@@ -20,4 +20,4 @@ if __name__ == "__main__":
         "Calculate the factorial of 5",
         use_gpt=True
     ))
-    print("GPT-assisted:", result)
+    print("GPT-assisted query:", result)
