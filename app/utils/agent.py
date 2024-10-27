@@ -22,19 +22,47 @@ class EnhancedPythonInterpreter:
         self.setup_interpreter()
         
     def setup_interpreter(self):
-        self.safe_builtins = {
-            'abs': abs, 'bool': bool, 'int': int, 'float': float,
-            'str': str, 'list': list, 'dict': dict, 'set': set,
-            'tuple': tuple, 'len': len, 'max': max, 'min': min,
-            'print': print, 'range': range, 'round': round,
-            'sum': sum, 'type': type
+        # Define dangerous builtins to remove
+        dangerous_builtins = {
+            # System operations
+            'exec', 'eval', 'compile',
+            # File operations
+            'open', 
+            # Process operations
+            'system', 'subprocess', '__import__',
+            # Object/memory operations
+            'globals', 'locals', 'vars', 'memoryview',
+            # Other dangerous operations
+            'breakpoint', 'input'
         }
         
+        # Start with a copy of regular builtins
+        safe_builtins = dict(__builtins__) if isinstance(__builtins__, dict) else dict(vars(__builtins__))
+        
+        # Remove dangerous operations
+        for func in dangerous_builtins:
+            safe_builtins.pop(func, None)
+        
         self.interpreter = code.InteractiveInterpreter(locals={
-            '__builtins__': self.safe_builtins,
+            '__builtins__': safe_builtins,
             '__name__': '__main__',
             '__doc__': None
         })
+
+        class RestrictedImporter:
+            def __init__(self):
+                self.blacklist = {
+                    'os', 'sys', 'subprocess', 'socket', 
+                    'requests', 'urllib', 'http', 
+                    'pathlib', 'shutil', 'tempfile'
+                }
+
+            def find_spec(self, fullname, path, target=None):
+                if fullname.split('.')[0] in self.blacklist:
+                    raise ImportError(f"Import of {fullname} is not allowed for security reasons")
+                return None  # Let regular import machinery handle allowed imports
+
+        sys.meta_path.insert(0, RestrictedImporter())
 
     def transform_ast(self, code: str) -> ast.AST:
         """Transform AST to capture last expression result"""
@@ -104,7 +132,7 @@ class EnhancedPythonInterpreter:
         try:
             # Update API call to new syntax
             response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "Generate Python code for the given query"},
                     {"role": "user", "content": query}
