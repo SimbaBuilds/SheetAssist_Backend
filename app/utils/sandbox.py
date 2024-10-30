@@ -7,14 +7,18 @@ import contextlib
 from typing import Optional
 from openai import OpenAI
 import os
+from dotenv import load_dotenv
+
 
 
 class EnhancedPythonInterpreter:
     # Class constructor
     def __init__(self, timeout_seconds: Optional[int] = 60):
+        # Add debug prints
+        load_dotenv(override=True)  # Add override=True to force reload
+        api_key = os.getenv('OPENAI_API_KEY')        
         self.timeout_seconds = timeout_seconds
-        # Update client initialization in constructor
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
+        self.openai_client = OpenAI(api_key=api_key)
         self.setup_interpreter()
     
     # method to define dangerous builtins
@@ -95,6 +99,7 @@ class EnhancedPythonInterpreter:
         """Execute code with safety checks and timeout"""
         result = {
             'output': '',
+            'code': code,
             'error': None,
             'return_value': None,
             'timed_out': False
@@ -140,10 +145,14 @@ class EnhancedPythonInterpreter:
 
         try:
             # Update API call to new syntax
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "Generate Python code for the given query. The generated code should be enclosed in one set of triple backticks."},
+                    {"role": "system", "content": """Generate Python code for the given query. 
+                     The generated code should be enclosed in one set of triple backticks.
+                     Do not include print statements in the code -- instead, ensure the last line is an expression that returns the desired value.
+                     For example, instead of `print(result)`, just use `result` as the last line.
+                     """},
                     {"role": "user", "content": query}
                 ]
             )
@@ -153,6 +162,12 @@ class EnhancedPythonInterpreter:
             code_start = suggested_code.find('```') + 3
             code_end = suggested_code.rfind('```')
             extracted_code = suggested_code[code_start:code_end].strip()
+            
+            # Remove language identifier if present
+            if extracted_code.startswith('python'):
+                extracted_code = extracted_code[6:].strip()
+            
+
             return self.execute_code(extracted_code)  # returns dict
             
         except Exception as e:
