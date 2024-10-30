@@ -1,23 +1,20 @@
+from app.utils.sandbox import EnhancedPythonInterpreter
+import asyncio
 
-from utils.agent import EnhancedPythonInterpreter
 
-
+prompt = "Calculate the factorial of 5"
 
 # Example usage
 if __name__ == "__main__":
-    interpreter = EnhancedPythonInterpreter(
-        openai_api_key="your-api-key-here",
-        timeout_seconds=5
-    )
+    interpreter = EnhancedPythonInterpreter()
     
     # Direct code execution
     result = interpreter.execute_code("print('Hello'); 2 + 2")
     print("Direct execution:", result)
     
     # GPT-assisted interpretation
-    import asyncio
     result = asyncio.run(interpreter.interpret_query(
-        "Calculate the factorial of 5",
+        prompt,
         use_gpt=True
     ))
     print("GPT-assisted query:", result)
