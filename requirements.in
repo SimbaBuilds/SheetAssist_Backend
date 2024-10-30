@@ -1,3 +1,9 @@
 openai
 pydantic
 python-dotenv
+pandas
+PyPDF2
+PyMuPDF
+numpy
+openpyxl
+numpy
