@@ -8,9 +8,9 @@ prompt = "Calculate the factorial of 5"
 if __name__ == "__main__":
     interpreter = EnhancedPythonInterpreter()
     
-    # Direct code execution
-    result = interpreter.execute_code("print('Hello'); 2 + 2")
-    print("Direct execution:", result)
+    # # Direct code execution
+    # result = interpreter.execute_code("print('Hello'); 2 + 2")
+    # print("Direct execution:", result)
     
     # GPT-assisted interpretation
     result = asyncio.run(interpreter.interpret_query(
@@ -18,3 +18,8 @@ if __name__ == "__main__":
         use_gpt=True
     ))
     print("GPT-assisted query:", result)
+
+
+
+
+#python -m app.main

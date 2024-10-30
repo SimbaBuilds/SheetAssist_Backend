@@ -34,15 +34,15 @@ class EnhancedPythonInterpreter:
         }
         
         # Start with a copy of regular builtins
-        safe_builtins = dict(__builtins__) if isinstance(__builtins__, dict) else dict(vars(__builtins__))
+        self.safe_builtins = dict(__builtins__) if isinstance(__builtins__, dict) else dict(vars(__builtins__))
         
         # Remove dangerous operations
         for func in dangerous_builtins:
-            safe_builtins.pop(func, None)
+            self.safe_builtins.pop(func, None)
         
         # Create interpreter with safe builtins
         self.interpreter = code.InteractiveInterpreter(locals={
-            '__builtins__': safe_builtins,
+            '__builtins__': self.safe_builtins,
             '__name__': '__main__',
             '__doc__': None
         })
