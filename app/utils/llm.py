@@ -15,7 +15,7 @@ if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY not found in environment variables")
 
 
-# generate code from user query
+# generate code from user query -- result goes to sandbox
 def generate_code(query: str, data: List) -> str:
     
     user_message = query
@@ -40,8 +40,7 @@ def generate_code(query: str, data: List) -> str:
     return response.choices[0].message.content
 
 
-
-# sandbox result processing when error present
+# generate new code from error -- result goes to sandbox
 def generate_new_code(result: SandboxResult) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     response = client.chat.completions.create(
@@ -61,6 +60,25 @@ def generate_new_code(result: SandboxResult) -> str:
     return response.choices[0].message.content
 
 
+# generate new code from error -- result goes to sandbox
+def generate_new_code_from_analysis(result: SandboxResult, analysis_result: str) -> str:
+    """Analyze the result of a sandboxed code execution and return a new script to try"""
+    response = client.chat.completions.create(
+        model="gpt-4o",  
+        messages=[
+            {"role": "system", "content": """Analyze the result of code that did not produce an error 
+                but did not satisfy the user's original query and return a new script to try.
+                The generated code should be enclosed in one set of triple backticks.
+                Do not forget your imports.
+                The data is available in the 'df' variable as a pandas DataFrame.
+                Do not include print statements -- ensure the last line returns the desired value."""},
+            {"role": "user", "content": f""" Here is the original user query, code, and error:
+                Original Query:\n{result.original_query}\n\n
+                Code:\n{result.code}\n
+                Analysis:\n{analysis_result}"""}
+        ]
+    )
+    return response.choices[0].message.content
 
 # post-error result processing - processes random sample of result -- result goes to sentiment analysis function
 def analyze_sandbox_result(result: SandboxResult, old_data: List[TabularDataInfo], new_data: TabularDataInfo) -> str:
@@ -92,7 +110,7 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[TabularDataInfo
     return result
 
 
-# processes result of LLM analysis of post-error sandbox result
+# processes result of LLM analysis of post-error sandbox result -- result goes to generate new code or finish analysis
 def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
     """Analyze the sentiment of the result of an analysis and return a boolean"""
     response = client.chat.completions.create(
@@ -128,7 +146,7 @@ def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
     result = json.loads(response.choices[0].message.content)
     return result["is_positive"], analysis_result
 
-# Filter for error or result processing
+# Filter for error or result processing -- resutl goes to generate new code with error
 def sandbox_result_filter_one(result: SandboxResult) -> AnalysisResult:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     if result.error:
