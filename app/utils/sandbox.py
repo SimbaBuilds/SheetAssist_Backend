@@ -5,7 +5,6 @@ from io import StringIO
 import sys
 import contextlib
 from typing import Optional
-from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import pandas as pd
@@ -13,16 +12,8 @@ import fitz  # PyMuPDF
 import numpy as np
 import openpyxl  # for Excel support
 from typing import Any, Optional, List
-
-
-class TabularDataInfo:
-    """Class for storing information about data being processed"""
-    def __init__(self, df: pd.DataFrame = None, snapshot: str = None, 
-                 data_type: str = None, file_name: str = None):
-        self.df = df
-        self.snapshot = snapshot
-        self.data_type = data_type
-        self.file_name = file_name
+from app.utils.llm import generate_code
+from app.schemas import TabularDataInfo
 
 
 
@@ -30,10 +21,7 @@ class EnhancedPythonInterpreter:
     # Class constructor
     def __init__(self, timeout_seconds: Optional[int] = 60):
         # Add debug prints
-        load_dotenv(override=True)  # Add override=True to force reload
-        api_key = os.getenv('OPENAI_API_KEY')        
         self.timeout_seconds = timeout_seconds
-        self.openai_client = OpenAI(api_key=api_key)
         self.setup_allowed_packages()
         self.setup_interpreter()
     
@@ -87,15 +75,17 @@ class EnhancedPythonInterpreter:
         # Restricted import finder -- 
         class RestrictedImporter:
             def __init__(self):
-                self.blacklist = {
-                    'os', 'sys', 'subprocess', 'socket', 
-                    'requests', 'urllib', 'http', 
-                    'pathlib', 'shutil', 'tempfile'
-                }
-                # Whitelist for data manipulation packages
+                # self.blacklist = {
+                #     'os', 'sys', 'subprocess', 'socket', 
+                #     'requests', 'urllib', 'http', 
+                #     'pathlib', 'shutil', 'tempfile'
+                # }
+                self.blacklist = {}
                 self.whitelist = {
                     'pandas', 'numpy', 'PyMuPDF', 'openpyxl',
-                    'datetime', 'json', 'csv', 'PyPDF2'
+                    'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
+                    'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
+                    'ssl', 'certifi', 'urllib3', 'http.client', 'socket'
                 }
 
             def find_spec(self, fullname, path, target=None):
@@ -184,31 +174,21 @@ class EnhancedPythonInterpreter:
 
     
     # method to interpret query using GPT (if available) or direct execution -- wraps execute_code
-    async def interpret_query(self, query: str, use_gpt: bool = True, data: Optional[List[TabularDataInfo]] = None) -> dict:
+    def interpret_query(self, query: str, use_gpt: bool = True, data: Optional[List[TabularDataInfo]] = None) -> dict:
 
-        if not use_gpt or not self.openai_client:
+        if not use_gpt:
             return self.execute_code(query)
 
         # Create a namespace with the data
-        namespace = {
-            'df': data[0].df if data and data[0].df is not None else None,
-        }
+        namespace = {}
+        if data and len(data) > 0 and data[0].df is not None:
+            namespace['df'] = data[0].df
+            print("DataFrame shape:", data[0].df.shape)  # Debug print
         
         try:
-            # Update API call to new syntax
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": """Generate Python code for the given query. 
-                     The generated code should be enclosed in one set of triple backticks.  Don't forget your import statements.
-                     Do not include print statements in the code -- instead, ensure the last line is an expression that returns the desired value.
-                     For example, instead of `print(result)`, just use `result` as the last line of code.
-                     """},
-                    {"role": "user", "content": query + f"\n\n Here is a snapshot of the data: {data[0].snapshot if data and data[0] else 'No data provided'}"}
-                ]
-            )
+            print("Generating code for query:", query)
+            suggested_code = generate_code(query, data)
             
-            suggested_code = response.choices[0].message.content
             # Extract code enclosed in triple backticks
             code_start = suggested_code.find('```') + 3
             code_end = suggested_code.rfind('```')
@@ -227,10 +207,21 @@ class EnhancedPythonInterpreter:
             # Pass the namespace to execute_code
             return self.execute_code(extracted_code, namespace=namespace)  
             
-        except Exception as e:
+        except ConnectionError as e:
+            error_details = f'Connection Error: {str(e)}'
+            print(error_details)
             return {
                 'output': '',
-                'error': f'GPT interpretation failed: {str(e)}',
+                'error': error_details,
+                'return_value': None,
+                'timed_out': False
+            }
+        except Exception as e:
+            error_details = f'GPT interpretation failed: {str(e)}\nType: {type(e).__name__}'
+            print(error_details)
+            return {
+                'output': '',
+                'error': error_details,
                 'return_value': None,
                 'timed_out': False
             }
