@@ -17,10 +17,12 @@ from typing import Any, Optional, List
 
 class TabularDataInfo:
     """Class for storing information about data being processed"""
-    df: Optional[pd.DataFrame] = None  # The actual data object (DataFrame, array etc)
-    snapshot: Optional[str] = None  # String representation of data preview/sample
-    data_type: Optional[str] = None  # Type of data (e.g. "DataFrame", "ndarray", "list")
-    file_name: Optional[str] = None  # Original file name if loaded from file
+    def __init__(self, df: pd.DataFrame = None, snapshot: str = None, 
+                 data_type: str = None, file_name: str = None):
+        self.df = df
+        self.snapshot = snapshot
+        self.data_type = data_type
+        self.file_name = file_name
 
 
 
@@ -34,6 +36,20 @@ class EnhancedPythonInterpreter:
         self.openai_client = OpenAI(api_key=api_key)
         self.setup_allowed_packages()
         self.setup_interpreter()
+    
+    def setup_allowed_packages(self):
+        """Initialize allowed packages for the sandbox environment"""
+        self.allowed_packages = {
+            'pd': pd,
+            'np': np,
+            'openpyxl': openpyxl,
+            'math': __import__('math'),
+            'statistics': __import__('statistics'),
+            'datetime': __import__('datetime'),
+            'json': __import__('json'),
+            'csv': __import__('csv'),
+            'PyPDF2': __import__('PyPDF2')
+        }
     
     # method to define dangerous builtins
     def setup_interpreter(self):
@@ -119,7 +135,8 @@ class EnhancedPythonInterpreter:
             sys.stdout, sys.stderr = old_stdout, old_stderr
 
     # method to execute raw code with safety checks and timeout
-    def execute_code(self, code: str) -> dict:
+    def execute_code(self, code: str, namespace: dict = None) -> dict:
+        print("executing code:")
         """Execute code with safety checks and timeout"""
         result = {
             'output': '',
@@ -134,10 +151,11 @@ class EnhancedPythonInterpreter:
                 try:
                     # Transform AST to capture last expression
                     tree = self.transform_ast(code)
-                    # Update namespace to include allowed packages
+                    # Create namespace with safe builtins, allowed packages, and passed data
                     ns = {
                         '__builtins__': self.safe_builtins,
-                        **self.allowed_packages
+                        **self.allowed_packages,
+                        **(namespace or {})  # Add the passed namespace if it exists
                     }
                     #run the code
                     exec(compile(tree, '<ast>', 'exec'), ns)
@@ -154,6 +172,7 @@ class EnhancedPythonInterpreter:
         thread = threading.Thread(target=execute)
         thread.daemon = True
         thread.start()
+        print("thread started")
         thread.join(timeout=self.timeout_seconds)
 
         if thread.is_alive():
@@ -165,11 +184,16 @@ class EnhancedPythonInterpreter:
 
     
     # method to interpret query using GPT (if available) or direct execution -- wraps execute_code
-    async def interpret_query(self, query: str, use_gpt: bool = True, data: Optional[List[DataInfo]] = None) -> dict:
+    async def interpret_query(self, query: str, use_gpt: bool = True, data: Optional[List[TabularDataInfo]] = None) -> dict:
 
         if not use_gpt or not self.openai_client:
             return self.execute_code(query)
 
+        # Create a namespace with the data
+        namespace = {
+            'df': data[0].df if data and data[0].df is not None else None,
+        }
+        
         try:
             # Update API call to new syntax
             response = self.openai_client.chat.completions.create(
@@ -180,7 +204,7 @@ class EnhancedPythonInterpreter:
                      Do not include print statements in the code -- instead, ensure the last line is an expression that returns the desired value.
                      For example, instead of `print(result)`, just use `result` as the last line of code.
                      """},
-                    {"role": "user", "content": query + f"\n\n Here is a snapshot of the data: {data[0].snapshot}"}
+                    {"role": "user", "content": query + f"\n\n Here is a snapshot of the data: {data[0].snapshot if data and data[0] else 'No data provided'}"}
                 ]
             )
             
@@ -189,17 +213,19 @@ class EnhancedPythonInterpreter:
             code_start = suggested_code.find('```') + 3
             code_end = suggested_code.rfind('```')
             extracted_code = suggested_code[code_start:code_end].strip()
-            
+            print("extracted_code:", extracted_code)
             # Remove language identifier if present
             if extracted_code.startswith('python'):
                 extracted_code = extracted_code[6:].strip()
             
-            # Prepend common imports
-            extracted_code = """import math\nimport statistics\nimport 
-            datetime\nimport json\n import PyPDF2\nimport csv\nimport pandas as pd
-            \nimport fitz\nimport numpy as np\nimport openpyxl\n\n""" + extracted_code
 
-            return self.execute_code(extracted_code)  # returns dict
+            # Prepend common imports and add namespace setup
+            extracted_code = """import math\nimport statistics\nimport datetime\nimport json
+            \nimport PyPDF2\nimport csv\nimport pandas as pd\nimport fitz
+            \nimport numpy as np\nimport openpyxl\n\n""" + extracted_code
+
+            # Pass the namespace to execute_code
+            return self.execute_code(extracted_code, namespace=namespace)  
             
         except Exception as e:
             return {
@@ -208,4 +234,6 @@ class EnhancedPythonInterpreter:
                 'return_value': None,
                 'timed_out': False
             }
+
+
 

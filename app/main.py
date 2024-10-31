@@ -9,7 +9,7 @@ file_paths = ['course_data.csv', 'course_data_2.csv']
 # Read the CSV file
 df = pd.read_csv(file_paths[0])
 # Store data info in a DataInfo object
-data_info = TabularDataInfo(data=df, snapshot=str(df.head(10)), data_type="DataFrame", file_name=file_paths[0])
+data_info = TabularDataInfo(df=df, snapshot=str(df.head(10)), data_type="DataFrame", file_name=file_paths[0])
 
 
 prompt = f"Remove courses with less than 20 active students from this list."
