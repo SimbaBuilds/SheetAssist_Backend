@@ -13,7 +13,7 @@ import numpy as np
 import openpyxl  # for Excel support
 from typing import Any, Optional, List
 from app.utils.llm import generate_code
-from app.schemas import TabularDataInfo
+from app.class_schemas import TabularDataInfo, SandboxResult
 
 
 
@@ -75,12 +75,11 @@ class EnhancedPythonInterpreter:
         # Restricted import finder -- 
         class RestrictedImporter:
             def __init__(self):
-                # self.blacklist = {
-                #     'os', 'sys', 'subprocess', 'socket', 
-                #     'requests', 'urllib', 'http', 
-                #     'pathlib', 'shutil', 'tempfile'
-                # }
-                self.blacklist = {}
+                self.blacklist = {
+                    'os', 'sys', 'subprocess', 'socket', 
+                    'requests', 'urllib', 'http', 
+                    'pathlib', 'shutil', 'tempfile'
+                }
                 self.whitelist = {
                     'pandas', 'numpy', 'PyMuPDF', 'openpyxl',
                     'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
@@ -125,16 +124,10 @@ class EnhancedPythonInterpreter:
             sys.stdout, sys.stderr = old_stdout, old_stderr
 
     # method to execute raw code with safety checks and timeout
-    def execute_code(self, code: str, namespace: dict = None) -> dict:
-        print("executing code:")
-        """Execute code with safety checks and timeout"""
-        result = {
-            'output': '',
-            'code': code,
-            'error': None,
-            'return_value': None,
-            'timed_out': False
-        }
+    def execute_code(self, original_query: str, code: str, namespace: dict = None) -> SandboxResult:
+        """Execute (cleaned)code with safety checks and timeout"""
+
+        result = SandboxResult(original_query=original_query, print_output="", code=code, error=None, return_value=None, timed_out=False)
 
         def execute():
             with self.capture_output() as (stdout, stderr):
@@ -150,14 +143,14 @@ class EnhancedPythonInterpreter:
                     #run the code
                     exec(compile(tree, '<ast>', 'exec'), ns)
                     # Capture return value from the last expression in the AST
-                    result['return_value'] = ns.get('_result')
-                    # Capture output
-                    result['output'] = stdout.getvalue()
-                    # Capture errors
+                    result.return_value = ns.get('_result')
+                    # Captures print output
+                    result.print_output = stdout.getvalue()
+                    # Captures error output
                     if stderr.getvalue():
-                        result['error'] = stderr.getvalue()
+                        result.error = stderr.getvalue()
                 except Exception as e:
-                    result['error'] = str(e)
+                    result.error = str(e)
 
         thread = threading.Thread(target=execute)
         thread.daemon = True
@@ -166,8 +159,8 @@ class EnhancedPythonInterpreter:
         thread.join(timeout=self.timeout_seconds)
 
         if thread.is_alive():
-            result['timed_out'] = True
-            result['error'] = f'Execution timed out after {self.timeout_seconds} seconds'
+            result.timed_out = True
+            result.error = f'Execution timed out after {self.timeout_seconds} seconds'
             thread = None
 
         return result
@@ -183,48 +176,39 @@ class EnhancedPythonInterpreter:
         namespace = {}
         if data and len(data) > 0 and data[0].df is not None:
             namespace['df'] = data[0].df
-            print("DataFrame shape:", data[0].df.shape)  # Debug print
+            print("DataFrame shape:", data[0].df.shape)  
         
         try:
-            print("Generating code for query:", query)
             suggested_code = generate_code(query, data)
             
             # Extract code enclosed in triple backticks
             code_start = suggested_code.find('```') + 3
             code_end = suggested_code.rfind('```')
             extracted_code = suggested_code[code_start:code_end].strip()
-            print("extracted_code:", extracted_code)
+            # print("\nextracted_code:\n", extracted_code)
             # Remove language identifier if present
             if extracted_code.startswith('python'):
                 extracted_code = extracted_code[6:].strip()
             
-
-            # Prepend common imports and add namespace setup
-            extracted_code = """import math\nimport statistics\nimport datetime\nimport json
-            \nimport PyPDF2\nimport csv\nimport pandas as pd\nimport fitz
-            \nimport numpy as np\nimport openpyxl\n\n""" + extracted_code
-
-            # Pass the namespace to execute_code
-            return self.execute_code(extracted_code, namespace=namespace)  
+            # Remove import statements
+            cleaned_code = '\n'.join(
+                line for line in extracted_code.split('\n')
+                if not line.strip().startswith('import') and not line.strip().startswith('from')
+            )
+            
+            result = self.execute_code(query, cleaned_code, namespace=namespace)  #MODIFY TO ANALYZE AND RETURN EXECUTION RESULT, FOR LOOP RANGE 5 ATTEMPTS
+            return result
             
         except ConnectionError as e:
+            result = SandboxResult(original_query=query, print_output="", code="", error=None, return_value=None, timed_out=False)
             error_details = f'Connection Error: {str(e)}'
-            print(error_details)
-            return {
-                'output': '',
-                'error': error_details,
-                'return_value': None,
-                'timed_out': False
-            }
+            result.error = error_details
+            return result
         except Exception as e:
+            result = SandboxResult(original_query=query, print_output="", code="", error=None, return_value=None, timed_out=False)
             error_details = f'GPT interpretation failed: {str(e)}\nType: {type(e).__name__}'
-            print(error_details)
-            return {
-                'output': '',
-                'error': error_details,
-                'return_value': None,
-                'timed_out': False
-            }
+            result.error = error_details
+            return result
 
 
 

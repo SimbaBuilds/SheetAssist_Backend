@@ -24,11 +24,10 @@ query = "Remove courses with less than 20 active students from this list."
 
 # Example usage
 if __name__ == "__main__":
-    interpreter = EnhancedPythonInterpreter()
     
-    # # Direct code execution
-    # result = interpreter.execute_code("print('Hello'); 2 + 2")
-    # print("Direct execution:", result)
+    success = False
+    
+    interpreter = EnhancedPythonInterpreter()
     
     # GPT-assisted interpretation
     result = interpreter.interpret_query(
@@ -36,9 +35,8 @@ if __name__ == "__main__":
         use_gpt=True,
         data = data_info_list
     )
-    print("GPT-assisted query:", result)
-
-
+    
+    print("\nOriginal Query:", result.original_query, "\nResult:", "\nOutput:", result.print_output, "\nCode:", result.code, "\nError:", result.error, "\nReturn Value:", result.return_value, "\nTimed Out:", result.timed_out, "\n\n")
 
 
 #python -m app.main
