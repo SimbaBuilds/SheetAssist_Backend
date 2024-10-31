@@ -41,7 +41,7 @@ def generate_code(query: str, data: List) -> str:
 
 
 # generate new code from error -- result goes to sandbox
-def generate_new_code(result: SandboxResult) -> str:
+def generate_new_code_from_error(result: SandboxResult) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     response = client.chat.completions.create(
         model="gpt-4o",  
@@ -60,7 +60,7 @@ def generate_new_code(result: SandboxResult) -> str:
     return response.choices[0].message.content
 
 
-# generate new code from error -- result goes to sandbox
+# generate new code from analysis -- result goes to sandbox
 def generate_new_code_from_analysis(result: SandboxResult, analysis_result: str) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     response = client.chat.completions.create(
@@ -72,7 +72,7 @@ def generate_new_code_from_analysis(result: SandboxResult, analysis_result: str)
                 Do not forget your imports.
                 The data is available in the 'df' variable as a pandas DataFrame.
                 Do not include print statements -- ensure the last line returns the desired value."""},
-            {"role": "user", "content": f""" Here is the original user query, code, and error:
+            {"role": "user", "content": f""" Here is the original user query, code, and LLM produced analysis:
                 Original Query:\n{result.original_query}\n\n
                 Code:\n{result.code}\n
                 Analysis:\n{analysis_result}"""}
