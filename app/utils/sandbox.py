@@ -28,15 +28,21 @@ class EnhancedPythonInterpreter:
     def setup_allowed_packages(self):
         """Initialize allowed packages for the sandbox environment"""
         self.allowed_packages = {
-            'pd': pd,
-            'np': np,
-            'openpyxl': openpyxl,
+            'pd': __import__('pandas'),
+            'np': __import__('numpy'),
+            'openpyxl': __import__('openpyxl'),
             'math': __import__('math'),
             'statistics': __import__('statistics'),
             'datetime': __import__('datetime'),
             'json': __import__('json'),
             'csv': __import__('csv'),
-            'PyPDF2': __import__('PyPDF2')
+            'PyPDF2': __import__('PyPDF2'),
+            'fitz': __import__('fitz'),  # PyMuPDF for advanced PDF processing
+            'io': __import__('io'),      # For StringIO/BytesIO operations
+            're': __import__('re'),      # For regular expressions
+            'chardet': __import__('chardet'),  # For character encoding detection
+            'tabula': __import__('tabula-py'),  # For extracting tables from PDFs
+            'zipfile': __import__('zipfile')  # For handling compressed files
         }
     
     # method to define dangerous builtins
@@ -85,7 +91,8 @@ class EnhancedPythonInterpreter:
                     'pandas', 'numpy', 'PyMuPDF', 'openpyxl',
                     'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
                     'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
-                    'ssl', 'certifi', 'urllib3', 'http.client', 'socket'
+                    'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
+                    'fitz', 'io', 're', 'chardet', 'tabula', 'zipfile'  # Added new packages
                 }
 
             def find_spec(self, fullname, path, target=None):

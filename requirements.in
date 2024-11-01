@@ -6,5 +6,5 @@ PyPDF2
 PyMuPDF
 numpy
 openpyxl
-numpy
-tenacity
+chardet
+tabula-py
