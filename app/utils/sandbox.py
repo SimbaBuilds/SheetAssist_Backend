@@ -199,26 +199,28 @@ class EnhancedPythonInterpreter:
             result = self.execute_code(query, cleaned_code, namespace=namespace)  
             
             # Error handling for initial execution
-            error_attempts = 0
+            error_attempts = 1
             while result.error and error_attempts < 6:
-                print("Error attempt:", error_attempts)
+                print("Error:", result.error)
                 suggested_code = gen_from_error(result)
                 cleaned_code = self.extract_code(suggested_code)
+                print("New code:", cleaned_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
                 error_attempts += 1
+                print("Error attempt:", error_attempts)
                 if error_attempts == 5:
                     result.error = "Execution failed after 5 attempts"
                     return result
                 
             # Analysis and improvement loop
-            analysis_attempts = 0
+            analysis_attempts = 1
             while analysis_attempts < 6:    
                 print("Analysis attempt:", analysis_attempts)
                 old_data = data
                 new_data = TabularDataInfo(df=result.return_value, snapshot=result.return_value.head(10), file_name=data[0].file_name, data_type="DataFrame")
                 analysis_result = analyze_sandbox_result(result, old_data, new_data)
                 success, analysis_result = sentiment_analysis(analysis_result)
-                
+                print("Analysis result:", analysis_result)
                 if success:
                     #SUCCESS
                     print("\nSuccess!\n")
@@ -238,17 +240,21 @@ class EnhancedPythonInterpreter:
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
 
                 # Restart error handling for new attempt 
-                error_attempts = 0
+                error_attempts = 1
                 while result.error and error_attempts < 6:
+                    print("Error:", result.error)
                     suggested_code = gen_from_error(result)
                     cleaned_code = self.extract_code(suggested_code)
+                    print("New code:", cleaned_code)
                     result = self.execute_code(query, cleaned_code, namespace=namespace)
                     error_attempts += 1
+                    print("Error attempt:", error_attempts)
                     if error_attempts == 5:
                         result.error = "Execution failed after 5 attempts"
                         return result      
                         
                 analysis_attempts += 1
+                print("Analysis attempt:", analysis_attempts)
                 if analysis_attempts == 5:
                     result.error = "Analysis failed after 5 attempts"
                     return result
