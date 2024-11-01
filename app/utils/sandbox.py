@@ -203,6 +203,7 @@ class EnhancedPythonInterpreter:
             while result.error and error_attempts < 6:
                 print("Error:", result.error)
                 suggested_code = gen_from_error(result)
+                unprocessed_code = suggested_code #for deciding on whitelist vs blacklist
                 cleaned_code = self.extract_code(suggested_code)
                 print("New code:", cleaned_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
@@ -224,6 +225,7 @@ class EnhancedPythonInterpreter:
                 if success:
                     #SUCCESS
                     print("\nSuccess!\n")
+                    print("Unprocessed LLM output:", unprocessed_code) #for deciding on whitelist vs blacklist
                     result = SandboxResult(
                         original_query=query, 
                         print_output="", 
@@ -236,6 +238,7 @@ class EnhancedPythonInterpreter:
                 
                 # Gen new code from analysis
                 new_code = gen_from_analysis(result, analysis_result)
+                unprocessed_code = new_code #for deciding on whitelist vs blacklist
                 cleaned_code = self.extract_code(new_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
 
