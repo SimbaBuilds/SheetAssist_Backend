@@ -9,18 +9,18 @@ import pandas as pd
 from app.utils.sandbox import TabularDataInfo
 
 
-file_paths = ['course_data.csv', 'course_data_2.csv']
+file_paths = ['course_data.csv']
 data_info_list = []
 
-# Read the CSV file
-df = pd.read_csv(file_paths[0])
-# Store data info in a DataInfo object
-data_info = TabularDataInfo(df=df, snapshot=str(df.head(10)), data_type="DataFrame", file_name=file_paths[0])
-data_info_list.append(data_info)
+# Read the CSV files
+for file_path in file_paths:
+    df = pd.read_csv(file_path)
+    # Store data info in a DataInfo object
+    data_info = TabularDataInfo(df=df, snapshot=str(df.head(10)), data_type="DataFrame", file_name=file_path)
+    data_info_list.append(data_info)
 
 query = "Remove courses with less than 20 active students from this list."
-
-
+    
 
 # Example usage
 if __name__ == "__main__":

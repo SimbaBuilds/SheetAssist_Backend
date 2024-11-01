@@ -41,7 +41,7 @@ class EnhancedPythonInterpreter:
             'io': __import__('io'),      # For StringIO/BytesIO operations
             're': __import__('re'),      # For regular expressions
             'chardet': __import__('chardet'),  # For character encoding detection
-            'tabula': __import__('tabula-py'),  # For extracting tables from PDFs
+            'tabula': __import__('tabula'),  # For extracting tables from PDFs
             'zipfile': __import__('zipfile')  # For handling compressed files
         }
     
@@ -210,7 +210,7 @@ class EnhancedPythonInterpreter:
             while result.error and error_attempts < 6:
                 print("Error:", result.error)
                 suggested_code = gen_from_error(result)
-                unprocessed_code = suggested_code #for deciding on whitelist vs blacklist
+                unprocessed_llm_output = suggested_code 
                 cleaned_code = self.extract_code(suggested_code)
                 print("New code:", cleaned_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
@@ -232,7 +232,7 @@ class EnhancedPythonInterpreter:
                 if success:
                     #SUCCESS
                     print("\nSuccess!\n")
-                    print("Unprocessed LLM output:", unprocessed_code) #for deciding on whitelist vs blacklist
+                    print("Unprocessed LLM output:\n", unprocessed_llm_output) 
                     result = SandboxResult(
                         original_query=query, 
                         print_output="", 
@@ -245,7 +245,7 @@ class EnhancedPythonInterpreter:
                 
                 # Gen new code from analysis
                 new_code = gen_from_analysis(result, analysis_result)
-                unprocessed_code = new_code #for deciding on whitelist vs blacklist
+                unprocessed_llm_output = new_code 
                 cleaned_code = self.extract_code(new_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
 
