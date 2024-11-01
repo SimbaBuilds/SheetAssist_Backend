@@ -12,7 +12,7 @@ import fitz  # PyMuPDF
 import numpy as np
 import openpyxl  # for Excel support
 from typing import Any, Optional, List
-from app.utils.llm import generate_code
+from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
 from app.class_schemas import TabularDataInfo, SandboxResult
 
 
@@ -62,16 +62,17 @@ class EnhancedPythonInterpreter:
         for func in dangerous_builtins:
             self.safe_builtins.pop(func, None)
         
-        # Create interpreter with safe builtins and allowed packages
-        namespace = {
+        # Create base namespace with safe builtins and allowed packages
+        self.base_namespace = {
             '__builtins__': self.safe_builtins,
             '__name__': '__main__',
             '__doc__': None,
             **self.allowed_packages  # Add allowed packages to namespace
         }
-        self.interpreter = code.InteractiveInterpreter(locals=namespace)
-
         
+        # Initialize interpreter with base namespace
+        self.interpreter = code.InteractiveInterpreter(locals=self.base_namespace)
+
         # Restricted import finder -- 
         class RestrictedImporter:
             def __init__(self):
@@ -165,38 +166,90 @@ class EnhancedPythonInterpreter:
 
         return result
 
-    
+    # method to clean code -- removes language identifier and import statements
+    def clean_code(suggested_code: str) -> str:
+        # Extract code enclosed in triple backticks
+        code_start = suggested_code.find('```') + 3
+        code_end = suggested_code.rfind('```')
+        extracted_code = suggested_code[code_start:code_end].strip()
+        # print("\nextracted_code:\n", extracted_code)
+        # Remove language identifier if present
+        if extracted_code.startswith('python'):
+            extracted_code = extracted_code[6:].strip()
+
+        # Remove import statements
+        cleaned_code = '\n'.join(
+            line for line in extracted_code.split('\n')
+            if not line.strip().startswith('import') and not line.strip().startswith('from')
+        )
+        return cleaned_code
+
     # method to interpret query using GPT (if available) or direct execution -- wraps execute_code
-    def interpret_query(self, query: str, use_gpt: bool = True, data: Optional[List[TabularDataInfo]] = None) -> dict:
-
-        if not use_gpt:
-            return self.execute_code(query)
-
-        # Create a namespace with the data
-        namespace = {}
+    def process_query(self, query: str, use_gpt: bool = True, data: Optional[List[TabularDataInfo]] = None) -> SandboxResult:
+        # Create execution namespace by extending base namespace
+        namespace = dict(self.base_namespace)  # Create a copy of base namespace
         if data and len(data) > 0 and data[0].df is not None:
             namespace['df'] = data[0].df
-            print("DataFrame shape:", data[0].df.shape)  
+            print("DataFrame shape:", data[0].df.shape)
         
         try:
-            suggested_code = generate_code(query, data)
+            # Initial code generation and execution
+            suggested_code = gen_from_query(query, data)
+            cleaned_code = self.clean_code(suggested_code)
+            result = self.execute_code(query, cleaned_code, namespace=namespace)  
             
-            # Extract code enclosed in triple backticks
-            code_start = suggested_code.find('```') + 3
-            code_end = suggested_code.rfind('```')
-            extracted_code = suggested_code[code_start:code_end].strip()
-            # print("\nextracted_code:\n", extracted_code)
-            # Remove language identifier if present
-            if extracted_code.startswith('python'):
-                extracted_code = extracted_code[6:].strip()
-            
-            # Remove import statements
-            cleaned_code = '\n'.join(
-                line for line in extracted_code.split('\n')
-                if not line.strip().startswith('import') and not line.strip().startswith('from')
-            )
-            
-            result = self.execute_code(query, cleaned_code, namespace=namespace)  #MODIFY TO ANALYZE AND RETURN EXECUTION RESULT, FOR LOOP RANGE 5 ATTEMPTS
+            # Error handling for initial execution
+            error_attempts = 0
+            while result.error and error_attempts < 6:
+                suggested_code = gen_from_error(result)
+                cleaned_code = self.clean_code(suggested_code)
+                result = self.execute_code(query, cleaned_code, namespace=namespace)
+                error_attempts += 1
+                if error_attempts == 5:
+                    result.error = "Execution failed after 5 attempts"
+                    return result
+                
+            # Analysis and improvement loop
+            analysis_attempts = 0
+            while analysis_attempts < 6:    
+                old_data = data
+                new_data = TabularDataInfo(df=result.return_value)
+                analysis_result = analyze_sandbox_result(result, old_data, new_data)
+                success, analysis_result = sentiment_analysis(analysis_result)
+                
+                if success:
+                    #SUCCESS
+                    result = SandboxResult(
+                        original_query=query, 
+                        print_output="", 
+                        code=result.code, 
+                        error=None, 
+                        return_value=new_data.df, 
+                        timed_out=False
+                    )
+                    return result 
+                
+                # Gen new code from analysis
+                new_code = gen_from_analysis(result, analysis_result)
+                cleaned_code = self.clean_code(new_code)
+                result = self.execute_code(query, cleaned_code, namespace=namespace)
+
+                # Restart error handling for new attempt 
+                error_attempts = 0
+                while result.error and error_attempts < 6:
+                    suggested_code = gen_from_error(result)
+                    cleaned_code = self.clean_code(suggested_code)
+                    result = self.execute_code(query, cleaned_code, namespace=namespace)
+                    error_attempts += 1
+                    if error_attempts == 5:
+                        result.error = "Execution failed after 5 attempts"
+                        return result      
+                        
+                analysis_attempts += 1
+                if analysis_attempts == 5:
+                    result.error = "Analysis failed after 5 attempts"
+                    return result
+
             return result
             
         except ConnectionError as e:

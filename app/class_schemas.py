@@ -12,7 +12,7 @@ class TabularDataInfo:
 
 class SandboxResult:
     """Class for storing the result of a sandboxed code execution"""
-    def __init__(self, original_query: str, print_output: str, code: str, error: str, return_value: str, timed_out: bool):
+    def __init__(self, original_query: str, print_output: str, code: str, error: str, return_value: pd.DataFrame, timed_out: bool):
         self.original_query = original_query
         self.print_output = print_output
         self.code = code
