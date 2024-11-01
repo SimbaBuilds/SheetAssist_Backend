@@ -88,9 +88,7 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[TabularDataInfo
     old_data_snapshot = ""
     for data in old_data:
         old_data_snapshot += f"{data.file_name}:\n{data.snapshot}\n\n"
-    
-    new_data_snapshot = new_data.to_string()
-        
+            
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
@@ -103,7 +101,7 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[TabularDataInfo
                 Here is the original user query and snapshots of the new and old data:
                 Original Query:\n{result.original_query}\n\n
                 Old Data:\n{old_data_snapshot}\n\n
-                New Data:\n{new_data_snapshot}\n\n
+                New Data:\n{new_data.snapshot}\n\n
                 """}
         ]
     )
@@ -127,19 +125,21 @@ def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
         response_format={
             "type": "json_schema",
             "json_schema": {
-                "type": "object",
-                "properties": {
-                    "is_positive": {
-                        "type": "boolean",
-                        "description": "True if the sentiment is positive, False if negative"
-                    }
-                },
-                "required": ["is_positive"],
-                "additionalProperties": False
-            },
-            "strict": True
-        },
-        temperature=0
+                "name": "sentiment_response",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "is_positive": {
+                            "type": "boolean",
+                            "description": "True if the sentiment is positive, False if negative"
+                        }
+                    },
+                    "required": ["is_positive"],
+                    "additionalProperties": False,
+                    "strict": True
+                }
+            }
+        }
     )
     
     # Parse the JSON response and return the boolean

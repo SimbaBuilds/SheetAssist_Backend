@@ -34,16 +34,20 @@ if __name__ == "__main__":
         data = data_info_list
     )
 
-    df = result.return_value
+    if result.return_value is not None:
+        df_snapshot = result.return_value.head(10)
+    else:
+        df_snapshot = "None"
+
 
     print("\nOriginal Query:", 
           result.original_query, "\nResult:", 
           "\nOutput:", result.print_output, 
           "\nCode:", result.code, 
           "\nError:", result.error, 
-          "\nReturn Value:", df.head(10), 
+          "\nReturn Value Snapshot:", df_snapshot, 
           "\nTimed Out:", result.timed_out, 
           "\n\n")
 
 
-#python -m app.main
+

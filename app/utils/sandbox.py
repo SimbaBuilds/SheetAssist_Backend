@@ -167,7 +167,7 @@ class EnhancedPythonInterpreter:
         return result
 
     # method to clean code -- removes language identifier and import statements
-    def clean_code(suggested_code: str) -> str:
+    def extract_code(self, suggested_code: str) -> str:
         # Extract code enclosed in triple backticks
         code_start = suggested_code.find('```') + 3
         code_end = suggested_code.rfind('```')
@@ -195,14 +195,15 @@ class EnhancedPythonInterpreter:
         try:
             # Initial code generation and execution
             suggested_code = gen_from_query(query, data)
-            cleaned_code = self.clean_code(suggested_code)
+            cleaned_code = self.extract_code(suggested_code)
             result = self.execute_code(query, cleaned_code, namespace=namespace)  
             
             # Error handling for initial execution
             error_attempts = 0
             while result.error and error_attempts < 6:
+                print("Error attempt:", error_attempts)
                 suggested_code = gen_from_error(result)
-                cleaned_code = self.clean_code(suggested_code)
+                cleaned_code = self.extract_code(suggested_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
                 error_attempts += 1
                 if error_attempts == 5:
@@ -212,13 +213,15 @@ class EnhancedPythonInterpreter:
             # Analysis and improvement loop
             analysis_attempts = 0
             while analysis_attempts < 6:    
+                print("Analysis attempt:", analysis_attempts)
                 old_data = data
-                new_data = TabularDataInfo(df=result.return_value)
+                new_data = TabularDataInfo(df=result.return_value, snapshot=result.return_value.head(10), file_name=data[0].file_name, data_type="DataFrame")
                 analysis_result = analyze_sandbox_result(result, old_data, new_data)
                 success, analysis_result = sentiment_analysis(analysis_result)
                 
                 if success:
                     #SUCCESS
+                    print("\nSuccess!\n")
                     result = SandboxResult(
                         original_query=query, 
                         print_output="", 
@@ -231,14 +234,14 @@ class EnhancedPythonInterpreter:
                 
                 # Gen new code from analysis
                 new_code = gen_from_analysis(result, analysis_result)
-                cleaned_code = self.clean_code(new_code)
+                cleaned_code = self.extract_code(new_code)
                 result = self.execute_code(query, cleaned_code, namespace=namespace)
 
                 # Restart error handling for new attempt 
                 error_attempts = 0
                 while result.error and error_attempts < 6:
                     suggested_code = gen_from_error(result)
-                    cleaned_code = self.clean_code(suggested_code)
+                    cleaned_code = self.extract_code(suggested_code)
                     result = self.execute_code(query, cleaned_code, namespace=namespace)
                     error_attempts += 1
                     if error_attempts == 5:
