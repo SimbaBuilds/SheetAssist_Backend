@@ -13,3 +13,4 @@ Pillow
 requests
 fastapi[all]
 uvicorn[standard]
+python-dateutil

@@ -1,15 +1,13 @@
 from fastapi import APIRouter, UploadFile, File, Form
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.class_schemas import (
-    TabularDataInfo, JsonDataInfo, TextDataInfo, 
-    ImageDataInfo, WebDataInfo
-)
+from app.class_schemas import FileDataInfo, ProcessedQueryResult
 import pandas as pd
 import json
+from app.utils.file_management import temp_file_manager
 
 router = APIRouter()
 
@@ -18,12 +16,35 @@ class QueryRequest(BaseModel):
     files: Optional[List[UploadFile]] = []
     query: str
 
-@router.post("/process_query")
+def get_data_snapshot(content: Any, data_type: str) -> str:
+    """Generate appropriate snapshot based on data type"""
+    if data_type == "DataFrame":
+        return content.head(10).to_string()
+    elif data_type == "json":
+        # For JSON, return first few key-value pairs or array elements
+        if isinstance(content, dict):
+            snapshot_dict = dict(list(content.items())[:5])
+            return json.dumps(snapshot_dict, indent=2)
+        elif isinstance(content, list):
+            return json.dumps(content[:5], indent=2)
+        return str(content)[:500]
+    elif data_type == "text":
+        # Return first 500 characters for text
+        return content[:500] + ("..." if len(content) > 500 else "")
+    elif data_type == "image":
+        # For images, return basic file info
+        return f"Image file: {content.filename}, Size: {len(content.file.read())} bytes"
+    return str(content)[:500]
+
+
+@router.post("/process_query", response_model=ProcessedQueryResult)
 async def process_query_endpoint(
     request: QueryRequest,
 ):
     try:
-        # Initialize preprocessor and data storage
+        # Create a session directory for this request
+        session_dir = temp_file_manager.get_temp_dir()
+        
         preprocessor = FilePreprocessor()
         processed_data = []
         
@@ -32,11 +53,12 @@ async def process_query_endpoint(
             try:
                 df = preprocessor.process_web_url(url)
                 processed_data.append(
-                    WebDataInfo(
-                        url=url,
-                        df=df,
-                        source_type='google_sheets' if 'docs.google.com' in url else 'excel_web',
-                        converted_csv_path=None  # You might want to save to CSV and store path
+                    FileDataInfo(
+                        content=df,
+                        snapshot=get_data_snapshot(df, "DataFrame"),
+                        data_type="DataFrame",
+                        original_file_name=url.split('/')[-1],
+                        url=url
                     )
                 )
             except Exception as e:
@@ -47,95 +69,64 @@ async def process_query_endpoint(
             for file in request.files:
                 file_ext = file.filename.split('.')[-1].lower()
                 
-                # Handle tabular data (Excel and CSV)
-                if file_ext in ['xlsx', 'xls']:
-                    df = preprocessor.process_excel(file.file)
-                    processed_data.append(
-                        TabularDataInfo(
-                            df=df,
-                            snapshot=df.head(10),
-                            file_name=file.filename,
-                            data_type="DataFrame"
-                        )
-                    )
-                elif file_ext == 'csv':
-                    df = preprocessor.process_csv(file.file)
-                    processed_data.append(
-                        TabularDataInfo(
-                            df=df,
-                            snapshot=df.head(10),
-                            file_name=file.filename,
-                            data_type="DataFrame"
-                        )
-                    )
-                
-                # Handle JSON data
-                elif file_ext == 'json':
-                    json_str = preprocessor.process_json(file.file)
-                    processed_data.append(
-                        JsonDataInfo(
-                            content=json.loads(json_str),
-                            string_representation=json_str,
-                            file_name=file.filename
-                        )
-                    )
-                
-                # Handle text files
-                elif file_ext == 'txt':
-                    content = preprocessor.process_text(file.file)
-                    processed_data.append(
-                        TextDataInfo(
-                            content=content,
-                            file_name=file.filename,
-                            data_type="text",
-                            original_format="txt"
-                        )
-                    )
-                
-                # Handle Word documents
-                elif file_ext == 'docx':
-                    content = preprocessor.process_docx(file.file)
-                    processed_data.append(
-                        TextDataInfo(
-                            content=content,
-                            file_name=file.filename,
-                            data_type="text",
-                            original_format="docx"
-                        )
-                    )
-                
-                # Handle images
-                elif file_ext in ['png', 'jpeg', 'jpg']:
-                    if file_ext == 'png':
-                        # Convert PNG to JPEG
-                        jpeg_path = preprocessor.process_image(file.file)
+                try:
+                    if file_ext in ['xlsx', 'xls', 'csv']:
+                        df = preprocessor.process_excel(file.file) if file_ext in ['xlsx', 'xls'] else preprocessor.process_csv(file.file)
                         processed_data.append(
-                            ImageDataInfo(
-                                image_data=file.file,
-                                file_name=file.filename,
-                                original_format="png",
-                                converted_jpeg_path=jpeg_path
+                            FileDataInfo(
+                                content=df,
+                                snapshot=get_data_snapshot(df, "DataFrame"),
+                                data_type="DataFrame",
+                                original_file_name=file.filename
                             )
                         )
-                    else:
+                    
+                    elif file_ext == 'json':
+                        json_content = json.loads(preprocessor.process_json(file.file))
                         processed_data.append(
-                            ImageDataInfo(
-                                image_data=file.file,
-                                file_name=file.filename,
-                                original_format="jpeg"
+                            FileDataInfo(
+                                content=json_content,
+                                snapshot=get_data_snapshot(json_content, "json"),
+                                data_type="json",
+                                original_file_name=file.filename
+                            )
+                        )
+                    
+                    elif file_ext in ['txt', 'docx']:
+                        content = preprocessor.process_docx(file.file) if file_ext == 'docx' else preprocessor.process_text(file.file)
+                        processed_data.append(
+                            FileDataInfo(
+                                content=content,
+                                snapshot=get_data_snapshot(content, "text"),
+                                data_type="text",
+                                original_file_name=file.filename
+                            )
+                        )
+                    
+                    elif file_ext in ['png', 'jpeg', 'jpg']:
+                        new_path = None
+                        if file_ext == 'png':
+                            # Pass session_dir to process_image
+                            new_path = preprocessor.process_image(
+                                file.file,
+                                output_path=str(session_dir / f"{file.filename}.jpeg")
+                            )
+                        
+                        processed_data.append(
+                            FileDataInfo(
+                                content=file,
+                                snapshot=get_data_snapshot(file, "image"),
+                                data_type="image",
+                                original_file_name=file.filename,
+                                new_file_path=new_path
                             )
                         )
                 
-                # Handle PDF files (assuming PDF processing is implemented in FilePreprocessor)
-                elif file_ext == 'pdf':
-                    # TODO: Implement PDF processing
-                    pass
-                
+                except Exception as e:
+                    return {"status": "error", "message": f"Error processing file {file.filename}: {str(e)}"}
         
-        # Initialize sandbox environment
+        # Rest of the code remains the same
         sandbox = EnhancedPythonInterpreter()
-        
-        # Process query using the processed data
         result = process_query(
             query=request.query,
             sandbox=sandbox,

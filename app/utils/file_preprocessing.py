@@ -1,13 +1,12 @@
 import pandas as pd
 import json
-from typing import Union, BinaryIO, Dict, Any
+from typing import Union, BinaryIO
 from pathlib import Path
 import docx
 import requests
 from PIL import Image
 import io
-import openpyxl
-import urllib.parse
+from app.utils.file_management import temp_file_manager
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -129,12 +128,17 @@ class FilePreprocessor:
             if output_path:
                 jpeg_path = output_path
             else:
-                # Generate output path if not provided
-                original_path = file if isinstance(file, str) else 'image'
-                jpeg_path = f"{Path(original_path).stem}.jpeg"
+                # Use temp file manager instead of local path
+                session_dir = temp_file_manager.get_temp_dir()
+                original_name = Path(file if isinstance(file, str) else 'image').stem
+                jpeg_path = temp_file_manager.save_temp_file(
+                    None,  # We'll save directly with PIL
+                    f"{original_name}.jpeg",
+                    session_dir
+                )
             
             img.save(jpeg_path, 'JPEG')
-            return jpeg_path
+            return str(jpeg_path)
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
 

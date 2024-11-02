@@ -1,20 +1,30 @@
-from app.class_schemas import TabularDataInfo, SandboxResult
+from app.class_schemas import SandboxResult, FileDataInfo
 from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
 from app.utils.code_processing import extract_code
 from typing import List
 from app.utils.sandbox import EnhancedPythonInterpreter
+import pandas as pd
 
 def process_query(
     query: str, 
     sandbox: EnhancedPythonInterpreter,
-    data: List[TabularDataInfo] = None #WILL NEED TO BE A LIST OF VARYING DATA TYPES
+    data: List[FileDataInfo] = None 
 ) -> SandboxResult:
     
     # Create execution namespace by extending base namespace
     namespace = dict(sandbox.base_namespace)  # Create a copy of base namespace
-    if data and len(data) > 0 and data[0].df is not None:
-        namespace['df'] = data[0].df
-        print("DataFrame shape:", data[0].df.shape)
+    
+    # Handle different data types in namespace
+    if data and len(data) > 0:
+        for idx, file_data in enumerate(data):
+            var_name = f'data_{idx}' if idx > 0 else 'data'
+            namespace[var_name] = file_data.content
+            
+            # Print information about the data
+            if isinstance(file_data.content, pd.DataFrame):
+                print(f"{var_name} shape:", file_data.content.shape)
+            elif hasattr(file_data.content, '__len__'):
+                print(f"{var_name} length:", len(file_data.content))
     
     try:
         # Initial code generation and execution
@@ -42,7 +52,25 @@ def process_query(
         while analysis_attempts < 6:    
             print("Analysis attempt:", analysis_attempts)
             old_data = data
-            new_data = TabularDataInfo(df=result.return_value, snapshot=result.return_value.head(10), file_name=data[0].file_name, data_type="DataFrame") 
+            
+            # Create new FileDataInfo based on return value type
+            if isinstance(result.return_value, pd.DataFrame):
+                new_data = FileDataInfo(
+                    content=result.return_value,
+                    snapshot=result.return_value.head(10).to_string(),
+                    data_type="DataFrame",
+                    original_file_name=data[0].original_file_name if data else None
+                )
+            else:
+                new_data = FileDataInfo(
+                    content=result.return_value,
+                    snapshot=str(result.return_value)[:1000] if result.return_value is not None else None,
+                    data_type=type(result.return_value).__name__,
+                    original_file_name=data[0].original_file_name if data else None
+                )
+
+            #ADD MORE CASES^ ?    
+            
             analysis_result = analyze_sandbox_result(result, old_data, new_data)
             success, analysis_result = sentiment_analysis(analysis_result)
             print("Analysis result:", analysis_result)

@@ -2,7 +2,7 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from typing import List
-from app.class_schemas import SandboxResult, AnalysisResult, TabularDataInfo
+from app.class_schemas import SandboxResult, FileDataInfo
 import pandas as pd
 import json
 from typing import Tuple
@@ -16,11 +16,17 @@ if not os.getenv("OPENAI_API_KEY"):
 
 
 # generate code from user query -- result goes to sandbox
-def gen_from_query(query: str, data: List) -> str:
+def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
     
     user_message = query
     if data and len(data) > 0:
-        user_message = f"DataFrame Snapshot:\n{data[0].snapshot}\n\nQuery: {query}"
+        # Build data description for multiple files
+        data_description = ""
+        for idx, file_data in enumerate(data):
+            var_name = f'data_{idx}' if idx > 0 else 'data'
+            data_description += f"\n{var_name} ({file_data.data_type}):\n{file_data.snapshot}\n"
+        
+        user_message = f"Available Data:{data_description}\n\nQuery: {query}"
 
     response = client.chat.completions.create(
         model="gpt-4o",  
@@ -28,7 +34,8 @@ def gen_from_query(query: str, data: List) -> str:
             {"role": "system", "content": """Generate Python code for the given query. 
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
-                The data is available in the 'df' variable as a pandas DataFrame.
+                The data is available in variables named 'data', 'data_1', 'data_2', etc.
+                Each data variable may be of different types (DataFrame, string, list, etc.).
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
@@ -85,26 +92,28 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
     return response.choices[0].message.content
 
 # post-error result processing - processes random sample of result -- result goes to sentiment analysis function
-def analyze_sandbox_result(result: SandboxResult, old_data: List[TabularDataInfo], new_data: TabularDataInfo) -> str:
+def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], new_data: FileDataInfo) -> str:
     """Analyze the result of a sandboxed code execution and return an analysis"""
     
+    # Build old data snapshot
     old_data_snapshot = ""
-    for data in old_data:
-        old_data_snapshot += f"{data.file_name}:\n{data.snapshot}\n\n"
+    for idx, data in enumerate(old_data):
+        var_name = f'data_{idx}' if idx > 0 else 'data'
+        old_data_snapshot += f"{var_name} ({data.data_type}):\n{data.snapshot}\n\n"
             
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.
-                Do not include print statements -- ensure the last line returns the desired value.
-                Respond in with either "yes, the result satisfies the user's original query" 
+                The data can be of any type (DataFrame, string, list, etc.).
+                Respond with either "yes, the result satisfies the user's original query" 
                 or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does not satisfy the user's original query]"
              """},
             {"role": "user", "content": f""" 
                 Here is the original user query and snapshots of the new and old data:
                 Original Query:\n{result.original_query}\n\n
                 Old Data:\n{old_data_snapshot}\n\n
-                New Data:\n{new_data.snapshot}\n\n
+                New Data ({new_data.data_type}):\n{new_data.snapshot}\n\n
                 """}
         ]
     )
