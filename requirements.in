@@ -8,3 +8,8 @@ numpy
 openpyxl
 chardet
 tabula-py
+python-docx
+Pillow
+requests
+fastapi[all]
+uvicorn[standard]

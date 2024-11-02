@@ -3,11 +3,30 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-
+from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Body, Path
+from fastapi.middleware.cors import CORSMiddleware
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 from app.utils.sandbox import TabularDataInfo
+from app.endpoints import process_query
+import uvicorn
 
+app = FastAPI()
+
+#FASTAPI
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Specify domains if needed
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+#include endpoints via router
+#region
+app.include_router(process_query.router)
+#endregion
 
 file_paths = ['course_data.csv']
 data_info_list = []
@@ -23,31 +42,10 @@ query = "Remove courses with less than 20 active students from this list."
     
 
 # Example usage
-if __name__ == "__main__":
-    
-    interpreter = EnhancedPythonInterpreter()
-    
-    # GPT-assisted interpretation
-    result = interpreter.process_query(
-        query = query,
-        use_gpt=True,
-        data = data_info_list
-    )
+if __name__ == "__main__":    
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="127.0.0.1", port=port)
 
-    if result.return_value is not None:
-        df_snapshot = result.return_value.head(10)
-    else:
-        df_snapshot = "None"
-
-
-    print("\nOriginal Query:", 
-          result.original_query, "\nResult:", 
-          "\nOutput:", result.print_output, 
-          "\nCode:", result.code, 
-          "\nError:", result.error, 
-          "\nReturn Value Snapshot:", df_snapshot, 
-          "\nTimed Out:", result.timed_out, 
-          "\n\n")
 
 
 
