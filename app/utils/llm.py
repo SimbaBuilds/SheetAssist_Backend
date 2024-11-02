@@ -57,7 +57,8 @@ def gen_from_error(result: SandboxResult) -> str:
             {"role": "system", "content": """Analyze the result of a failed sandboxed code execution and return a new script to try.
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
-                The data is available in the 'df' variable as a pandas DataFrame.
+                The data is available in variables named 'data', 'data_1', 'data_2', etc.
+                Each data variable may be of different types (DataFrame, string, list, etc.).
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
@@ -79,7 +80,8 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
                 but did not satisfy the user's original query and return a new script to try.
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
-                The data is available in the 'df' variable as a pandas DataFrame.
+                The data is available in variables named 'data', 'data_1', 'data_2', etc.
+                Each data variable may be of different types (DataFrame, string, list, etc.).
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
@@ -120,7 +122,7 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
     result = response.choices[0].message.content
     return result
 
-# processes result of LLM analysis of post-error sandbox result -- result goes to generate new code or finish analysis
+# processes result of LLM analysis of post-error sandbox result -- result goes to generate new code or exit analysis
 def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
     """Analyze the sentiment of the result of an analysis and return a boolean"""
     response = client.chat.completions.create(

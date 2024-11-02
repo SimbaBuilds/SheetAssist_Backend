@@ -1,12 +1,13 @@
 import pandas as pd
 import json
-from typing import Union, BinaryIO
+from typing import Union, BinaryIO, Tuple
 from pathlib import Path
 import docx
 import requests
 from PIL import Image
 import io
 from app.utils.file_management import temp_file_manager
+import fitz  # PyMuPDF
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -176,6 +177,70 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(f"Error processing web URL: {str(e)}")
 
+    @staticmethod
+    def process_pdf(file: Union[BinaryIO, str], query: str = None) -> Tuple[str, str, bool]:
+        """
+        Process PDF files and convert to string if readable, otherwise handle with vision
+        
+        Args:
+            file: File object or path to PDF file
+            query: Optional query for vision processing
+            
+        Returns:
+            Tuple[str, str, bool]: (content, data_type, is_readable)
+            - content: Extracted text or vision API result
+            - data_type: "text" or "vision_extracted"
+            - is_readable: Whether the PDF was machine-readable
+        """
+        try:
+            # Create a temporary file if we received a file object
+            if not isinstance(file, str):
+                temp_path = temp_file_manager.save_temp_file(file.read(), "temp.pdf")
+                pdf_path = str(temp_path)
+            else:
+                pdf_path = file
+
+            # Open PDF with PyMuPDF
+            doc = fitz.open(pdf_path)
+            
+            # Try to extract text
+            text_content = ""
+            total_text_length = 0
+            
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                page_text = page.get_text()
+                total_text_length += len(page_text.strip())
+                text_content += f"\n[Page {page_num + 1}]\n{page_text}"
+
+            doc.close()
+
+            # If not a file path, clean up the temporary file
+            if not isinstance(file, str):
+                temp_path.unlink()
+
+            # Check if PDF is readable (has meaningful text content)
+            is_readable = total_text_length > 100  # Arbitrary threshold
+
+            if is_readable:
+                return text_content, "text", True
+            
+            # Handle unreadable PDFs
+            if doc.page_count > 5:
+                raise ValueError("Unreadable PDF with more than 5 pages")
+                
+            # For small unreadable PDFs, process with vision
+            vision_processor = VisionProcessor()
+            vision_result = vision_processor.process_pdf_with_vision(pdf_path, query)
+            
+            if vision_result["status"] == "error":
+                raise ValueError(f"Vision API error: {vision_result['error']}")
+                
+            return vision_result["content"], "vision_extracted", False
+
+        except Exception as e:
+            raise ValueError(f"Error processing PDF file: {str(e)}")
+
     @classmethod
     def preprocess_file(cls, file: Union[BinaryIO, str], file_type: str, **kwargs) -> Union[pd.DataFrame, str]:
         """
@@ -196,7 +261,8 @@ class FilePreprocessor:
             'txt': cls.process_text,
             'docx': cls.process_docx,
             'png': cls.process_image,
-            'web_url': cls.process_web_url
+            'web_url': cls.process_web_url,
+            'pdf': cls.process_pdf
         }
         
         processor = processors.get(file_type.lower())

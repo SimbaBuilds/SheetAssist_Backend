@@ -5,9 +5,11 @@ from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
 from app.class_schemas import FileDataInfo, ProcessedQueryResult
-import pandas as pd
 import json
 from app.utils.file_management import temp_file_manager
+from app.utils.vision_processing import VisionProcessor
+import os
+import logging
 
 router = APIRouter()
 
@@ -112,16 +114,48 @@ async def process_query_endpoint(
                                 output_path=str(session_dir / f"{file.filename}.jpeg")
                             )
                         
+                        # Initialize vision processor and process the image
+                        vision_processor = VisionProcessor()
+                        image_path = new_path or str(session_dir / file.filename)
+                        
+                        # Process image with vision API
+                        vision_result = vision_processor.process_image_with_vision(
+                            image_path=image_path,
+                            query=request.query
+                        )
+                        
+                        if vision_result["status"] == "error":
+                            raise Exception(f"Vision API error: {vision_result['error']}")
+                        
                         processed_data.append(
                             FileDataInfo(
-                                content=file,
+                                content=vision_result["content"],  # Store the extracted information
                                 snapshot=get_data_snapshot(file, "image"),
                                 data_type="image",
                                 original_file_name=file.filename,
                                 new_file_path=new_path
                             )
                         )
+
+                        # Clean up the temporary file
+                        if new_path:
+                            try:
+                                os.remove(new_path)
+                            except Exception as e:
+                                logging.warning(f"Failed to remove temporary file {new_path}: {e}")
                 
+                    elif file_ext == 'pdf':
+                        content, data_type, is_readable = preprocessor.process_pdf(file.file, request.query)
+                        processed_data.append(
+                            FileDataInfo(
+                                content=content,
+                                snapshot=get_data_snapshot(content, "text"),
+                                data_type=data_type,
+                                original_file_name=file.filename,
+                                metadata={"is_readable": is_readable}
+                            )
+                        )
+
                 except Exception as e:
                     return {"status": "error", "message": f"Error processing file {file.filename}: {str(e)}"}
         
