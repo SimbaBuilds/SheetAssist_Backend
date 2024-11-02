@@ -42,7 +42,7 @@ def process_query(
         while analysis_attempts < 6:    
             print("Analysis attempt:", analysis_attempts)
             old_data = data
-            new_data = TabularDataInfo(df=result.return_value, snapshot=result.return_value.head(10), file_name=data[0].file_name, data_type="DataFrame") #return value now tuple of any types
+            new_data = TabularDataInfo(df=result.return_value, snapshot=result.return_value.head(10), file_name=data[0].file_name, data_type="DataFrame") 
             analysis_result = analyze_sandbox_result(result, old_data, new_data)
             success, analysis_result = sentiment_analysis(analysis_result)
             print("Analysis result:", analysis_result)
