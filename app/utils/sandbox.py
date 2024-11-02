@@ -1,20 +1,11 @@
 import code
-import ast
 import threading
 from io import StringIO
 import sys
 import contextlib
 from typing import Optional
-import os
-from dotenv import load_dotenv
-import pandas as pd
-import fitz  # PyMuPDF
-import numpy as np
-import openpyxl  # for Excel support
-from typing import Any, Optional, List
-from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
-from app.class_schemas import TabularDataInfo, SandboxResult
-from app.utils.code_processing import transform_ast, extract_code
+from app.class_schemas import SandboxResult
+from app.utils.code_processing import transform_ast
 
 
 class EnhancedPythonInterpreter:
@@ -128,7 +119,7 @@ class EnhancedPythonInterpreter:
             with self.capture_output() as (stdout, stderr):
                 try:
                     # Transform AST to capture last expression
-                    tree = self.transform_ast(code)
+                    tree = transform_ast(code)
                     # Create namespace with safe builtins, allowed packages, and passed data
                     ns = {
                         '__builtins__': self.safe_builtins,

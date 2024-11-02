@@ -12,4 +12,6 @@
     1. A sandbox environment must be set up as implemented in my EnhancedPythonInterpreter class
     2. Snapshots of the data along with the user query are sent to LLMs which iteratively generate code that 
         results in the user query being satsified
-    3. A response to the front end is sent which will always be one or more pandas dataframes or an error/feedback message
+    3. A response to the front end is sent which will 
+        be (1) one or more pandas dataframes (2) a pdf file (3) a txt file or 
+        (4) an error/feedback message

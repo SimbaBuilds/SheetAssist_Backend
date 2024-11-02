@@ -8,9 +8,11 @@ def transform_ast(code: str) -> ast.AST:
     if tree.body:
         last_node = tree.body[-1]
         if isinstance(last_node, ast.Expr):
+            # Handle both single values and tuples/lists
             assign = ast.Assign(
                 targets=[ast.Name(id="_result", ctx=ast.Store())],
-                value=last_node.value
+                value=last_node.value if isinstance(last_node.value, (ast.Tuple, ast.List)) 
+                      else ast.Tuple(elts=[last_node.value], ctx=ast.Load())
             )
             tree.body[-1] = ast.fix_missing_locations(assign)
     return tree

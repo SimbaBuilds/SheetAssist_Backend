@@ -29,7 +29,8 @@ def gen_from_query(query: str, data: List) -> str:
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
                 The data is available in the 'df' variable as a pandas DataFrame.
-                The return value of the code should be a pandas DataFrame.
+                The return value can be of any type (DataFrame, string, number, etc.).
+                If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
             {"role": "user", "content": user_message}
         ]
@@ -50,7 +51,8 @@ def gen_from_error(result: SandboxResult) -> str:
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
                 The data is available in the 'df' variable as a pandas DataFrame.
-                The return value of the code should be a pandas DataFrame.
+                The return value can be of any type (DataFrame, string, number, etc.).
+                If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
             {"role": "user", "content": f""" Here is the original user query, code, and error:
                 Original Query:\n{result.original_query}\n\n
@@ -71,7 +73,8 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
                 The data is available in the 'df' variable as a pandas DataFrame.
-                The return value of the code should be a pandas DataFrame.
+                The return value can be of any type (DataFrame, string, number, etc.).
+                If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
             {"role": "user", "content": f""" Here is the original user query, code, and LLM produced analysis:
                 Original Query:\n{result.original_query}\n\n
