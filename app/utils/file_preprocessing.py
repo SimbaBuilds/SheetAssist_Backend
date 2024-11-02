@@ -8,6 +8,7 @@ from PIL import Image
 import io
 from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
+from app.utils.vision_processing import VisionProcessor
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -111,7 +112,7 @@ class FilePreprocessor:
         
         Args:
             file: File object or path to image file
-            output_path: Optional path to save converted image
+            output_path: Path to save converted image (required in production)
             
         Returns:
             str: Path to converted JPEG file
@@ -126,20 +127,12 @@ class FilePreprocessor:
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
             
-            if output_path:
-                jpeg_path = output_path
-            else:
-                # Use temp file manager instead of local path
-                session_dir = temp_file_manager.get_temp_dir()
-                original_name = Path(file if isinstance(file, str) else 'image').stem
-                jpeg_path = temp_file_manager.save_temp_file(
-                    None,  # We'll save directly with PIL
-                    f"{original_name}.jpeg",
-                    session_dir
-                )
+            if not output_path:
+                raise ValueError("output_path is required for image processing")
             
-            img.save(jpeg_path, 'JPEG')
-            return str(jpeg_path)
+            img.save(output_path, 'JPEG')
+            return output_path
+            
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
 

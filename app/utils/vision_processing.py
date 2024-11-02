@@ -53,6 +53,10 @@ class VisionProcessor:
     def process_image_with_vision(self, image_path: str, query: str) -> dict:
         """Process image with GPT-4o Vision API"""
         try:
+            # Check if image_path exists
+            if not os.path.exists(image_path):
+                raise ValueError(f"Image file not found at path: {image_path}")
+                
             b64_image = self.image_to_base64(image_path)
             
             headers = {
@@ -114,6 +118,10 @@ class VisionProcessor:
             Dict[str, str]: Processing result with status and content
         """
         try:
+            # Check if PDF exists
+            if not os.path.exists(pdf_path):
+                raise ValueError(f"PDF file not found at path: {pdf_path}")
+                
             doc = fitz.open(pdf_path)
             all_page_content = []
             
