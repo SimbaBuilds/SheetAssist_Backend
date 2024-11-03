@@ -193,6 +193,12 @@ async def process_query_endpoint(
         else:
             df_snapshot = "None"
         
+        # Clean up temporary files
+        try:
+            temp_file_manager.cleanup()
+        except Exception as e:
+            logging.error(f"Error cleaning up temporary files: {str(e)}")
+        
         print("\nOriginal Query:", 
           result.original_query, "\nResult:", 
           "\nOutput:", result.print_output, 

@@ -2,7 +2,7 @@
 1. Receive and pre-process form data from the front end via endpoint "process query"
     1. Web URLs (up to 10): Links to Google Sheets or Excel for Web Sheets 
         1. Tabular data from web URLs must be read and converted to csvs for processing
-    2. Files (up to 10) of type .xlsx, .csv, .json, .docx, .txt, ,pdf, .jpeg, and .png, 
+    2. Files (up to 10) of type .xlsx, .csv, .json, .docx, .txt, ,pdf, .jpeg, and .png 
         1. .xlsx files must be converted to csv files
         2. json data must be loaded and converted to a string
         3. .docx and .txt files must be loaded and converted to a string
