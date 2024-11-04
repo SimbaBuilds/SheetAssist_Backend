@@ -1,5 +1,16 @@
 import pandas as pd
-from typing import Union, Tuple, Any, List
+from typing import Union, Tuple, Any, List, Optional
+from pydantic import BaseModel
+from fastapi import UploadFile 
+
+
+
+
+
+class QueryRequest(BaseModel):
+    web_urls: Optional[List[str]] = []
+    files: Optional[List[UploadFile]] = []
+    query: str
 
 
 class FileDataInfo:
@@ -16,23 +27,21 @@ class FileDataInfo:
 class SandboxResult:
     """Class for storing the result of a sandboxed code execution"""
     def __init__(self, original_query: str, print_output: str, code: str, 
-                 error: str, return_value: Union[Tuple[Any, ...], Any], timed_out: bool):
+                 error: str, return_value: Union[Tuple[Any, ...], Any], timed_out: bool,
+                 return_value_snapshot: Optional[str] = None):
         self.original_query = original_query
         self.print_output = print_output
         self.code = code
         self.error = error
         self.return_value = return_value  # Can be a single value of any type or a tuple of any types
         self.timed_out = timed_out
-
-
-class ProcessedQueryResult:
-    """Class for storing the result of a processed query, which can include DataFrames, PDFs, text files, or error messages"""
-    def __init__(self, result: SandboxResult, data: List[FileDataInfo]):
-        self.result = result  # Contains execution result including any errors/feedback
-        self.data = data  # Contains processed data files (DataFrames, PDFs, text)
+        self.return_value_snapshot = return_value_snapshot
 
 
 
+class ProcessedQueryResult(BaseModel):
+    result: SandboxResult
+    message: str
 
 
 

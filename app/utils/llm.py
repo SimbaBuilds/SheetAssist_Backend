@@ -2,7 +2,7 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from typing import List
-from app.class_schemas import SandboxResult, FileDataInfo
+from app.schemas import SandboxResult, FileDataInfo
 import pandas as pd
 import json
 from typing import Tuple

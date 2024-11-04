@@ -4,19 +4,24 @@ from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.class_schemas import FileDataInfo, ProcessedQueryResult
+from app.schemas import FileDataInfo, ProcessedQueryResult
 import json
 from app.utils.file_management import temp_file_manager
 from app.utils.vision_processing import VisionProcessor
 import os
 import logging
-
+from app.schemas import QueryRequest
 router = APIRouter()
 
-class QueryRequest(BaseModel):
-    web_urls: Optional[List[str]] = []
-    files: Optional[List[UploadFile]] = []
-    query: str
+
+def _create_return_value_snapshot(self) -> str:
+    """Creates a string representation of the return value"""
+    try:
+        if isinstance(self.return_value, tuple):
+            return ', '.join(str(item) for item in self.return_value)
+        return str(self.return_value)
+    except Exception:
+        return "<unprintable value>"
 
 def get_data_snapshot(content: Any, data_type: str) -> str:
     """Generate appropriate snapshot based on data type"""
@@ -185,13 +190,8 @@ async def process_query_endpoint(
             data=processed_data
         )
         
-        if result.error:
-            return {"status": "error", "message": result.error}
-            
-        if result.return_value is not None:
-            df_snapshot = result.return_value.head(10)
-        else:
-            df_snapshot = "None"
+        result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
+
         
         # Clean up temporary files
         try:
@@ -204,14 +204,26 @@ async def process_query_endpoint(
           "\nOutput:", result.print_output, 
           "\nCode:", result.code, 
           "\nError:", result.error, 
-          "\nReturn Value Snapshot:", df_snapshot, 
+          "\nReturn Value Snapshot:", result.return_value_snapshot, 
           "\nTimed Out:", result.timed_out, 
           "\n\n")
         
-        return {
-            "status": "success",
-            "data": result.return_value.to_dict(orient='records')
-        }
+        # Handle both tuple returns and single items
+        if isinstance(result.return_value, tuple):
+            # If it's a tuple, convert each DataFrame to dict
+            return {
+                "message": "success",
+                "result": [df.to_dict(orient='records') if hasattr(df, 'to_dict') else df 
+                        for df in result.return_value]
+            }
+        else:
+            # Handle single return value
+            return {
+                "message": "success",
+                "result": (result.return_value.to_dict(orient='records') 
+                        if hasattr(result.return_value, 'to_dict') 
+                        else result.return_value)
+            }
        
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"message": "error", "result": str(e)}

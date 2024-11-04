@@ -4,7 +4,7 @@ from io import StringIO
 import sys
 import contextlib
 from typing import Optional
-from app.class_schemas import SandboxResult
+from app.schemas import SandboxResult
 from app.utils.code_processing import transform_ast
 
 

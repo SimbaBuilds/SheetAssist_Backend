@@ -1,4 +1,4 @@
-from app.class_schemas import SandboxResult, FileDataInfo
+from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
 from app.utils.code_processing import extract_code
 from typing import List
