@@ -83,7 +83,7 @@ def process_query(
                     print_output="", 
                     code=result.code, 
                     error=None, 
-                    return_value=new_data.df, 
+                    return_value=new_data.content,
                     timed_out=False
                 )
                 return result 
@@ -117,12 +117,22 @@ def process_query(
         return result
         
     except ConnectionError as e:
-        result = SandboxResult(original_query=query, print_output="", code="", error=None, return_value=None, timed_out=False)
-        error_details = f'Connection Error: {str(e)}'
-        result.error = error_details
+        result = SandboxResult(
+            original_query=query,
+            print_output="",
+            code="",
+            error=f'Connection Error: {str(e)}',
+            return_value=None,
+            timed_out=False
+        )
         return result
     except Exception as e:
-        result = SandboxResult(original_query=query, print_output="", code="", error=None, return_value=None, timed_out=False)
-        error_details = f'GPT interpretation failed: {str(e)}\nType: {type(e).__name__}'
-        result.error = error_details
+        result = SandboxResult(
+            original_query=query,
+            print_output="",
+            code="",
+            error=f'GPT interpretation failed: {str(e)}\nType: {type(e).__name__}',
+            return_value=None,
+            timed_out=False
+        )
         return result

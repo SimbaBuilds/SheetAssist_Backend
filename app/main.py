@@ -5,11 +5,10 @@ sys.path.append(project_root)
 
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Body, Path
 from fastapi.middleware.cors import CORSMiddleware
-from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
-from app.utils.sandbox import TabularDataInfo
 from app.endpoints import process_query
 import uvicorn
+from app.schemas import FileDataInfo
 
 app = FastAPI()
 
@@ -35,7 +34,12 @@ data_info_list = []
 for file_path in file_paths:
     df = pd.read_csv(file_path)
     # Store data info in a DataInfo object
-    data_info = TabularDataInfo(df=df, snapshot=str(df.head(10)), data_type="DataFrame", file_name=file_path)
+    data_info = FileDataInfo(
+        content=df, 
+        snapshot=str(df.head(10)), 
+        data_type="DataFrame", 
+        original_file_name=file_path
+    )
     data_info_list.append(data_info)
 
 query = "Remove courses with less than 20 active students from this list."

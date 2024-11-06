@@ -13,30 +13,32 @@ class QueryRequest(BaseModel):
     query: str
 
 
-class FileDataInfo:
-    """Class for storing information about data being processed"""
-    def __init__(self, content: Any = None, snapshot: str = None, 
-                 data_type: str = None, original_file_name: str = None, new_file_path: str = None, url: str = None):
-        self.content = content
-        self.snapshot = snapshot
-        self.data_type = data_type
-        self.original_file_name = original_file_name
-        self.new_file_path = new_file_path
-        self.url = url
+class FileDataInfo(BaseModel):
+    """Pydantic model for storing information about data being processed"""
+    content: Optional[Any] = None
+    snapshot: Optional[str] = None
+    data_type: Optional[str] = None
+    original_file_name: Optional[str] = None
+    new_file_path: Optional[str] = None
+    url: Optional[str] = None
+    metadata: Optional[dict] = None
 
-class SandboxResult:
-    """Class for storing the result of a sandboxed code execution"""
-    def __init__(self, original_query: str, print_output: str, code: str, 
-                 error: str, return_value: Union[Tuple[Any, ...], Any], timed_out: bool,
-                 return_value_snapshot: Optional[str] = None):
-        self.original_query = original_query
-        self.print_output = print_output
-        self.code = code
-        self.error = error
-        self.return_value = return_value  # Can be a single value of any type or a tuple of any types
-        self.timed_out = timed_out
-        self.return_value_snapshot = return_value_snapshot
+    class Config:
+        arbitrary_types_allowed = True  # Allow any Python type for content
 
+
+class SandboxResult(BaseModel):
+    """Pydantic model for storing the result of a sandboxed code execution"""
+    original_query: str
+    print_output: str
+    code: str
+    error: Optional[str] = None
+    return_value: Any  # Can be a single value of any type or a tuple of any types
+    timed_out: bool
+    return_value_snapshot: Optional[str] = None
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow any Python type for return_value
 
 
 class ProcessedQueryResult(BaseModel):

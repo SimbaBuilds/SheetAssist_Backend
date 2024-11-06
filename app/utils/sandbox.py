@@ -113,7 +113,15 @@ class EnhancedPythonInterpreter:
     def execute_code(self, original_query: str, code: str, namespace: dict = None) -> SandboxResult:
         """Execute (cleaned)code with safety checks and timeout"""
 
-        result = SandboxResult(original_query=original_query, print_output="", code=code, error=None, return_value=None, timed_out=False)
+        result = SandboxResult(
+            original_query=original_query,
+            print_output="",
+            code=code,
+            error=None,
+            return_value=None,
+            timed_out=False,
+            return_value_snapshot=None
+        )
 
         def execute():
             with self.capture_output() as (stdout, stderr):
