@@ -7,10 +7,15 @@ from fastapi import UploadFile
 
 
 
+class OutputPreferences(BaseModel):
+    type: Optional[str] = "online"  # 'download' or 'online'
+    destination_url: Optional[str] = None
+
 class QueryRequest(BaseModel):
     web_urls: Optional[List[str]] = []
     files: Optional[List[UploadFile]] = []
     query: str
+    output_preferences: Optional[OutputPreferences] = None
 
 
 class FileDataInfo(BaseModel):

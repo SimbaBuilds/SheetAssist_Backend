@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
@@ -11,8 +11,15 @@ from app.utils.vision_processing import VisionProcessor
 import os
 import logging
 from app.schemas import QueryRequest
-router = APIRouter()
+from fastapi.responses import FileResponse
+import tempfile
+import csv
+import io
+import pandas as pd
+from app.utils.document_integrations import DocumentIntegrations
+from app.utils.file_postprocessing import create_pdf
 
+router = APIRouter()
 
 def _create_return_value_snapshot(self) -> str:
     """Creates a string representation of the return value"""
@@ -166,6 +173,112 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
     
     return processed_data
 
+async def handle_destination_upload(data: Any, destination_url: str) -> bool:
+    """Upload data to various destination types"""
+    try:
+        doc_integrations = DocumentIntegrations()
+        url_lower = destination_url.lower()
+        
+        if "docs.google.com" in url_lower:
+            if "document" in url_lower:
+                return await doc_integrations.append_to_google_doc(data, destination_url)
+            elif "spreadsheets" in url_lower:
+                return await doc_integrations.append_to_google_sheet(data, destination_url)
+        
+        elif "office.com" in url_lower or "sharepoint.com" in url_lower:
+            if "word" in url_lower:
+                return await doc_integrations.append_to_office_doc(data, destination_url)
+            elif "excel" in url_lower:
+                return await doc_integrations.append_to_office_sheet(data, destination_url)
+        
+        raise ValueError(f"Unsupported destination URL type: {destination_url}")
+    
+    except Exception as e:
+        logging.error(f"Failed to upload to destination: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+async def handle_output_preferences(result, output_preferences) -> Any:
+    """Handle different output preferences and return appropriate response"""
+    if not output_preferences:
+        return {
+            "message": "success",
+            "result": (result.return_value.to_dict(orient='records') 
+                    if hasattr(result.return_value, 'to_dict') 
+                    else result.return_value)
+        }
+
+    if output_preferences.type == "download":
+        # Create appropriate file format
+        if isinstance(result.return_value, pd.DataFrame):
+            if output_preferences.format == "pdf":
+                tmp_path = create_pdf(result.return_value)
+                return FileResponse(
+                    tmp_path,
+                    media_type='application/pdf',
+                    filename='query_results.pdf'
+                )
+            # default to CSV for DataFrames
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as tmp:
+                result.return_value.to_csv(tmp.name, index=False)
+                return FileResponse(
+                    tmp.name,
+                    media_type='text/csv',
+                    filename='query_results.csv'
+                )
+        
+        elif isinstance(result.return_value, (dict, list)):
+            if output_preferences.format == "pdf":
+                tmp_path = create_pdf(result.return_value)
+                return FileResponse(
+                    tmp_path,
+                    media_type='application/pdf',
+                    filename='query_results.pdf'
+                )
+            # default to JSON
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
+                json.dump(result.return_value, tmp)
+                return FileResponse(
+                    tmp.name,
+                    media_type='application/json',
+                    filename='query_results.json'
+                )
+        
+        else:  # string or other types
+            if output_preferences.format == "pdf":
+                tmp_path = create_pdf(result.return_value)
+                return FileResponse(
+                    tmp_path,
+                    media_type='application/pdf',
+                    filename='query_results.pdf'
+                )
+            # default to TXT
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tmp:
+                tmp.write(str(result.return_value))
+                return FileResponse(
+                    tmp.name,
+                    media_type='text/plain',
+                    filename='query_results.txt'
+                )
+    
+    elif output_preferences.destination_url:
+        # Handle destination URL upload
+        await handle_destination_upload(
+            result.return_value, 
+            output_preferences.destination_url
+        )
+        return {
+            "message": "success",
+            "result": "Data uploaded successfully"
+        }
+
+    # Default response
+    return {
+        "message": "success",
+        "result": (result.return_value.to_dict(orient='records') 
+                if hasattr(result.return_value, 'to_dict') 
+                else result.return_value)
+    }
+
 @router.post("/process_query", response_model=ProcessedQueryResult)
 async def process_query_endpoint(
     request: QueryRequest,
@@ -208,22 +321,8 @@ async def process_query_endpoint(
           "\nTimed Out:", result.timed_out, 
           "\n\n")
         
-        # Handle both tuple returns and single items
-        if isinstance(result.return_value, tuple):
-            # If it's a tuple, convert each DataFrame to dict
-            return {
-                "message": "success",
-                "result": [df.to_dict(orient='records') if hasattr(df, 'to_dict') else df 
-                        for df in result.return_value]
-            }
-        else:
-            # Handle single return value
-            return {
-                "message": "success",
-                "result": (result.return_value.to_dict(orient='records') 
-                        if hasattr(result.return_value, 'to_dict') 
-                        else result.return_value)
-            }
-       
+        # Use the helper function to handle output preferences
+        return await handle_output_preferences(result, request.output_preferences)
+
     except Exception as e:
         return {"message": "error", "result": str(e)}

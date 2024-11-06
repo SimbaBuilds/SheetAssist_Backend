@@ -14,3 +14,14 @@ requests
 fastapi[all]
 uvicorn[standard]
 python-dateutil
+google-auth
+google-api-python-client
+msgraph-core
+msgraph-sdk
+reportlab
+azure-identity
+azure-core
+azure-storage-blob
+azure-storage-file-share
+
+
