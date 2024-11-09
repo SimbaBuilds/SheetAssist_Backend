@@ -6,7 +6,7 @@ sys.path.append(project_root)
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Body, Path
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
-from app.endpoints import process_query
+from app.endpoints import process_query, token_handling
 import uvicorn
 from app.schemas import FileDataInfo
 
@@ -25,6 +25,7 @@ app.add_middleware(
 #include endpoints via router
 #region
 app.include_router(process_query.router)
+app.include_router(token_handling.router)
 #endregion
 
 file_paths = ['course_data.csv']

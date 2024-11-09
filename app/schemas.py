@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Union, Tuple, Any, List, Optional
+from typing import Union, Tuple, Any, List, Optional, Dict
 from pydantic import BaseModel
 from fastapi import UploadFile 
 
@@ -52,5 +52,7 @@ class ProcessedQueryResult(BaseModel):
 
 
 
-
+class TokenData(BaseModel):
+    user_id: str
+    tokens: Dict
 
