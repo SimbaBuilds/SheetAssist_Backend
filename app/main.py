@@ -3,12 +3,10 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Body, Path
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
 from app.endpoints import process_query, token_handling
 import uvicorn
-from app.schemas import FileDataInfo
 
 app = FastAPI()
 
@@ -28,22 +26,24 @@ app.include_router(process_query.router)
 app.include_router(token_handling.router)
 #endregion
 
-file_paths = ['course_data.csv']
-data_info_list = []
 
-# Read the CSV files
-for file_path in file_paths:
-    df = pd.read_csv(file_path)
-    # Store data info in a DataInfo object
-    data_info = FileDataInfo(
-        content=df, 
-        snapshot=str(df.head(10)), 
-        data_type="DataFrame", 
-        original_file_name=file_path
-    )
-    data_info_list.append(data_info)
+# development
+# file_paths = ['course_data.csv']
+# data_info_list = []
 
-query = "Remove courses with less than 20 active students from this list."
+# # Read the CSV files
+# for file_path in file_paths:
+#     df = pd.read_csv(file_path)
+#     # Store data info in a DataInfo object
+#     data_info = FileDataInfo(
+#         content=df, 
+#         snapshot=str(df.head(10)), 
+#         data_type="DataFrame", 
+#         original_file_name=file_path
+#     )
+#     data_info_list.append(data_info)
+
+# query = "Remove courses with less than 20 active students from this list."
     
 
 # Example usage
