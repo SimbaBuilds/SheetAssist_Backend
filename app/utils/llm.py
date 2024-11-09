@@ -3,7 +3,6 @@ import os
 from dotenv import load_dotenv
 from typing import List
 from app.schemas import SandboxResult, FileDataInfo
-import pandas as pd
 import json
 from typing import Tuple
 
@@ -13,7 +12,6 @@ client = OpenAI(api_key=api_key)
 
 if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY not found in environment variables")
-
 
 # generate code from user query -- result goes to sandbox
 def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
@@ -32,13 +30,16 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """Generate Python code for the given query. 
+                You are being given a preprocessed version of the user provided files.
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
                 The data is available in variables named 'data', 'data_1', 'data_2', etc.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
-                Do not include print statements -- ensure the last line returns the desired value."""},
+                Do not include print statements -- ensure the last line returns the desired value.
+                If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variables. 
+             """},
             {"role": "user", "content": user_message}
         ]
     )
@@ -76,8 +77,8 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
-            {"role": "system", "content": """Analyze the result of code that did not produce an error 
-                but did not satisfy the user's original query and return a new script to try.
+            {"role": "system", "content": """Analyze the result of the provided error free code that did not 
+                satisfy the user's original query.  Then, return a new script to try.
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
                 The data is available in variables named 'data', 'data_1', 'data_2', etc.
