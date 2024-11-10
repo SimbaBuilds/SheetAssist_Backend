@@ -7,8 +7,6 @@ from uuid import UUID
 
 
 
-
-
 class OutputPreferences(BaseModel):
     type: Optional[str] = "online"  # 'download' or 'online'
     destination_url: Optional[str] = None
@@ -53,22 +51,4 @@ class ProcessedQueryResult(BaseModel):
     message: str
 
 
-
-class TokenData(BaseModel):
-    user_id: str
-    tokens: Dict
-
-
-
-class GoogleTokenRecord(BaseModel):
-    id: Optional[UUID] = None
-    user_id: UUID
-    encrypted_access_token: str
-    encrypted_refresh_token: str 
-    expiry_timestamp: datetime
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
