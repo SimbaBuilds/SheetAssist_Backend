@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Union, Tuple, Any, List, Optional, Dict
 from pydantic import BaseModel
 from fastapi import UploadFile 
+from datetime import datetime
+from uuid import UUID
 
 
 
@@ -55,4 +57,18 @@ class ProcessedQueryResult(BaseModel):
 class TokenData(BaseModel):
     user_id: str
     tokens: Dict
+
+
+
+class GoogleTokenRecord(BaseModel):
+    id: Optional[UUID] = None
+    user_id: UUID
+    encrypted_access_token: str
+    encrypted_refresh_token: str 
+    expiry_timestamp: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 

@@ -7,6 +7,8 @@ from cryptography.fernet import Fernet
 from app.schemas import TokenData
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from app.schemas import GoogleTokenRecord
+from uuid import UUID
 
 router = APIRouter()
 
@@ -21,18 +23,24 @@ supabase: Client = create_client(
 )
 
 
-@router.post("/store-google-tokens")
+@router.post("/auth/store-google-tokens")
 async def store_google_tokens(data: TokenData):
     try:
-        # Encrypt tokens before storage
-        encrypted_tokens = fernet.encrypt(str(data.tokens).encode())
+        # Encrypt tokens separately
+        encrypted_access_token = fernet.encrypt(data.tokens['access_token'].encode()).decode()
+        encrypted_refresh_token = fernet.encrypt(data.tokens['refresh_token'].encode()).decode()
         
-        # Store encrypted tokens in Supabase
-        response = supabase.table('google_tokens').upsert({
-            'user_id': data.user_id,
-            'encrypted_tokens': encrypted_tokens.decode(),
-            'updated_at': datetime.now(timezone.utc).isoformat()
-        }).execute()
+        # Create record matching GoogleTokenRecord schema
+        token_record = {
+            'user_id': UUID(data.user_id),
+            'encrypted_access_token': encrypted_access_token,
+            'encrypted_refresh_token': encrypted_refresh_token,
+            'expiry_timestamp': datetime.fromtimestamp(data.tokens['expiry_date'], tz=timezone.utc),
+            'updated_at': datetime.now(timezone.utc)
+        }
+        
+        # Store in Supabase
+        response = supabase.table('google_tokens').upsert(token_record).execute()
         
         if hasattr(response, 'error') and response.error is not None:
             raise HTTPException(status_code=500, detail=str(response.error))
@@ -46,38 +54,49 @@ async def store_google_tokens(data: TokenData):
 async def refresh_google_tokens(user_id: str):
     try:
         # Fetch encrypted tokens
-        response = supabase.table('google_tokens').select('encrypted_tokens').eq('user_id', user_id).execute()
+        response = supabase.table('google_tokens').select(
+            'encrypted_access_token',
+            'encrypted_refresh_token',
+            'expiry_timestamp'
+        ).eq('user_id', UUID(user_id)).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Tokens not found")
             
         # Decrypt tokens
-        encrypted_tokens = response.data[0]['encrypted_tokens']
-        tokens_str = fernet.decrypt(encrypted_tokens.encode()).decode()
-        tokens = eval(tokens_str)  # Convert string back to dict
+        record = response.data[0]
+        refresh_token = fernet.decrypt(record['encrypted_refresh_token'].encode()).decode()
         
         # Check if access token needs refresh
-        if is_token_expired(tokens['expiry_date']):
+        if datetime.now(timezone.utc) > record['expiry_timestamp']:
             # Use refresh token to get new access token
-            new_tokens = refresh_google_access_token(tokens['refresh_token'])
+            new_tokens = refresh_google_access_token(refresh_token)
             
             # Store new tokens
-            encrypted_new_tokens = fernet.encrypt(str(new_tokens).encode())
-            supabase.table('google_tokens').upsert({
-                'user_id': user_id,
-                'encrypted_tokens': encrypted_new_tokens.decode(),
-                'updated_at': datetime.now(timezone.utc).isoformat()
-            }).execute()
+            token_record = {
+                'user_id': UUID(user_id),
+                'encrypted_access_token': fernet.encrypt(new_tokens['access_token'].encode()).decode(),
+                'encrypted_refresh_token': fernet.encrypt(new_tokens['refresh_token'].encode()).decode(),
+                'expiry_timestamp': datetime.fromtimestamp(new_tokens['expiry_date'], tz=timezone.utc),
+                'updated_at': datetime.now(timezone.utc)
+            }
+            
+            supabase.table('google_tokens').upsert(token_record).execute()
             
             return {"status": "success", "tokens": new_tokens}
-            
-        return {"status": "success", "tokens": tokens}
+        
+        # If token is still valid, return current tokens
+        access_token = fernet.decrypt(record['encrypted_access_token'].encode()).decode()
+        current_tokens = {
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expiry_date': int(record['expiry_timestamp'].timestamp())
+        }
+        
+        return {"status": "success", "tokens": current_tokens}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-def is_token_expired(expiry_date: int) -> bool:
-    return datetime.now(timezone.utc).timestamp() > expiry_date
 
 def refresh_google_access_token(refresh_token: str) -> Dict:
     """Refresh Google access token using refresh token."""
