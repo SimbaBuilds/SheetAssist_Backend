@@ -10,6 +10,7 @@ from uuid import UUID
 class OutputPreferences(BaseModel):
     type: Optional[str] = "online"  # 'download' or 'online'
     destination_url: Optional[str] = None
+    format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
 
 class QueryRequest(BaseModel):
     web_urls: Optional[List[str]] = []

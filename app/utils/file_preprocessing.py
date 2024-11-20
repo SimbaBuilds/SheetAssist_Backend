@@ -9,6 +9,7 @@ import io
 from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
 from app.utils.vision_processing import VisionProcessor
+import re
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -108,30 +109,38 @@ class FilePreprocessor:
     @staticmethod
     def process_image(file: Union[BinaryIO, str], output_path: str = None) -> str:
         """
-        Process image files (.png) and convert to JPEG
+        Process image files (.png, .jpg, .jpeg)
+        PNG files are converted to JPEG, JPEG files are left untouched
         
         Args:
             file: File object or path to image file
-            output_path: Path to save converted image (required in production)
+            output_path: Path to save converted image (required for PNG conversion)
             
         Returns:
-            str: Path to converted JPEG file
+            str: Path to image file (original path for JPEG, converted path for PNG)
         """
         try:
             if isinstance(file, str):
                 img = Image.open(file)
+                # If it's already a JPEG, return the original path
+                if file.lower().endswith(('.jpg', '.jpeg')):
+                    return file
             else:
                 img = Image.open(io.BytesIO(file.read()))
             
-            # Convert to RGB if necessary (PNG might have RGBA)
-            if img.mode in ('RGBA', 'P'):
-                img = img.convert('RGB')
+            # Convert PNG to JPEG
+            if img.format == 'PNG':
+                # Convert to RGB if necessary (PNG might have RGBA)
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
+                
+                if not output_path:
+                    raise ValueError("output_path is required for PNG conversion")
+                
+                img.save(output_path, 'JPEG')
+                return output_path
             
-            if not output_path:
-                raise ValueError("output_path is required for image processing")
-            
-            img.save(output_path, 'JPEG')
-            return output_path
+            return file  # Return original file for JPEGs
             
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
@@ -139,21 +148,58 @@ class FilePreprocessor:
     @staticmethod
     def process_web_url(url: str) -> pd.DataFrame:
         """
-        Process web URLs (Google Sheets or Excel) and convert to DataFrame
+        Process web URLs (Google Sheets/Docs, Microsoft Excel/Word Online) and convert to appropriate format
         
         Args:
-            url: URL to the web sheet
+            url: URL to the web document
             
         Returns:
-            pd.DataFrame: Processed data as DataFrame
+            Union[pd.DataFrame, str]: Processed data as DataFrame for spreadsheets or string for documents
         """
         try:
             # Handle Google Sheets URLs
             if 'docs.google.com/spreadsheets' in url:
-                # Convert to export URL
                 file_id = url.split('/d/')[1].split('/')[0]
                 export_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv"
                 return pd.read_csv(export_url)
+            
+            # Handle Google Docs URLs
+            elif 'docs.google.com/document' in url:
+                file_id = url.split('/d/')[1].split('/')[0]
+                export_url = f"https://docs.google.com/document/d/{file_id}/export?format=txt"
+                response = requests.get(export_url)
+                if response.status_code != 200:
+                    raise ValueError(f"Failed to fetch Google Doc: {url}")
+                return response.text
+            
+            # Handle Microsoft Excel Online URLs
+            elif 'xlsx' in url:
+                # Extract the sharing URL
+                response = requests.get(url, allow_redirects=True)
+                share_url = response.url
+                
+                # Convert to direct download link
+                download_url = share_url.replace('view.aspx', 'download.aspx')
+                response = requests.get(download_url)
+                if response.status_code != 200:
+                    raise ValueError(f"Failed to fetch Excel Online file: {url}")
+                    
+                return pd.read_excel(io.BytesIO(response.content))
+            
+            # Handle Microsoft Word Online URLs
+            elif 'docx' in url:
+                # Extract the sharing URL
+                response = requests.get(url, allow_redirects=True)
+                share_url = response.url
+                
+                # Convert to direct download link
+                download_url = share_url.replace('view.aspx', 'download.aspx')
+                response = requests.get(download_url)
+                if response.status_code != 200:
+                    raise ValueError(f"Failed to fetch Word Online file: {url}")
+                
+                doc = docx.Document(io.BytesIO(response.content))
+                return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
             
             # Handle direct Excel/CSV URLs
             response = requests.get(url)
@@ -167,6 +213,7 @@ class FilePreprocessor:
                 return pd.read_excel(io.BytesIO(response.content))
             else:
                 raise ValueError(f"Unsupported content type: {content_type}")
+                
         except Exception as e:
             raise ValueError(f"Error processing web URL: {str(e)}")
 
@@ -254,8 +301,14 @@ class FilePreprocessor:
             'txt': cls.process_text,
             'docx': cls.process_docx,
             'png': cls.process_image,
+            'jpg': cls.process_image,
+            'jpeg': cls.process_image,
             'web_url': cls.process_web_url,
-            'pdf': cls.process_pdf
+            'pdf': cls.process_pdf,
+            'gdoc': cls.process_web_url,
+            'gsheet': cls.process_web_url,
+            'office_doc': cls.process_web_url,
+            'office_sheet': cls.process_web_url
         }
         
         processor = processors.get(file_type.lower())

@@ -6,6 +6,8 @@ import tempfile
 import pandas as pd
 from typing import Any
 import json
+from docx import Document
+import openpyxl
 
 def create_pdf(data: Any) -> str:
     """Create PDF file from various data types"""
@@ -48,4 +50,89 @@ def create_pdf(data: Any) -> str:
         elements.append(Paragraph(data, styles['Normal']))
     
     doc.build(elements)
+    return tmp_path
+
+def create_xlsx(data: Any) -> str:
+    """Create Excel file from various data types"""
+    tmp_path = tempfile.mktemp(suffix='.xlsx')
+    
+    if isinstance(data, pd.DataFrame):
+        data.to_excel(tmp_path, index=False)
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        
+        if isinstance(data, (dict, list)):
+            # Convert to string and write as single cell
+            ws['A1'] = json.dumps(data, indent=2)
+        else:
+            ws['A1'] = str(data)
+            
+        wb.save(tmp_path)
+    
+    return tmp_path
+
+def create_docx(data: Any) -> str:
+    """Create Word document from various data types"""
+    tmp_path = tempfile.mktemp(suffix='.docx')
+    doc = Document()
+    
+    if isinstance(data, pd.DataFrame):
+        # Add table
+        table = doc.add_table(rows=len(data)+1, cols=len(data.columns))
+        
+        # Add headers
+        for j, column in enumerate(data.columns):
+            table.cell(0, j).text = str(column)
+            
+        # Add data
+        for i, row in enumerate(data.values):
+            for j, cell in enumerate(row):
+                table.cell(i+1, j).text = str(cell)
+                
+    elif isinstance(data, (dict, list)):
+        doc.add_paragraph(json.dumps(data, indent=2))
+    else:
+        doc.add_paragraph(str(data))
+    
+    doc.save(tmp_path)
+    return tmp_path
+
+def create_txt(data: Any) -> str:
+    """Create text file from various data types"""
+    tmp_path = tempfile.mktemp(suffix='.txt')
+    
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        if isinstance(data, pd.DataFrame):
+            f.write(data.to_string())
+        elif isinstance(data, (dict, list)):
+            f.write(json.dumps(data, indent=2))
+        else:
+            f.write(str(data))
+    
+    return tmp_path
+
+def create_csv(data: Any) -> str:
+    """Create CSV file from various data types"""
+    tmp_path = tempfile.mktemp(suffix='.csv')
+    
+    if isinstance(data, pd.DataFrame):
+        data.to_csv(tmp_path, index=False)
+    else:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            if isinstance(data, (dict, list)):
+                if isinstance(data, dict):
+                    # Convert single dict to DataFrame and then to CSV
+                    pd.DataFrame([data]).to_csv(f, index=False)
+                else:
+                    # Convert list of dicts or list of values to CSV
+                    if all(isinstance(item, dict) for item in data):
+                        pd.DataFrame(data).to_csv(f, index=False)
+                    else:
+                        pd.DataFrame({"Value": data}).to_csv(f, index=False)
+            else:
+                # For simple types, create a single-cell CSV
+                f.write("Value\n")
+                f.write(f"{str(data)}\n")
+    
     return tmp_path

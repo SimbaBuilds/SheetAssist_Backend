@@ -17,7 +17,7 @@ import csv
 import io
 import pandas as pd
 from app.utils.document_integrations import DocumentIntegrations
-from app.utils.file_postprocessing import create_pdf
+from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv
 
 router = APIRouter()
 
@@ -201,69 +201,50 @@ async def handle_output_preferences(result, output_preferences) -> Any:
     """Handle different output preferences and return appropriate response"""
     if not output_preferences:
         return {
-            "message": "success",
-            "result": (result.return_value.to_dict(orient='records') 
-                    if hasattr(result.return_value, 'to_dict') 
-                    else result.return_value)
+            "message": "success", 
+            "result": (result.return_value.to_dict(orient='records')
+                      if hasattr(result.return_value, 'to_dict')
+                      else result.return_value)
         }
 
     if output_preferences.type == "download":
-        # Create appropriate file format
-        if isinstance(result.return_value, pd.DataFrame):
-            if output_preferences.format == "pdf":
-                tmp_path = create_pdf(result.return_value)
-                return FileResponse(
-                    tmp_path,
-                    media_type='application/pdf',
-                    filename='query_results.pdf'
-                )
-            # default to CSV for DataFrames
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as tmp:
-                result.return_value.to_csv(tmp.name, index=False)
-                return FileResponse(
-                    tmp.name,
-                    media_type='text/csv',
-                    filename='query_results.csv'
-                )
-        
-        elif isinstance(result.return_value, (dict, list)):
-            if output_preferences.format == "pdf":
-                tmp_path = create_pdf(result.return_value)
-                return FileResponse(
-                    tmp_path,
-                    media_type='application/pdf',
-                    filename='query_results.pdf'
-                )
-            # default to JSON
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
-                json.dump(result.return_value, tmp)
-                return FileResponse(
-                    tmp.name,
-                    media_type='application/json',
-                    filename='query_results.json'
-                )
-        
-        else:  # string or other types
-            if output_preferences.format == "pdf":
-                tmp_path = create_pdf(result.return_value)
-                return FileResponse(
-                    tmp_path,
-                    media_type='application/pdf',
-                    filename='query_results.pdf'
-                )
-            # default to TXT
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tmp:
-                tmp.write(str(result.return_value))
-                return FileResponse(
-                    tmp.name,
-                    media_type='text/plain',
-                    filename='query_results.txt'
-                )
-    
+        # Get the desired output format, defaulting based on data type
+        output_format = output_preferences.format
+        if not output_format:
+            if isinstance(result.return_value, pd.DataFrame):
+                output_format = 'csv'
+            elif isinstance(result.return_value, (dict, list)):
+                output_format = 'json'
+            else:
+                output_format = 'txt'
+
+        # Create temporary file in requested format
+        if output_format == 'pdf':
+            tmp_path = create_pdf(result.return_value)
+            media_type = 'application/pdf'
+        elif output_format == 'xlsx':
+            tmp_path = create_xlsx(result.return_value)
+            media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        elif output_format == 'docx':
+            tmp_path = create_docx(result.return_value)
+            media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        elif output_format == 'txt':
+            tmp_path = create_txt(result.return_value)
+            media_type = 'text/plain'
+        else:  # csv
+            tmp_path = create_csv(result.return_value)
+            media_type = 'text/csv'
+
+        return FileResponse(
+            tmp_path,
+            media_type=media_type,
+            filename=f'query_results.{output_format}'
+        )
+
     elif output_preferences.destination_url:
         # Handle destination URL upload
         await handle_destination_upload(
-            result.return_value, 
+            result.return_value,
             output_preferences.destination_url
         )
         return {
@@ -271,12 +252,12 @@ async def handle_output_preferences(result, output_preferences) -> Any:
             "result": "Data uploaded successfully"
         }
 
-    # Default response
+    # Default online response
     return {
         "message": "success",
-        "result": (result.return_value.to_dict(orient='records') 
-                if hasattr(result.return_value, 'to_dict') 
-                else result.return_value)
+        "result": (result.return_value.to_dict(orient='records')
+                  if hasattr(result.return_value, 'to_dict')
+                  else result.return_value)
     }
 
 @router.post("/process_query", response_model=ProcessedQueryResult)
