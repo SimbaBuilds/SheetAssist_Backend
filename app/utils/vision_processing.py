@@ -72,7 +72,7 @@ class VisionProcessor:
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"Extract the relevant information from this image based on this user query: {query}"
+                                "text": f"Extract all relevant textual information from this image based on this user query: {query}"
                             },
                             {
                                 "type": "image_url",

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 import pandas as pd
 from app.utils.document_integrations import DocumentIntegrations
 from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv
+from fastapi import BackgroundTasks
 
 router = APIRouter()
 
@@ -197,9 +198,9 @@ async def handle_destination_upload(data: Any, destination_url: str) -> bool:
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_endpoint(
     request: QueryRequest,
+    background_tasks: BackgroundTasks
 ) -> QueryResponse:
     try:
-        # Create a session directory for this request
         session_dir = temp_file_manager.get_temp_dir()
         
         # Process files using the helper function
@@ -218,74 +219,73 @@ async def process_query_endpoint(
             sandbox=sandbox,
             data=preprocessed_data
         )
-        print("Query processed")
         result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
+        print("Query processed")
+        print("Output preferences:", request.output_preferences.type)
+        # Handle output based on type
+        if request.output_preferences.type == "download":
+            # Get the desired output format, defaulting based on data type
+            output_format = request.output_preferences.format
+            if not output_format:
+                if isinstance(result.return_value, pd.DataFrame):
+                    output_format = 'csv'
+                elif isinstance(result.return_value, (dict, list)):
+                    output_format = 'json'
+                else:
+                    output_format = 'txt'
 
-        # Handle output based on preferences
-        if request.output_preferences:
-            if request.output_preferences.type == "download":
-                # Get the desired output format, defaulting based on data type
-                output_format = request.output_preferences.format
-                if not output_format:
-                    if isinstance(result.return_value, pd.DataFrame):
-                        output_format = 'csv'
-                    elif isinstance(result.return_value, (dict, list)):
-                        output_format = 'json'
-                    else:
-                        output_format = 'txt'
+            # Create temporary file in requested format
+            if output_format == 'pdf':
+                tmp_path = create_pdf(result.return_value)
+                media_type = 'application/pdf'
+            elif output_format == 'xlsx':
+                tmp_path = create_xlsx(result.return_value)
+                media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            elif output_format == 'docx':
+                tmp_path = create_docx(result.return_value)
+                media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            elif output_format == 'txt':
+                tmp_path = create_txt(result.return_value)
+                media_type = 'text/plain'
+            else:  # csv
+                tmp_path = create_csv(result.return_value)
+                media_type = 'text/csv'
 
-                # Create temporary file in requested format
-                if output_format == 'pdf':
-                    tmp_path = create_pdf(result.return_value)
-                    media_type = 'application/pdf'
-                elif output_format == 'xlsx':
-                    tmp_path = create_xlsx(result.return_value)
-                    media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                elif output_format == 'docx':
-                    tmp_path = create_docx(result.return_value)
-                    media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                elif output_format == 'txt':
-                    tmp_path = create_txt(result.return_value)
-                    media_type = 'text/plain'
-                else:  # csv
-                    tmp_path = create_csv(result.return_value)
-                    media_type = 'text/csv'
+            # Mark files for cleanup after response is sent
+            temp_file_manager.mark_for_cleanup(tmp_path, session_dir)
+            background_tasks.add_task(temp_file_manager.cleanup_marked)
+            
+            return QueryResponse(
+                status="success",
+                message="File ready for download",
+                files=[FileInfo(
+                    file_path=str(tmp_path),
+                    media_type=media_type,
+                    filename=f'query_results.{output_format}',
+                    download_url=f"/api/process_query/download/query_results.{output_format}"
+                )]
+            )
 
-                return QueryResponse(
-                    status="success",
-                    message="File ready for download",
-                    files=[FileInfo(
-                        file_path=tmp_path,
-                        media_type=media_type,
-                        filename=f'query_results.{output_format}'
-                    )]
-                )
+        elif request.output_preferences.type == "online":
+            if not request.output_preferences.destination_url:
+                raise ValueError("destination_url is required for online type")
+                
+            # Handle destination URL upload
+            await handle_destination_upload(
+                result.return_value,
+                request.output_preferences.destination_url
+            )
 
-            elif request.output_preferences.destination_url:
-                # Handle destination URL upload
-                await handle_destination_upload(
-                    result.return_value,
-                    request.output_preferences.destination_url
-                )
-                return QueryResponse(
-                    status="success",
-                    message="Data successfully uploaded to destination"
-                )
+            temp_file_manager.cleanup_marked()  # Clean up immediately
 
-        # Clean up temporary files
-        try:
-            temp_file_manager.cleanup()
-        except Exception as e:
-            logging.error(f"Error cleaning up temporary files: {str(e)}")
+            return QueryResponse(
+                status="success",
+                message="Data successfully uploaded to destination"
+            )
         
-        # Default online response
-        return QueryResponse(
-            status="success",
-            message="Query processed successfully",
-            data=result.return_value.to_dict(orient='records')
-            if hasattr(result.return_value, 'to_dict')
-            else result.return_value
-        )
+        else:
+            raise ValueError(f"Invalid output type: {request.output_preferences.type}")
+
 
     except Exception as e:
         logging.error(f"Error processing query: {str(e)}")
@@ -293,3 +293,44 @@ async def process_query_endpoint(
             status="error",
             message=str(e)
         )
+
+@router.get("/download/{filename}")
+async def download_file(filename: str):
+    """
+    Serve a processed file for download
+    
+    Args:
+        filename: Name of the file to download
+    """
+    try:
+        # Get the base directory where temporary files are stored
+        base_dir = temp_file_manager.base_dir
+        
+        # Search for the file in all session directories
+        for session_dir in base_dir.glob("session_*"):
+            file_path = session_dir / filename
+            if file_path.exists():
+                # Determine the media type based on file extension
+                extension = filename.split('.')[-1].lower()
+                media_types = {
+                    'pdf': 'application/pdf',
+                    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'txt': 'text/plain',
+                    'csv': 'text/csv'
+                }
+                
+                media_type = media_types.get(extension, 'application/octet-stream')
+                
+                # Return the file as a response
+                return FileResponse(
+                    path=str(file_path),
+                    media_type=media_type,
+                    filename=filename,
+                    background=None  # Don't delete the file immediately after sending
+                )
+        
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving file: {str(e)}")

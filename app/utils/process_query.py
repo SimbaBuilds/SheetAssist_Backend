@@ -25,7 +25,7 @@ def process_query(
                 print(f"{var_name} shape:", file_data.content.shape)
             elif hasattr(file_data.content, '__len__'):
                 print(f"{var_name} length:", len(file_data.content))
-    
+        print(f"Namespace created for data {var_name}")
     try:
         # Initial code generation and execution
         suggested_code = gen_from_query(query, data)

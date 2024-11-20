@@ -43,6 +43,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
             {"role": "user", "content": user_message}
         ]
     )
+    print(f"LLM called with message: {user_message}\nCode generated from query: {response.choices[0].message.content}")
     
     if not response or not response.choices:
         raise ValueError("Empty response from OpenAI API")

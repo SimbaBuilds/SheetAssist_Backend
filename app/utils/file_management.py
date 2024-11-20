@@ -28,6 +28,8 @@ class TempFileManager:
         
         # Register cleanup on program exit
         atexit.register(self.cleanup_old_files)
+        
+        self._pending_cleanup = set()
     
     def get_temp_dir(self) -> Path:
         """Create a new temporary directory for the current session"""
@@ -89,6 +91,28 @@ class TempFileManager:
             raise ValueError(f"Unsupported file data type: {type(file_data)}")
             
         return file_path
+    
+    def mark_for_cleanup(self, *paths: Path) -> None:
+        """Mark files or directories for cleanup after they're no longer needed
+        
+        Args:
+            *paths: Paths to mark for cleanup
+        """
+        for path in paths:
+            self._pending_cleanup.add(Path(path))
+    
+    def cleanup_marked(self) -> None:
+        """Clean up all marked files and directories"""
+        while self._pending_cleanup:
+            path = self._pending_cleanup.pop()
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                elif path.exists():
+                    path.unlink()
+                logger.info(f"Cleaned up marked path: {path}")
+            except Exception as e:
+                logger.error(f"Error cleaning up marked path {path}: {str(e)}")
 
 # Global instance
 temp_file_manager = TempFileManager() 

@@ -8,7 +8,7 @@ from uuid import UUID
 
 
 class OutputPreferences(BaseModel):
-    type: Optional[str] = "online"  # 'download' or 'online'
+    type: str  # 'download' or 'online' - no longer Optional
     destination_url: Optional[str] = None
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
 
@@ -16,7 +16,7 @@ class QueryRequest(BaseModel):
     web_urls: Optional[List[str]] = []
     files: Optional[List[UploadFile]] = []
     query: str
-    output_preferences: Optional[OutputPreferences] = None
+    output_preferences: OutputPreferences  # no longer Optional
 
 
 class FileInfo(BaseModel):
@@ -24,12 +24,12 @@ class FileInfo(BaseModel):
     file_path: str
     media_type: str
     filename: str
+    download_url: Optional[str] = None  # New field for download URL
 
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
     status: str  # "success" or "error"
     message: str  # Description of result or error message
-    data: Optional[Any] = None  # For online viewing of results
     files: Optional[List[FileInfo]] = None  # For downloadable files
 
     class Config:
