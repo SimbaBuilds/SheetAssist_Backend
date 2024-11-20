@@ -72,7 +72,12 @@ class VisionProcessor:
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"Extract all relevant textual information from this image based on this user query: {query}"
+                                "text": f"""
+                                Extract all relevant information from this image based on this user query: {query}. 
+                                If formatting in the image provides information, indicate as much in your response 
+                                (e.g. large text at the top of the image: title: [large text], 
+                                tabular data: table: [tabular data], etc...).
+                                """
                             },
                             {
                                 "type": "image_url",

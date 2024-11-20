@@ -108,40 +108,21 @@ class FilePreprocessor:
 
     @staticmethod
     def process_image(file: Union[BinaryIO, str], output_path: str = None) -> str:
-        """
-        Process image files (.png, .jpg, .jpeg)
-        PNG files are converted to JPEG, JPEG files are left untouched
-        
-        Args:
-            file: File object or path to image file
-            output_path: Path to save converted image (required for PNG conversion)
-            
-        Returns:
-            str: Path to image file (original path for JPEG, converted path for PNG)
-        """
+        """Process image files (.png, .jpg, .jpeg)"""
         try:
             if isinstance(file, str):
                 img = Image.open(file)
-                # If it's already a JPEG, return the original path
-                if file.lower().endswith(('.jpg', '.jpeg')):
-                    return file
             else:
-                img = Image.open(io.BytesIO(file.read()))
-            
-            # Convert PNG to JPEG
-            if img.format == 'PNG':
-                # Convert to RGB if necessary (PNG might have RGBA)
+                file.seek(0)
+                img = Image.open(file)
+
+            if img.format == 'PNG' and output_path:
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGB')
-                
-                if not output_path:
-                    raise ValueError("output_path is required for PNG conversion")
-                
                 img.save(output_path, 'JPEG')
                 return output_path
-            
-            return file  # Return original file for JPEGs
-            
+
+            return file
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
 

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.schemas import FileDataInfo, QueryResponse, FileInfo
+from app.schemas import FileDataInfo, QueryResponse, FileInfo, FileMetadata
 import json
 from app.utils.file_management import temp_file_manager
 from app.utils.vision_processing import VisionProcessor
@@ -44,8 +44,10 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
         # Return first 500 characters for text
         return content[:500] + ("..." if len(content) > 500 else "")
     elif data_type == "image":
-        # For images, return basic file info
-        return f"Image file: {content.filename}, Size: {len(content.file.read())} bytes"
+        content.file.seek(0)
+        size = len(content.file.read())
+        content.file.seek(0)
+        return f"Image file: {content.filename}, Size: {size} bytes"
     return str(content)[:500]
 
 async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: str, session_dir) -> List[FileDataInfo]:
@@ -56,6 +58,7 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
     # Process web URLs if provided
     for url in web_urls:
         try:
+            logging.info(f"Processing URL: {url}")
             df = preprocessor.process_web_url(url)
             processed_data.append(
                 FileDataInfo(
@@ -67,16 +70,22 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                 )
             )
         except Exception as e:
+            logging.error(f"Error processing URL {url}: {str(e)}")
             raise Exception(f"Error processing URL {url}: {str(e)}")
     
     # Process uploaded files
     if files:
         for file in files:
             file_ext = file.filename.split('.')[-1].lower()
+            logging.info(f"Processing file: {file.filename} (type: {file.content_type}, extension: {file_ext})")
             
             try:
                 if file_ext in ['xlsx', 'xls', 'csv']:
-                    df = preprocessor.process_excel(file.file) if file_ext in ['xlsx', 'xls'] else preprocessor.process_csv(file.file)
+                    file.file.seek(0)
+                    if file_ext in ['xlsx', 'xls']:
+                        df = preprocessor.process_excel(file.file)
+                    else:
+                        df = preprocessor.process_csv(file.file)
                     processed_data.append(
                         FileDataInfo(
                             content=df,
@@ -87,6 +96,7 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                     )
                 
                 elif file_ext == 'json':
+                    file.file.seek(0)
                     json_content = json.loads(preprocessor.process_json(file.file))
                     processed_data.append(
                         FileDataInfo(
@@ -98,7 +108,11 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                     )
                 
                 elif file_ext in ['txt', 'docx']:
-                    content = preprocessor.process_docx(file.file) if file_ext == 'docx' else preprocessor.process_text(file.file)
+                    file.file.seek(0)
+                    if file_ext == 'docx':
+                        content = preprocessor.process_docx(file.file)
+                    else:
+                        content = preprocessor.process_text(file.file)
                     processed_data.append(
                         FileDataInfo(
                             content=content,
@@ -109,6 +123,7 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                     )
                 
                 elif file_ext in ['png', 'jpeg', 'jpg']:
+                    file.file.seek(0)
                     new_path = None
                     if file_ext == 'png':
                         new_path = preprocessor.process_image(
@@ -165,8 +180,12 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                             metadata={"is_readable": is_readable}
                         )
                     )
+                else:
+                    logging.warning(f"Unhandled file extension: {file_ext} for file {file.filename}")
+                    raise Exception(f"Unsupported file type: {file_ext}")
 
             except Exception as e:
+                logging.error(f"Error processing file {file.filename}: {str(e)}")
                 raise Exception(f"Error processing file {file.filename}: {str(e)}")
     
     return processed_data
@@ -201,17 +220,27 @@ async def process_query_endpoint(
     background_tasks: BackgroundTasks
 ) -> QueryResponse:
     try:
+        logging.info(f"Processing query with {len(request.files)} files")
+        
+        # Avoid logging the full request object
+        logging.debug(f"Query: {request.query[:100]}...")  # Only log first 100 chars
+        
         session_dir = temp_file_manager.get_temp_dir()
         
-        # Process files using the helper function
-        preprocessed_data = await preprocess_files(
-            files=request.files,
-            web_urls=request.web_urls,
-            query=request.query,
-            session_dir=session_dir
-        )
-        print("Files preprocessed")
-        
+        try:
+            preprocessed_data = await preprocess_files(
+                files=request.files,
+                web_urls=request.web_urls,
+                query=request.query,
+                session_dir=session_dir
+            )
+        except Exception as e:
+            logging.error(f"File preprocessing error: {e.__class__.__name__}")
+            return QueryResponse(
+                status="error",
+                message="Error processing uploaded files"
+            )
+
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
         result = process_query(
@@ -288,10 +317,11 @@ async def process_query_endpoint(
 
 
     except Exception as e:
-        logging.error(f"Error processing query: {str(e)}")
+        error_msg = "Error processing binary file" if isinstance(e, UnicodeDecodeError) else str(e)
+        logging.error(f"Process query error: {e.__class__.__name__}")
         return QueryResponse(
             status="error",
-            message=str(e)
+            message=error_msg
         )
 
 @router.get("/download/{filename}")

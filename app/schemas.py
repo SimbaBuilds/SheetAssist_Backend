@@ -19,12 +19,18 @@ class QueryRequest(BaseModel):
     output_preferences: OutputPreferences  # no longer Optional
 
 
+class FileMetadata(BaseModel):
+    """Basic metadata about an uploaded file"""
+    filename: str
+    content_type: str
+    size: int
+
 class FileInfo(BaseModel):
     """Information about a downloadable file"""
     file_path: str
     media_type: str
     filename: str
-    download_url: Optional[str] = None  # New field for download URL
+    download_url: Optional[str] = None
 
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
