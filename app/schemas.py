@@ -19,6 +19,24 @@ class QueryRequest(BaseModel):
     output_preferences: Optional[OutputPreferences] = None
 
 
+class FileInfo(BaseModel):
+    """Information about a downloadable file"""
+    file_path: str
+    media_type: str
+    filename: str
+
+class QueryResponse(BaseModel):
+    """Unified response model for all query processing results"""
+    status: str  # "success" or "error"
+    message: str  # Description of result or error message
+    data: Optional[Any] = None  # For online viewing of results
+    files: Optional[List[FileInfo]] = None  # For downloadable files
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+
 class FileDataInfo(BaseModel):
     """Pydantic model for storing information about data being processed"""
     content: Optional[Any] = None
@@ -39,17 +57,13 @@ class SandboxResult(BaseModel):
     print_output: str
     code: str
     error: Optional[str] = None
-    return_value: Any  # Can be a single value of any type or a tuple of any types
+    return_value: Any
     timed_out: bool
     return_value_snapshot: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True  # Allow any Python type for return_value
 
-
-class ProcessedQueryResult(BaseModel):
-    result: SandboxResult
-    message: str
 
 
 

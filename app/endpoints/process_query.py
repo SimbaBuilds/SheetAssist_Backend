@@ -1,10 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from typing import List, Optional, Any
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response
+from typing import List, Optional, Any, Union
 from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.schemas import FileDataInfo, ProcessedQueryResult
+from app.schemas import FileDataInfo, QueryResponse, FileInfo
 import json
 from app.utils.file_management import temp_file_manager
 from app.utils.vision_processing import VisionProcessor
@@ -12,9 +12,6 @@ import os
 import logging
 from app.schemas import QueryRequest
 from fastapi.responses import FileResponse
-import tempfile
-import csv
-import io
 import pandas as pd
 from app.utils.document_integrations import DocumentIntegrations
 from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv
@@ -185,10 +182,10 @@ async def handle_destination_upload(data: Any, destination_url: str) -> bool:
             elif "spreadsheets" in url_lower:
                 return await doc_integrations.append_to_google_sheet(data, destination_url)
         
-        elif "office.com" in url_lower or "sharepoint.com" in url_lower:
-            if "word" in url_lower:
+        elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+            if "docx" in url_lower:
                 return await doc_integrations.append_to_office_doc(data, destination_url)
-            elif "excel" in url_lower:
+            elif "xlsx" in url_lower:
                 return await doc_integrations.append_to_office_sheet(data, destination_url)
         
         raise ValueError(f"Unsupported destination URL type: {destination_url}")
@@ -197,113 +194,102 @@ async def handle_destination_upload(data: Any, destination_url: str) -> bool:
         logging.error(f"Failed to upload to destination: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-async def handle_output_preferences(result, output_preferences) -> Any:
-    """Handle different output preferences and return appropriate response"""
-    if not output_preferences:
-        return {
-            "message": "success", 
-            "result": (result.return_value.to_dict(orient='records')
-                      if hasattr(result.return_value, 'to_dict')
-                      else result.return_value)
-        }
-
-    if output_preferences.type == "download":
-        # Get the desired output format, defaulting based on data type
-        output_format = output_preferences.format
-        if not output_format:
-            if isinstance(result.return_value, pd.DataFrame):
-                output_format = 'csv'
-            elif isinstance(result.return_value, (dict, list)):
-                output_format = 'json'
-            else:
-                output_format = 'txt'
-
-        # Create temporary file in requested format
-        if output_format == 'pdf':
-            tmp_path = create_pdf(result.return_value)
-            media_type = 'application/pdf'
-        elif output_format == 'xlsx':
-            tmp_path = create_xlsx(result.return_value)
-            media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        elif output_format == 'docx':
-            tmp_path = create_docx(result.return_value)
-            media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        elif output_format == 'txt':
-            tmp_path = create_txt(result.return_value)
-            media_type = 'text/plain'
-        else:  # csv
-            tmp_path = create_csv(result.return_value)
-            media_type = 'text/csv'
-
-        return FileResponse(
-            tmp_path,
-            media_type=media_type,
-            filename=f'query_results.{output_format}'
-        )
-
-    elif output_preferences.destination_url:
-        # Handle destination URL upload
-        await handle_destination_upload(
-            result.return_value,
-            output_preferences.destination_url
-        )
-        return {
-            "message": "success",
-            "result": "Data uploaded successfully"
-        }
-
-    # Default online response
-    return {
-        "message": "success",
-        "result": (result.return_value.to_dict(orient='records')
-                  if hasattr(result.return_value, 'to_dict')
-                  else result.return_value)
-    }
-
-@router.post("/process_query", response_model=ProcessedQueryResult)
+@router.post("/process_query", response_model=QueryResponse)
 async def process_query_endpoint(
     request: QueryRequest,
-):
+) -> QueryResponse:
     try:
         # Create a session directory for this request
         session_dir = temp_file_manager.get_temp_dir()
         
         # Process files using the helper function
-        processed_data = await preprocess_files(
+        preprocessed_data = await preprocess_files(
             files=request.files,
             web_urls=request.web_urls,
             query=request.query,
             session_dir=session_dir
         )
+        print("Files preprocessed")
         
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
         result = process_query(
             query=request.query,
             sandbox=sandbox,
-            data=processed_data
+            data=preprocessed_data
         )
-        
+        print("Query processed")
         result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
 
-        
+        # Handle output based on preferences
+        if request.output_preferences:
+            if request.output_preferences.type == "download":
+                # Get the desired output format, defaulting based on data type
+                output_format = request.output_preferences.format
+                if not output_format:
+                    if isinstance(result.return_value, pd.DataFrame):
+                        output_format = 'csv'
+                    elif isinstance(result.return_value, (dict, list)):
+                        output_format = 'json'
+                    else:
+                        output_format = 'txt'
+
+                # Create temporary file in requested format
+                if output_format == 'pdf':
+                    tmp_path = create_pdf(result.return_value)
+                    media_type = 'application/pdf'
+                elif output_format == 'xlsx':
+                    tmp_path = create_xlsx(result.return_value)
+                    media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                elif output_format == 'docx':
+                    tmp_path = create_docx(result.return_value)
+                    media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                elif output_format == 'txt':
+                    tmp_path = create_txt(result.return_value)
+                    media_type = 'text/plain'
+                else:  # csv
+                    tmp_path = create_csv(result.return_value)
+                    media_type = 'text/csv'
+
+                return QueryResponse(
+                    status="success",
+                    message="File ready for download",
+                    files=[FileInfo(
+                        file_path=tmp_path,
+                        media_type=media_type,
+                        filename=f'query_results.{output_format}'
+                    )]
+                )
+
+            elif request.output_preferences.destination_url:
+                # Handle destination URL upload
+                await handle_destination_upload(
+                    result.return_value,
+                    request.output_preferences.destination_url
+                )
+                return QueryResponse(
+                    status="success",
+                    message="Data successfully uploaded to destination"
+                )
+
         # Clean up temporary files
         try:
             temp_file_manager.cleanup()
         except Exception as e:
             logging.error(f"Error cleaning up temporary files: {str(e)}")
         
-        print("\nOriginal Query:", 
-          result.original_query, "\nResult:", 
-          "\nOutput:", result.print_output, 
-          "\nCode:", result.code, 
-          "\nError:", result.error, 
-          "\nReturn Value Snapshot:", result.return_value_snapshot, 
-          "\nTimed Out:", result.timed_out, 
-          "\n\n")
-        
-        # Use the helper function to handle output preferences
-        return await handle_output_preferences(result, request.output_preferences)
+        # Default online response
+        return QueryResponse(
+            status="success",
+            message="Query processed successfully",
+            data=result.return_value.to_dict(orient='records')
+            if hasattr(result.return_value, 'to_dict')
+            else result.return_value
+        )
 
     except Exception as e:
-        return {"message": "error", "result": str(e)}
+        logging.error(f"Error processing query: {str(e)}")
+        return QueryResponse(
+            status="error",
+            message=str(e)
+        )
