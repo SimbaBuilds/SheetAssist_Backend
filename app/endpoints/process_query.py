@@ -262,16 +262,17 @@ async def process_query_endpoint(
                 session_dir=session_dir
             )
         except Exception as e:
-            # Safely handle binary-related errors
-            error_msg = (
-                "Error processing binary file" if isinstance(e, UnicodeDecodeError)
-                else str(e).split('\n')[0]  # Only take first line of error
-            )
-            logging.error(f"File preprocessing error: {e.__class__.__name__}: {error_msg}")
-            return QueryResponse(
-                status="error",
-                message=f"Error processing files: {error_msg}"
-            )
+            try:
+                error_msg = str(e)
+                if not error_msg.isascii() or len(error_msg) > 200:
+                    error_msg = f"Error processing files: {e.__class__.__name__}"
+                else:
+                    error_msg = error_msg.encode('ascii', 'ignore').decode('ascii')
+            except:
+                error_msg = "Error processing files"
+                
+            logging.error(f"File preprocessing error: {e.__class__.__name__}")
+            raise ValueError(error_msg)
 
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
@@ -349,15 +350,20 @@ async def process_query_endpoint(
 
 
     except Exception as e:
-        # Safely handle binary-related errors
-        error_msg = (
-            "Error processing binary file" if isinstance(e, UnicodeDecodeError)
-            else sanitize_error_message(e)
-        )
-        logging.error(f"Process query error: {e.__class__.__name__}: {error_msg}")
+        # Enhanced error handling for binary content
+        try:
+            error_msg = str(e)
+            if not error_msg.isascii() or len(error_msg) > 200:
+                error_msg = f"Error processing request: {e.__class__.__name__}"
+            else:
+                error_msg = error_msg.encode('ascii', 'ignore').decode('ascii')
+        except:
+            error_msg = "An unexpected error occurred"
+            
+        logging.error(f"Process query error: {e.__class__.__name__}")
         return QueryResponse(
             status="error",
-            message=f"Error processing request: {error_msg}"
+            message=error_msg
         )
 
 @router.get("/download/{filename}")

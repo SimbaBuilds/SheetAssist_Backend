@@ -9,7 +9,6 @@ import io
 from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
 from app.utils.vision_processing import VisionProcessor
-import re
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -32,15 +31,22 @@ class FilePreprocessor:
             
             # If it's a file-like object, read it directly into BytesIO
             if hasattr(file, 'read'):
-                content = file.read()
-                # Ensure we have bytes
-                if not isinstance(content, bytes):
-                    raise ValueError("Invalid file content")
-                file = io.BytesIO(content)
+                try:
+                    content = file.read()
+                    # Ensure we have bytes
+                    if not isinstance(content, bytes):
+                        raise ValueError("Invalid file content")
+                    file = io.BytesIO(content)
+                except Exception as e:
+                    raise ValueError("Error reading file content")
             
             return pd.read_excel(file)
         except Exception as e:
-            raise ValueError(f"Error processing Excel file: {str(e)}")
+            # Sanitize error message
+            error_msg = str(e)
+            if isinstance(error_msg, bytes) or len(error_msg) > 200:
+                error_msg = "Error processing Excel file"
+            raise ValueError(error_msg)
 
     @staticmethod
     def process_csv(file: Union[BinaryIO, str]) -> pd.DataFrame:
@@ -56,7 +62,7 @@ class FilePreprocessor:
         try:
             return pd.read_csv(file)
         except Exception as e:
-            raise ValueError(f"Error processing CSV file: {str(e)}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
     def process_json(file: Union[BinaryIO, str]) -> str:
@@ -77,7 +83,7 @@ class FilePreprocessor:
                 data = json.load(file)
             return json.dumps(data)
         except Exception as e:
-            raise ValueError(f"Error processing JSON file: {str(e)}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
     def process_text(file: Union[BinaryIO, str]) -> str:
@@ -90,12 +96,10 @@ class FilePreprocessor:
         Returns:
             str: File content as string
         """
-        # List of encodings to try
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         
         try:
             if isinstance(file, str):
-                # For file paths
                 for encoding in encodings:
                     try:
                         with open(file, 'r', encoding=encoding) as f:
@@ -103,9 +107,7 @@ class FilePreprocessor:
                     except UnicodeDecodeError:
                         continue
             else:
-                # For file objects
                 content = file.read()
-                # Don't print the content directly
                 for encoding in encodings:
                     try:
                         return content.decode(encoding)
@@ -117,8 +119,7 @@ class FilePreprocessor:
                 
             raise ValueError("Unable to decode file with any supported encoding")
         except Exception as e:
-            # Avoid including the binary content in the error message
-            raise ValueError(f"Error processing text file: {e.__class__.__name__}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
     def process_docx(file: Union[BinaryIO, str]) -> str:
@@ -138,7 +139,7 @@ class FilePreprocessor:
                 doc = docx.Document(io.BytesIO(file.read()))
             return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
         except Exception as e:
-            raise ValueError(f"Error processing Word document: {str(e)}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
     def process_image(file: Union[BinaryIO, str], output_path: str = None) -> str:
@@ -147,14 +148,16 @@ class FilePreprocessor:
             if isinstance(file, str):
                 img = Image.open(file)
             else:
-                # Ensure we're working with binary data
-                if hasattr(file, 'read'):
-                    content = file.read()
-                    if not isinstance(content, bytes):
-                        raise ValueError("Invalid image content")
-                    img = Image.open(io.BytesIO(content))
-                else:
-                    img = Image.open(file)
+                try:
+                    if hasattr(file, 'read'):
+                        content = file.read()
+                        if not isinstance(content, bytes):
+                            raise ValueError("Invalid image content")
+                        img = Image.open(io.BytesIO(content))
+                    else:
+                        img = Image.open(file)
+                except Exception:
+                    raise ValueError("Unable to read image file")
 
             if img.format == 'PNG' and output_path:
                 if img.mode in ('RGBA', 'P'):
@@ -164,7 +167,7 @@ class FilePreprocessor:
 
             return None
         except Exception as e:
-            raise ValueError(f"Error processing image: {str(e)}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
     def process_web_url(url: str) -> Union[pd.DataFrame, str]:
@@ -236,7 +239,7 @@ class FilePreprocessor:
                 raise ValueError(f"Unsupported content type: {content_type}")
                 
         except Exception as e:
-            raise ValueError(f"Error processing web URL: {str(e)}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
     def process_pdf(file: Union[BinaryIO, str], query: str = None) -> Tuple[str, str, bool]:
@@ -300,7 +303,7 @@ class FilePreprocessor:
             return vision_result["content"], "vision_extracted", False
 
         except Exception as e:
-            raise ValueError(f"Error processing PDF file: {str(e)}")
+            raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @classmethod
     def preprocess_file(cls, file: Union[BinaryIO, str], file_type: str, **kwargs) -> Union[pd.DataFrame, str]:
@@ -337,3 +340,15 @@ class FilePreprocessor:
             raise ValueError(f"Unsupported file type: {file_type}")
         
         return processor(file, **kwargs)
+
+    @staticmethod
+    def _sanitize_error(e: Exception) -> str:
+        """Sanitize error messages to prevent binary data leakage"""
+        try:
+            error_msg = str(e)
+            # If message contains binary data or is too long, return generic message
+            if not error_msg.isascii() or len(error_msg) > 200:
+                return f"Error processing file: {e.__class__.__name__}"
+            return error_msg.encode('ascii', 'ignore').decode('ascii')
+        except:
+            return "Error processing file"
