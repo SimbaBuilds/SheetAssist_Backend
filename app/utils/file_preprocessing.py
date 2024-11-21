@@ -93,6 +93,7 @@ class FilePreprocessor:
             else:
                 # For file objects
                 content = file.read()
+                # Don't print the content directly
                 for encoding in encodings:
                     try:
                         return content.decode(encoding)
@@ -104,7 +105,8 @@ class FilePreprocessor:
                 
             raise ValueError("Unable to decode file with any supported encoding")
         except Exception as e:
-            raise ValueError(f"Error processing text file: {str(e)}")
+            # Avoid including the binary content in the error message
+            raise ValueError(f"Error processing text file: {e.__class__.__name__}")
 
     @staticmethod
     def process_docx(file: Union[BinaryIO, str]) -> str:

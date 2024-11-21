@@ -25,4 +25,3 @@ azure-storage-blob
 azure-storage-file-share
 supabase
 google_auth_oauthlib
-python-magic

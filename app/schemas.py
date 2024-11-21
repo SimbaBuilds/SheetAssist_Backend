@@ -12,18 +12,20 @@ class OutputPreferences(BaseModel):
     destination_url: Optional[str] = None
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
 
+class FileMetadata(BaseModel):
+    """Metadata about an uploaded file from frontend"""
+    name: str
+    type: str  # MIME type
+    extension: str
+    size: int
+    index: int
+
 class QueryRequest(BaseModel):
     web_urls: Optional[List[str]] = []
-    files: Optional[List[UploadFile]] = []
+    files_metadata: Optional[List[FileMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional
 
-
-class FileMetadata(BaseModel):
-    """Basic metadata about an uploaded file"""
-    filename: str
-    content_type: str
-    size: int
 
 class FileInfo(BaseModel):
     """Information about a downloadable file"""
