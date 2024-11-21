@@ -78,11 +78,31 @@ class FilePreprocessor:
         Returns:
             str: File content as string
         """
+        # List of encodings to try
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
         try:
             if isinstance(file, str):
-                with open(file, 'r') as f:
-                    return f.read()
-            return file.read().decode('utf-8')
+                # For file paths
+                for encoding in encodings:
+                    try:
+                        with open(file, 'r', encoding=encoding) as f:
+                            return f.read()
+                    except UnicodeDecodeError:
+                        continue
+            else:
+                # For file objects
+                content = file.read()
+                for encoding in encodings:
+                    try:
+                        return content.decode(encoding)
+                    except UnicodeDecodeError:
+                        continue
+                
+                # If all encodings fail, try with error handling
+                return content.decode('utf-8', errors='replace')
+                
+            raise ValueError("Unable to decode file with any supported encoding")
         except Exception as e:
             raise ValueError(f"Error processing text file: {str(e)}")
 

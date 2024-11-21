@@ -16,6 +16,7 @@ import pandas as pd
 from app.utils.document_integrations import DocumentIntegrations
 from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv
 from fastapi import BackgroundTasks
+import magic  # Add this import at the top
 
 router = APIRouter()
 
@@ -54,6 +55,7 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
     """Helper function to preprocess files and web URLs"""
     preprocessor = FilePreprocessor()
     processed_data = []
+    mime = magic.Magic(mime=True)
     
     # Process web URLs if provided
     for url in web_urls:
@@ -76,13 +78,26 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
     # Process uploaded files
     if files:
         for file in files:
-            file_ext = file.filename.split('.')[-1].lower()
-            logging.info(f"Processing file: {file.filename} (type: {file.content_type}, extension: {file_ext})")
-            
             try:
-                if file_ext in ['xlsx', 'xls', 'csv']:
+                # Read the first few bytes to determine the file type
+                file_bytes = await file.read(1024)
+                file.seek(0)  # Reset file pointer
+                
+                detected_mime_type = mime.from_buffer(file_bytes)
+                file_ext = file.filename.split('.')[-1].lower()
+                
+                logging.info(f"Processing file: {file.filename}")
+                logging.info(f"Reported MIME type: {file.content_type}")
+                logging.info(f"Detected MIME type: {detected_mime_type}")
+                logging.info(f"File extension: {file_ext}")
+                
+                # Process based on MIME type
+                if detected_mime_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                        'application/vnd.ms-excel',
+                                        'text/csv',
+                                        'application/csv']:
                     file.file.seek(0)
-                    if file_ext in ['xlsx', 'xls']:
+                    if 'sheet' in detected_mime_type or 'excel' in detected_mime_type:
                         df = preprocessor.process_excel(file.file)
                     else:
                         df = preprocessor.process_csv(file.file)
@@ -95,7 +110,7 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                         )
                     )
                 
-                elif file_ext == 'json':
+                elif detected_mime_type in ['application/json', 'text/json']:
                     file.file.seek(0)
                     json_content = json.loads(preprocessor.process_json(file.file))
                     processed_data.append(
@@ -107,9 +122,10 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                         )
                     )
                 
-                elif file_ext in ['txt', 'docx']:
+                elif detected_mime_type in ['text/plain', 
+                                          'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
                     file.file.seek(0)
-                    if file_ext == 'docx':
+                    if 'wordprocessingml' in detected_mime_type:
                         content = preprocessor.process_docx(file.file)
                     else:
                         content = preprocessor.process_text(file.file)
@@ -122,10 +138,10 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                         )
                     )
                 
-                elif file_ext in ['png', 'jpeg', 'jpg']:
+                elif detected_mime_type.startswith('image/'):
                     file.file.seek(0)
                     new_path = None
-                    if file_ext == 'png':
+                    if detected_mime_type == 'image/png':
                         new_path = preprocessor.process_image(
                             file.file,
                             output_path=str(session_dir / f"{file.filename}.jpeg")
@@ -168,8 +184,8 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                         os.remove(image_path)
                     except Exception as e:
                         logging.warning(f"Failed to remove temporary file {image_path}: {e}")
-            
-                elif file_ext == 'pdf':
+                
+                elif detected_mime_type == 'application/pdf':
                     content, data_type, is_readable = preprocessor.process_pdf(file.file, query)
                     processed_data.append(
                         FileDataInfo(
@@ -181,8 +197,8 @@ async def preprocess_files(files: List[UploadFile], web_urls: List[str], query: 
                         )
                     )
                 else:
-                    logging.warning(f"Unhandled file extension: {file_ext} for file {file.filename}")
-                    raise Exception(f"Unsupported file type: {file_ext}")
+                    logging.warning(f"Unsupported MIME type: {detected_mime_type} for file {file.filename}")
+                    raise Exception(f"Unsupported file type: {detected_mime_type}")
 
             except Exception as e:
                 logging.error(f"Error processing file {file.filename}: {str(e)}")

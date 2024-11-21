@@ -308,6 +308,8 @@ python-dotenv==1.0.1
     #   -r requirements.in
     #   pydantic-settings
     #   uvicorn
+python-magic==0.4.27
+    # via -r requirements.in
 python-multipart==0.0.17
     # via fastapi
 pytz==2024.2
