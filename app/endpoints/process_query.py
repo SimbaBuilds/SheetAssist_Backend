@@ -244,12 +244,12 @@ async def handle_destination_upload(data: Any, destination_url: str) -> bool:
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_endpoint(
-    json: str = Form(...),
-    files: List[Dict[str, UploadFile]] = File(None),
+    json_data: str = Form(...),
+    files: List[UploadFile] = File(None),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ) -> QueryResponse:
     try:
-        request = QueryRequest(**json.loads(json))
+        request = QueryRequest(**json.loads(json_data))
         logging.info(f"Processing query with {len(request.files_metadata or [])} files")
         session_dir = temp_file_manager.get_temp_dir()
         
@@ -258,26 +258,22 @@ async def process_query_endpoint(
         
         # Process files if they exist
         if files:
-            for file_dict in files:
-                # Each file_dict should contain a single key-value pair
-                for key, file in file_dict.items():
-                    # Extract index from key (e.g., 'file_0' -> '0')
-                    index = int(key.split('_')[1])
-                    
-                    # Find corresponding metadata
-                    metadata = next((m for m in request.files_metadata if m.index == index), None)
-                    if not metadata:
-                        raise ValueError(f"No metadata found for file index: {index}")
-                    
-                    # Read and store file content
-                    content = await file.read()
-                    file_key = f"file_{index}"
-                    file_contents[file_key] = content
-                    
-                    # Reset file pointer
-                    await file.seek(0)
-                    
-                    logging.info(f"Processed file: {file.filename}, size: {len(content)} bytes")
+            for file in files:
+                # Find corresponding metadata using the file's index in the list
+                index = files.index(file)
+                metadata = next((m for m in request.files_metadata if m.index == index), None)
+                if not metadata:
+                    raise ValueError(f"No metadata found for file index: {index}")
+                
+                # Read and store file content
+                content = await file.read()
+                file_key = f"file_{index}"
+                file_contents[file_key] = content
+                
+                # Reset file pointer
+                await file.seek(0)
+                
+                logging.info(f"Processed file: {file.filename}, size: {len(content)} bytes")
         
         try:
             preprocessed_data = await preprocess_files(
