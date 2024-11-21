@@ -16,8 +16,12 @@ import pandas as pd
 from app.utils.document_integrations import DocumentIntegrations
 from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv
 from fastapi import BackgroundTasks
+import io
 
 router = APIRouter()
+def sanitize_error_message(e: Exception) -> str:
+    """Sanitize error messages to remove binary data"""
+    return str(e).encode('ascii', 'ignore').decode('ascii')
 
 def _create_return_value_snapshot(self) -> str:
     """Creates a string representation of the return value"""
@@ -59,19 +63,21 @@ async def preprocess_files(files: List[UploadFile], files_metadata: List[FileMet
     for url in web_urls:
         try:
             logging.info(f"Processing URL: {url}")
-            df = preprocessor.process_web_url(url)
+            content = preprocessor.process_web_url(url)
+            data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
             processed_data.append(
                 FileDataInfo(
-                    content=df,
-                    snapshot=get_data_snapshot(df, "DataFrame"),
-                    data_type="DataFrame",
+                    content=content,
+                    snapshot=get_data_snapshot(content, data_type),
+                    data_type=data_type,
                     original_file_name=url.split('/')[-1],
                     url=url
                 )
             )
         except Exception as e:
-            logging.error(f"Error processing URL {url}: {str(e)}")
-            raise Exception(f"Error processing URL {url}: {str(e)}")
+            error_msg = sanitize_error_message(e)
+            logging.error(f"Error processing URL {url}: {error_msg}")
+            raise Exception(f"Error processing URL {url}: {error_msg}")
     
     # Process uploaded files using metadata
     if files and files_metadata:
@@ -87,116 +93,130 @@ async def preprocess_files(files: List[UploadFile], files_metadata: List[FileMet
                 # Reset file pointer before processing
                 file.file.seek(0)
                 
-                # Process based on exact MIME types
-                match metadata.type:
-                    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' | 'text/csv':
-                        df = preprocessor.process_excel(file.file) if metadata.type.endswith('sheet') else preprocessor.process_csv(file.file)
-                        processed_data.append(
-                            FileDataInfo(
-                                content=df,
-                                snapshot=get_data_snapshot(df, "DataFrame"),
-                                data_type="DataFrame",
-                                original_file_name=file.filename
+                try:
+                    # Process based on exact MIME types
+                    match metadata.type:
+                        case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' | 'text/csv':
+                            
+                            file.file.seek(0)  # Reset file pointer
+                            if metadata.type.endswith('sheet'):
+                                # Create a BytesIO object from the raw bytes
+                                content = file.file.read()
+                                excel_file = io.BytesIO(content)
+                                df = pd.read_excel(excel_file)
+                            else:
+                                df = preprocessor.process_csv(file.file)
+                                
+                            processed_data.append(
+                                FileDataInfo(
+                                    content=df,
+                                    snapshot=get_data_snapshot(df, "DataFrame"),
+                                    data_type="DataFrame",
+                                    original_file_name=file.filename
+                                )
                             )
-                        )
-                    
-                    case 'image/png' | 'image/jpeg' | 'image/jpg':
-                        new_path = preprocessor.process_image(
-                            file.file,
-                            output_path=str(session_dir / f"{file.filename}.jpeg")
-                        )
-                        
-                        vision_processor = VisionProcessor()
-                        image_path = new_path or str(session_dir / file.filename)
-                        
-                        # Save the original file if it wasn't converted
-                        if not new_path:
-                            with open(image_path, 'wb') as f:
-                                file.file.seek(0)
-                                f.write(file.file.read())
-                        
-                        vision_result = vision_processor.process_image_with_vision(
-                            image_path=image_path,
-                            query=query
-                        )
-                        
-                        if vision_result["status"] == "error":
-                            raise Exception(f"Vision API error: {vision_result['error']}")
-                        
-                        processed_data.append(
-                            FileDataInfo(
-                                content=vision_result["content"],
-                                snapshot=get_data_snapshot(file, "image"),
-                                data_type="image",
-                                original_file_name=file.filename,
-                                new_file_path=new_path
-                            )
-                        )
 
-                        # Clean up temporary files
-                        if new_path:
-                            try:
-                                os.remove(new_path)
-                            except Exception as e:
-                                logging.warning(f"Failed to remove temporary file {new_path}: {e}")
-                        try:
-                            os.remove(image_path)
-                        except Exception as e:
-                            logging.warning(f"Failed to remove temporary file {image_path}: {e}")
-                    
-                    case 'application/json':
-                        json_content = preprocessor.process_json(file.file)
-                        processed_data.append(
-                            FileDataInfo(
-                                content=json_content,
-                                snapshot=get_data_snapshot(json_content, "json"),
-                                data_type="json",
-                                original_file_name=file.filename
+                        case 'image/png' | 'image/jpeg' | 'image/jpg':
+                            # Create a copy of the file content
+                            file.file.seek(0)
+                            file_copy = io.BytesIO(file.file.read())
+                            
+                            new_path = preprocessor.process_image(
+                                file_copy,
+                                output_path=str(session_dir / f"{file.filename}.jpeg")
                             )
-                        )
-                    
-                    case 'text/plain':
-                        text_content = preprocessor.process_text(file.file)
-                        processed_data.append(
-                            FileDataInfo(
-                                content=text_content,
-                                snapshot=get_data_snapshot(text_content, "text"),
-                                data_type="text",
-                                original_file_name=file.filename
+                            
+                            vision_processor = VisionProcessor()
+                            image_path = new_path or str(session_dir / file.filename)
+                            
+                            # Save the original file if it wasn't converted
+                            if not new_path:
+                                with open(image_path, 'wb') as f:
+                                    file_copy.seek(0)
+                                    f.write(file_copy.read())
+                            
+                            vision_result = vision_processor.process_image_with_vision(
+                                image_path=image_path,
+                                query=query
                             )
-                        )
-                    
-                    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-                        doc_content = preprocessor.process_docx(file.file)
-                        processed_data.append(
-                            FileDataInfo(
-                                content=doc_content,
-                                snapshot=get_data_snapshot(doc_content, "text"),
-                                data_type="text",
-                                original_file_name=file.filename
+                            
+                            if vision_result["status"] == "error":
+                                raise ValueError(f"Vision API error: {vision_result['error']}")
+                            
+                            processed_data.append(
+                                FileDataInfo(
+                                    content=vision_result["content"],
+                                    snapshot=get_data_snapshot(file, "image"),
+                                    data_type="image",
+                                    original_file_name=file.filename,
+                                    new_file_path=new_path
+                                )
                             )
-                        )
-                    
-                    case 'application/pdf':
-                        content, data_type, is_readable = preprocessor.process_pdf(file.file, query)
-                        processed_data.append(
-                            FileDataInfo(
-                                content=content,
-                                snapshot=get_data_snapshot(content, "text"),
-                                data_type=data_type,
-                                original_file_name=file.filename,
-                                metadata={"is_readable": is_readable}
+                        
+                        case 'application/json':
+                            json_content = preprocessor.process_json(file.file)
+                            processed_data.append(
+                                FileDataInfo(
+                                    content=json_content,
+                                    snapshot=get_data_snapshot(json_content, "json"),
+                                    data_type="json",
+                                    original_file_name=file.filename
+                                )
                             )
-                        )
-                    
-                    case _:
-                        logging.warning(f"Unsupported MIME type: {metadata.type} for file {file.filename}")
-                        raise ValueError(f"Unsupported file type: {metadata.type}")
+                        
+                        case 'text/plain':
+                            text_content = preprocessor.process_text(file.file)
+                            processed_data.append(
+                                FileDataInfo(
+                                    content=text_content,
+                                    snapshot=get_data_snapshot(text_content, "text"),
+                                    data_type="text",
+                                    original_file_name=file.filename
+                                )
+                            )
+                        
+                        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+                            doc_content = preprocessor.process_docx(file.file)
+                            processed_data.append(
+                                FileDataInfo(
+                                    content=doc_content,
+                                    snapshot=get_data_snapshot(doc_content, "text"),
+                                    data_type="text",
+                                    original_file_name=file.filename
+                                )
+                            )
+                        
+                        case 'application/pdf':
+                            content, data_type, is_readable = preprocessor.process_pdf(file.file, query)
+                            processed_data.append(
+                                FileDataInfo(
+                                    content=content,
+                                    snapshot=get_data_snapshot(content, "text"),
+                                    data_type=data_type,
+                                    original_file_name=file.filename,
+                                    metadata={"is_readable": is_readable}
+                                )
+                            )
+                        
+                        case _:
+                            logging.warning(f"Unsupported MIME type: {metadata.type} for file {file.filename}")
+                            raise ValueError(f"Unsupported file type: {metadata.type}")
+
+
+                except UnicodeDecodeError:
+                    raise ValueError(f"Cannot process binary content in file: {file.filename}")
+                
+                except Exception as e:
+                    # Sanitize any error messages containing binary data
+                    error_msg = sanitize_error_message(e)
+                    raise ValueError(f"Error processing file {file.filename}: {error_msg}")
 
             except Exception as e:
-                logging.error(f"Error processing file {file.filename}: {str(e)}")
-                raise Exception(f"Error processing file {file.filename}: {str(e)}")
-    
+                # Ensure the error message is clean of binary data
+                error_msg = str(e).encode('ascii', 'ignore').decode('ascii')
+                logging.error(f"Error processing file {file.filename}: {error_msg}")
+                raise ValueError(f"Error processing file {file.filename}: {error_msg}")
+
     return processed_data
 
 async def handle_destination_upload(data: Any, destination_url: str) -> bool:
@@ -231,9 +251,6 @@ async def process_query_endpoint(
     try:
         logging.info(f"Processing query with {len(request.files_metadata or [])} files")
         
-        # Avoid logging the full request object
-        logging.debug(f"Query: {request.query[:100]}...")  # Only log first 100 chars
-        
         session_dir = temp_file_manager.get_temp_dir()
         
         try:
@@ -253,7 +270,7 @@ async def process_query_endpoint(
             logging.error(f"File preprocessing error: {e.__class__.__name__}: {error_msg}")
             return QueryResponse(
                 status="error",
-                message=error_msg
+                message=f"Error processing files: {error_msg}"
             )
 
         # Process the query with the processed data
@@ -332,15 +349,15 @@ async def process_query_endpoint(
 
 
     except Exception as e:
-        # Safely handle any other errors
+        # Safely handle binary-related errors
         error_msg = (
             "Error processing binary file" if isinstance(e, UnicodeDecodeError)
-            else str(e).split('\n')[0]  # Only take first line of error
+            else sanitize_error_message(e)
         )
         logging.error(f"Process query error: {e.__class__.__name__}: {error_msg}")
         return QueryResponse(
             status="error",
-            message=error_msg
+            message=f"Error processing request: {error_msg}"
         )
 
 @router.get("/download/{filename}")

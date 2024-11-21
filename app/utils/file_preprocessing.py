@@ -26,6 +26,18 @@ class FilePreprocessor:
             pd.DataFrame: Processed data as DataFrame
         """
         try:
+            # For FastAPI UploadFile, we need to read the binary content first
+            if hasattr(file, 'file'):
+                file = file.file
+            
+            # If it's a file-like object, read it directly into BytesIO
+            if hasattr(file, 'read'):
+                content = file.read()
+                # Ensure we have bytes
+                if not isinstance(content, bytes):
+                    raise ValueError("Invalid file content")
+                file = io.BytesIO(content)
+            
             return pd.read_excel(file)
         except Exception as e:
             raise ValueError(f"Error processing Excel file: {str(e)}")
@@ -135,8 +147,14 @@ class FilePreprocessor:
             if isinstance(file, str):
                 img = Image.open(file)
             else:
-                file.seek(0)
-                img = Image.open(file)
+                # Ensure we're working with binary data
+                if hasattr(file, 'read'):
+                    content = file.read()
+                    if not isinstance(content, bytes):
+                        raise ValueError("Invalid image content")
+                    img = Image.open(io.BytesIO(content))
+                else:
+                    img = Image.open(file)
 
             if img.format == 'PNG' and output_path:
                 if img.mode in ('RGBA', 'P'):
@@ -144,12 +162,12 @@ class FilePreprocessor:
                 img.save(output_path, 'JPEG')
                 return output_path
 
-            return file
+            return None
         except Exception as e:
             raise ValueError(f"Error processing image: {str(e)}")
 
     @staticmethod
-    def process_web_url(url: str) -> pd.DataFrame:
+    def process_web_url(url: str) -> Union[pd.DataFrame, str]:
         """
         Process web URLs (Google Sheets/Docs, Microsoft Excel/Word Online) and convert to appropriate format
         
