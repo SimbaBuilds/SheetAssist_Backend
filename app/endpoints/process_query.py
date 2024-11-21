@@ -54,7 +54,13 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
         return f"Image file: {content.filename}, Size: {size} bytes"
     return str(content)[:500]
 
-async def preprocess_files(files: List[Dict[str, bytes]], files_metadata: List[FileMetadata], web_urls: List[str], query: str, session_dir) -> List[FileDataInfo]:
+async def preprocess_files(
+    files: Dict[str, bytes],
+    files_metadata: List[FileMetadata],
+    web_urls: List[str],
+    query: str,
+    session_dir
+) -> List[FileDataInfo]:
     """Helper function to preprocess files and web URLs"""
     preprocessor = FilePreprocessor()
     processed_data = []
@@ -83,122 +89,125 @@ async def preprocess_files(files: List[Dict[str, bytes]], files_metadata: List[F
     if files and files_metadata:
         for metadata in files_metadata:
             try:
-                # Find corresponding file in the list of dictionaries
-                file_dict = next(
-                    (f for f in files if f.get(f"file_{metadata.index}")), 
-                    None
-                )
-                
-                if not file_dict:
+                file_key = f"file_{metadata.index}"
+                if file_key not in files:
                     raise ValueError(f"No file content found for file: {metadata.name}")
                 
-                # Get the bytes content directly
-                file_content = file_dict[f"file_{metadata.index}"]
-                
+                file_content = files[file_key]
                 logging.info(f"Processing file: {metadata.name} with type: {metadata.type}")
                 
-                # Create BytesIO object from file content
-                file_io = io.BytesIO(file_content)
+                # Add debug logging
+                logging.debug(f"File content type: {type(file_content)}")
+                logging.debug(f"Metadata type: {metadata.type}")
                 
                 try:
-                    # Process based on exact MIME types
+                    # Ensure file_content is bytes
+                    if not isinstance(file_content, bytes):
+                        raise ValueError(f"Invalid file content type for {metadata.name}")
+
                     match metadata.type:
                         case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' | 'text/csv':
-                            if metadata.type.endswith('sheet'):
-                                excel_file = io.BytesIO(file_content)
-                                df = pd.read_excel(excel_file)
-                            else:
-                                df = preprocessor.process_csv(file_io)
+                            try:
+                                # Create a new BytesIO object from the bytes
+                                file_obj = io.BytesIO(file_content)
                                 
-                            processed_data.append(
-                                FileDataInfo(
-                                    content=df,
-                                    snapshot=get_data_snapshot(df, "DataFrame"),
-                                    data_type="DataFrame",
-                                    original_file_name=metadata.name
+                                if metadata.type.endswith('sheet'):
+                                    content = preprocessor.process_excel(file_obj)
+                                else:
+                                    content = preprocessor.process_csv(file_obj)
+                                
+                                processed_data.append(
+                                    FileDataInfo(
+                                        content=content,
+                                        snapshot=get_data_snapshot(content, "DataFrame"),
+                                        data_type="DataFrame",
+                                        original_file_name=metadata.name
+                                    )
                                 )
-                            )
-
+                            finally:
+                                file_obj.close()
+                        
                         case 'image/png' | 'image/jpeg' | 'image/jpg':
-                            # Create a copy of the file content
-                            file_copy = io.BytesIO(file_content)
-                            
-                            new_path = preprocessor.process_image(
-                                file_copy,
-                                output_path=str(session_dir / f"{metadata.name}.jpeg")
-                            )
-                            
-                            vision_processor = VisionProcessor()
-                            image_path = new_path or str(session_dir / metadata.name)
-                            
-                            # Save the original file if it wasn't converted
-                            if not new_path:
-                                with open(image_path, 'wb') as f:
-                                    file_copy.seek(0)
-                                    f.write(file_copy.read())
-                            
-                            vision_result = vision_processor.process_image_with_vision(
-                                image_path=image_path,
-                                query=query
-                            )
-                            
-                            if vision_result["status"] == "error":
-                                raise ValueError(f"Vision API error: {vision_result['error']}")
-                            
-                            processed_data.append(
-                                FileDataInfo(
-                                    content=vision_result["content"],
-                                    snapshot=get_data_snapshot(file_io, "image"),
-                                    data_type="image",
-                                    original_file_name=metadata.name,
-                                    new_file_path=new_path
+                            with io.BytesIO(file_content) as file_obj:
+                                new_path = preprocessor.process_image(
+                                    file_obj,
+                                    output_path=str(session_dir / f"{metadata.name}.jpeg")
                                 )
-                            )
+                                
+                                image_path = new_path or str(session_dir / metadata.name)
+                                
+                                # Save the original file if it wasn't converted
+                                if not new_path:
+                                    with open(image_path, 'wb') as f:
+                                        f.write(file_content)
+                                
+                                vision_processor = VisionProcessor()
+                                vision_result = vision_processor.process_image_with_vision(
+                                    image_path=image_path,
+                                    query=query
+                                )
+                                
+                                if vision_result["status"] == "error":
+                                    raise ValueError(f"Vision API error: {vision_result['error']}")
+                                
+                                processed_data.append(
+                                    FileDataInfo(
+                                        content=vision_result["content"],
+                                        snapshot=f"Image file: {metadata.name}, Size: {len(file_content)} bytes",
+                                        data_type="image",
+                                        original_file_name=metadata.name,
+                                        new_file_path=new_path
+                                    )
+                                )
                         
                         case 'application/json':
-                            json_content = preprocessor.process_json(file_io)
-                            processed_data.append(
-                                FileDataInfo(
-                                    content=json_content,
-                                    snapshot=get_data_snapshot(json_content, "json"),
-                                    data_type="json",
-                                    original_file_name=metadata.name
+                            with io.BytesIO(file_content) as file_obj:
+                                json_content = preprocessor.process_json(file_obj)
+                                processed_data.append(
+                                    FileDataInfo(
+                                        content=json_content,
+                                        snapshot=get_data_snapshot(json_content, "json"),
+                                        data_type="json",
+                                        original_file_name=metadata.name
+                                    )
                                 )
-                            )
                         
                         case 'text/plain':
-                            text_content = preprocessor.process_text(file_io)
-                            processed_data.append(
-                                FileDataInfo(
-                                    content=text_content,
-                                    snapshot=get_data_snapshot(text_content, "text"),
-                                    data_type="text",
-                                    original_file_name=metadata.name
+                            with io.BytesIO(file_content) as file_obj:
+                                text_content = preprocessor.process_text(file_obj)
+                                processed_data.append(
+                                    FileDataInfo(
+                                        content=text_content,
+                                        snapshot=get_data_snapshot(text_content, "text"),
+                                        data_type="text",
+                                        original_file_name=metadata.name
+                                    )
                                 )
-                            )
                         
                         case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-                            doc_content = preprocessor.process_docx(file_io)
-                            processed_data.append(
-                                FileDataInfo(
-                                    content=doc_content,
-                                    snapshot=get_data_snapshot(doc_content, "text"),
-                                    data_type="text",
-                                    original_file_name=metadata.name
+                            with io.BytesIO(file_content) as file_obj:
+                                doc_content = preprocessor.process_docx(file_obj)
+                                processed_data.append(
+                                    FileDataInfo(
+                                        content=doc_content,
+                                        snapshot=get_data_snapshot(doc_content, "text"),
+                                        data_type="text",
+                                        original_file_name=metadata.name
+                                    )
                                 )
-                            )
                         
                         case 'application/pdf':
-                            content, data_type, is_readable = preprocessor.process_pdf(file_io, query)
-                            processed_data.append(
-                                FileDataInfo(
-                                    content=content,
-                                    snapshot=get_data_snapshot(content, "text"),
-                                    data_type=data_type,
-                                    original_file_name=metadata.name,
-                                    metadata={"is_readable": is_readable}
+                            with io.BytesIO(file_content) as file_obj:
+                                content, data_type, is_readable = preprocessor.process_pdf(file_obj, query)
+                                processed_data.append(
+                                    FileDataInfo(
+                                        content=content,
+                                        snapshot=get_data_snapshot(content, "text"),
+                                        data_type=data_type,
+                                        original_file_name=metadata.name,
+                                        metadata={"is_readable": is_readable}
+                                    )
                                 )
-                            )
                         
                         case _:
                             logging.warning(f"Unsupported MIME type: {metadata.type} for file {metadata.name}")

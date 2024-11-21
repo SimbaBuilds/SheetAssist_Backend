@@ -25,28 +25,30 @@ class FilePreprocessor:
             pd.DataFrame: Processed data as DataFrame
         """
         try:
-            # For FastAPI UploadFile, we need to read the binary content first
-            if hasattr(file, 'file'):
-                file = file.file
+            # If it's a string path, read directly
+            if isinstance(file, str):
+                return pd.read_excel(file)
             
-            # If it's a file-like object, read it directly into BytesIO
+            # If it's bytes or BytesIO, ensure proper handling
+            if isinstance(file, (bytes, bytearray)):
+                return pd.read_excel(io.BytesIO(file))
+            
+            # If it's a file-like object
             if hasattr(file, 'read'):
-                try:
-                    content = file.read()
-                    # Ensure we have bytes
-                    if not isinstance(content, bytes):
-                        raise ValueError("Invalid file content")
-                    file = io.BytesIO(content)
-                except Exception as e:
-                    raise ValueError("Error reading file content")
+                content = file.read()
+                if isinstance(content, bytes):
+                    return pd.read_excel(io.BytesIO(content))
+                else:
+                    raise ValueError("Invalid file content type")
             
-            return pd.read_excel(file)
+            raise ValueError(f"Unsupported file type: {type(file)}")
+            
         except Exception as e:
             # Sanitize error message
             error_msg = str(e)
             if isinstance(error_msg, bytes) or len(error_msg) > 200:
                 error_msg = "Error processing Excel file"
-            raise ValueError(error_msg)
+            raise ValueError(f"Excel processing error: {error_msg}")
 
     @staticmethod
     def process_csv(file: Union[BinaryIO, str]) -> pd.DataFrame:
