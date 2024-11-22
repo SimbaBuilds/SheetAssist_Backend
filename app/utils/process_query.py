@@ -60,13 +60,13 @@ def process_query(
         error_attempts = 1
         while result.error and error_attempts < 6:
             print("Error:", result.error)
+            print("\n\nError attempt:", error_attempts)
             suggested_code = gen_from_error(result)
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
             print("New code:", cleaned_code)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
             error_attempts += 1
-            print("Error attempt:", error_attempts)
             if error_attempts == 5:
                 result.error = "Execution failed after 5 attempts"
                 return result

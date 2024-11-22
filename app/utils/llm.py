@@ -38,6 +38,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Generate Python code for the given query.   
                 Do not forget your imports.
+                Don't try to concatenate to an empty dataframe -- create a new one instead.
                 Use the simplest method to return the desired value.
                 Do not include print statements -- ensure the last line returns the desired value.
                 If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
@@ -72,6 +73,7 @@ def gen_from_error(result: SandboxResult) -> str:
                 Error:\n{result.error}"""}
         ]
     )
+    print(f"LLM called with original query, code, and error:\n{result.original_query}\n\n{result.code}\n\n{result.error}\n\n")
     return response.choices[0].message.content
 
 # generate new code from analysis -- result goes to a_s_r
