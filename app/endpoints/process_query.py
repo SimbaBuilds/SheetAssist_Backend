@@ -55,7 +55,7 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
     return str(content)[:500]
 
 async def preprocess_files(
-    files: Dict[str, bytes],
+    files: List[UploadFile],
     files_metadata: List[FileMetadata],
     web_urls: List[str],
     query: str,
@@ -69,7 +69,7 @@ async def preprocess_files(
     for url in web_urls:
         try:
             logging.info(f"Processing URL: {url}")
-            content = preprocessor.process_web_url(url)
+            content = preprocessor.preprocess_file(url, 'web_url')
             data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
             processed_data.append(
                 FileDataInfo(
@@ -89,139 +89,58 @@ async def preprocess_files(
     if files and files_metadata:
         for metadata in files_metadata:
             try:
-                file_key = f"file_{metadata.index}"
-                if file_key not in files:
-                    raise ValueError(f"No file content found for file: {metadata.name}")
+                file = files[metadata.index]
+                logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
                 
-                file_content = files[file_key]
-                logging.info(f"Processing file: {metadata.name} with type: {metadata.type}")
+                # Map MIME types to FilePreprocessor types
+                mime_to_processor = {
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+                    'text/csv': 'csv',
+                    'application/json': 'json',
+                    'text/plain': 'txt',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+                    'image/png': 'png',
+                    'image/jpeg': 'jpg',
+                    'image/jpg': 'jpg',
+                    'application/pdf': 'pdf'
+                }
                 
-                # Add debug logging
-                logging.debug(f"File content type: {type(file_content)}")
-                logging.debug(f"Metadata type: {metadata.type}")
-                
-                try:
-                    # Ensure file_content is bytes
-                    if not isinstance(file_content, bytes):
-                        raise ValueError(f"Invalid file content type for {metadata.name}")
+                file_type = mime_to_processor.get(metadata.type)
+                if not file_type:
+                    raise ValueError(f"Unsupported MIME type: {metadata.type}")
 
-                    match metadata.type:
-                        case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' | 'text/csv':
-                            try:
-                                # Create a new BytesIO object from the bytes
-                                file_obj = io.BytesIO(file_content)
-                                
-                                if metadata.type.endswith('sheet'):
-                                    content = preprocessor.process_excel(file_obj)
-                                else:
-                                    content = preprocessor.process_csv(file_obj)
-                                
-                                processed_data.append(
-                                    FileDataInfo(
-                                        content=content,
-                                        snapshot=get_data_snapshot(content, "DataFrame"),
-                                        data_type="DataFrame",
-                                        original_file_name=metadata.name
-                                    )
-                                )
-                            finally:
-                                file_obj.close()
-                        
-                        case 'image/png' | 'image/jpeg' | 'image/jpg':
-                            with io.BytesIO(file_content) as file_obj:
-                                new_path = preprocessor.process_image(
-                                    file_obj,
-                                    output_path=str(session_dir / f"{metadata.name}.jpeg")
-                                )
-                                
-                                image_path = new_path or str(session_dir / metadata.name)
-                                
-                                # Save the original file if it wasn't converted
-                                if not new_path:
-                                    with open(image_path, 'wb') as f:
-                                        f.write(file_content)
-                                
-                                vision_processor = VisionProcessor()
-                                vision_result = vision_processor.process_image_with_vision(
-                                    image_path=image_path,
-                                    query=query
-                                )
-                                
-                                if vision_result["status"] == "error":
-                                    raise ValueError(f"Vision API error: {vision_result['error']}")
-                                
-                                processed_data.append(
-                                    FileDataInfo(
-                                        content=vision_result["content"],
-                                        snapshot=f"Image file: {metadata.name}, Size: {len(file_content)} bytes",
-                                        data_type="image",
-                                        original_file_name=metadata.name,
-                                        new_file_path=new_path
-                                    )
-                                )
-                        
-                        case 'application/json':
-                            with io.BytesIO(file_content) as file_obj:
-                                json_content = preprocessor.process_json(file_obj)
-                                processed_data.append(
-                                    FileDataInfo(
-                                        content=json_content,
-                                        snapshot=get_data_snapshot(json_content, "json"),
-                                        data_type="json",
-                                        original_file_name=metadata.name
-                                    )
-                                )
-                        
-                        case 'text/plain':
-                            with io.BytesIO(file_content) as file_obj:
-                                text_content = preprocessor.process_text(file_obj)
-                                processed_data.append(
-                                    FileDataInfo(
-                                        content=text_content,
-                                        snapshot=get_data_snapshot(text_content, "text"),
-                                        data_type="text",
-                                        original_file_name=metadata.name
-                                    )
-                                )
-                        
-                        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-                            with io.BytesIO(file_content) as file_obj:
-                                doc_content = preprocessor.process_docx(file_obj)
-                                processed_data.append(
-                                    FileDataInfo(
-                                        content=doc_content,
-                                        snapshot=get_data_snapshot(doc_content, "text"),
-                                        data_type="text",
-                                        original_file_name=metadata.name
-                                    )
-                                )
-                        
-                        case 'application/pdf':
-                            with io.BytesIO(file_content) as file_obj:
-                                content, data_type, is_readable = preprocessor.process_pdf(file_obj, query)
-                                processed_data.append(
-                                    FileDataInfo(
-                                        content=content,
-                                        snapshot=get_data_snapshot(content, "text"),
-                                        data_type=data_type,
-                                        original_file_name=metadata.name,
-                                        metadata={"is_readable": is_readable}
-                                    )
-                                )
-                        
-                        case _:
-                            logging.warning(f"Unsupported MIME type: {metadata.type} for file {metadata.name}")
-                            raise ValueError(f"Unsupported file type: {metadata.type}")
+                # Handle special cases for images and PDFs that need additional parameters
+                kwargs = {}
+                if file_type in ['png', 'jpg', 'jpeg']:
+                    kwargs['output_path'] = str(session_dir / f"{metadata.name}.jpeg")
+                elif file_type == 'pdf':
+                    kwargs['query'] = query
 
-                except UnicodeDecodeError:
-                    raise ValueError(f"Cannot process binary content in file: {metadata.name}")
-                
-                except Exception as e:
-                    error_msg = sanitize_error_message(e)
-                    raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
+                # Process the file
+                with io.BytesIO(file.file.read()) as file_obj:
+                    content = preprocessor.preprocess_file(file_obj, file_type, **kwargs)
+
+                # Handle different return types
+                if file_type == 'pdf':
+                    content, data_type, is_readable = content  # Unpack PDF processor return values
+                    metadata_info = {"is_readable": is_readable}
+                else:
+                    data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
+                    metadata_info = {}
+
+                processed_data.append(
+                    FileDataInfo(
+                        content=content,
+                        snapshot=get_data_snapshot(content, data_type),
+                        data_type=data_type,
+                        original_file_name=metadata.name,
+                        metadata=metadata_info,
+                        new_file_path=kwargs.get('output_path')  # For images
+                    )
+                )
 
             except Exception as e:
-                error_msg = str(e).encode('ascii', 'ignore').decode('ascii')
+                error_msg = sanitize_error_message(e)
                 logging.error(f"Error processing file {metadata.name}: {error_msg}")
                 raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
 
@@ -262,31 +181,9 @@ async def process_query_endpoint(
         logging.info(f"Processing query with {len(request.files_metadata or [])} files")
         session_dir = temp_file_manager.get_temp_dir()
         
-        # Dictionary to store file contents
-        file_contents: Dict[str, bytes] = {}
-        
-        # Process files if they exist
-        if files:
-            for file in files:
-                # Find corresponding metadata using the file's index in the list
-                index = files.index(file)
-                metadata = next((m for m in request.files_metadata if m.index == index), None)
-                if not metadata:
-                    raise ValueError(f"No metadata found for file index: {index}")
-                
-                # Read and store file content
-                content = await file.read()
-                file_key = f"file_{index}"
-                file_contents[file_key] = content
-                
-                # Reset file pointer
-                await file.seek(0)
-                
-                logging.info(f"Processed file: {file.filename}, size: {len(content)} bytes")
-        
         try:
             preprocessed_data = await preprocess_files(
-                files=file_contents,
+                files=files,
                 files_metadata=request.files_metadata,
                 web_urls=request.web_urls,
                 query=request.query,

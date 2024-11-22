@@ -9,46 +9,31 @@ import io
 from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
 from app.utils.vision_processing import VisionProcessor
+from tempfile import SpooledTemporaryFile
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
     
     @staticmethod
-    def process_excel(file: Union[BinaryIO, str]) -> pd.DataFrame:
+    def process_excel(file: Union[SpooledTemporaryFile, str, Path]) -> pd.DataFrame:
         """
         Process Excel files (.xlsx) and convert to pandas DataFrame
         
         Args:
-            file: File object or path to Excel file
+            file: SpooledTemporaryFile from UploadFile.file, or path to Excel file
             
         Returns:
             pd.DataFrame: Processed data as DataFrame
         """
         try:
-            # If it's a string path, read directly
-            if isinstance(file, str):
+            # For file paths
+            if isinstance(file, (str, Path)):
                 return pd.read_excel(file)
-            
-            # If it's bytes or BytesIO, ensure proper handling
-            if isinstance(file, (bytes, bytearray)):
-                return pd.read_excel(io.BytesIO(file))
-            
-            # If it's a file-like object
-            if hasattr(file, 'read'):
-                content = file.read()
-                if isinstance(content, bytes):
-                    return pd.read_excel(io.BytesIO(content))
-                else:
-                    raise ValueError("Invalid file content type")
-            
-            raise ValueError(f"Unsupported file type: {type(file)}")
-            
+            # For SpooledTemporaryFile from UploadFile.file
+            return pd.read_excel(file)
         except Exception as e:
-            # Sanitize error message
-            error_msg = str(e)
-            if isinstance(error_msg, bytes) or len(error_msg) > 200:
-                error_msg = "Error processing Excel file"
-            raise ValueError(f"Excel processing error: {error_msg}")
+            # raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise e
 
     @staticmethod
     def process_csv(file: Union[BinaryIO, str]) -> pd.DataFrame:
@@ -144,11 +129,23 @@ class FilePreprocessor:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
-    def process_image(file: Union[BinaryIO, str], output_path: str = None) -> str:
-        """Process image files (.png, .jpg, .jpeg)"""
+    def process_image(file: Union[BinaryIO, str], output_path: str = None, query: str = None) -> Tuple[str, str]:
+        """
+        Process image files (.png, .jpg, .jpeg) and extract content using vision processing
+        
+        Args:
+            file: File object or path to file
+            output_path: Optional path to save converted image
+            query: Optional query for vision processing
+            
+        Returns:
+            Tuple[str, str]: (vision_content, new_file_path)
+        """
         try:
+            # Process the image file
             if isinstance(file, str):
                 img = Image.open(file)
+                image_path = file
             else:
                 try:
                     if hasattr(file, 'read'):
@@ -161,13 +158,37 @@ class FilePreprocessor:
                 except Exception:
                     raise ValueError("Unable to read image file")
 
+            # Convert PNG to JPEG if needed
+            new_path = None
             if img.format == 'PNG' and output_path:
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGB')
                 img.save(output_path, 'JPEG')
-                return output_path
+                new_path = output_path
+                image_path = new_path
+            else:
+                # Save the original file if it wasn't converted
+                image_path = output_path or str(Path(output_path).parent / "original_image")
+                with open(image_path, 'wb') as f:
+                    if isinstance(file, str):
+                        with open(file, 'rb') as src:
+                            f.write(src.read())
+                    else:
+                        file.seek(0)
+                        f.write(file.read())
 
-            return None
+            # Process with vision
+            vision_processor = VisionProcessor()
+            vision_result = vision_processor.process_image_with_vision(
+                image_path=image_path,
+                query=query
+            )
+
+            if vision_result["status"] == "error":
+                raise ValueError(f"Vision API error: {vision_result['error']}")
+
+            return vision_result["content"], new_path
+
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
