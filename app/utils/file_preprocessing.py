@@ -15,25 +15,34 @@ class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
     
     @staticmethod
-    def process_excel(file: Union[SpooledTemporaryFile, str, Path]) -> pd.DataFrame:
+    def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO]) -> pd.DataFrame:
         """
         Process Excel files (.xlsx) and convert to pandas DataFrame
         
         Args:
-            file: SpooledTemporaryFile from UploadFile.file, or path to Excel file
+            file: File object (SpooledTemporaryFile, BytesIO) or path to Excel file
             
         Returns:
             pd.DataFrame: Processed data as DataFrame
         """
         try:
+            print("Attempting to process excel file")
             # For file paths
             if isinstance(file, (str, Path)):
                 return pd.read_excel(file)
-            # For SpooledTemporaryFile from UploadFile.file
-            return pd.read_excel(file)
+            
+            # For file objects (BytesIO, SpooledTemporaryFile)
+            if hasattr(file, 'seek'):
+                file.seek(0)
+                # Create a BytesIO object from the file content
+                content = file.read()
+                if isinstance(content, str):
+                    raise ValueError("File content must be bytes")
+                return pd.read_excel(io.BytesIO(content))
+            
+            raise ValueError("Unsupported file object type")
         except Exception as e:
-            # raise ValueError(FilePreprocessor._sanitize_error(e))
-            raise e
+            raise ValueError(f"Error processing Excel file: {str(e)}")
 
     @staticmethod
     def process_csv(file: Union[BinaryIO, str]) -> pd.DataFrame:
@@ -187,7 +196,7 @@ class FilePreprocessor:
             if vision_result["status"] == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
-            return vision_result["content"], new_path
+            return vision_result["content"]
 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))

@@ -118,6 +118,7 @@ async def preprocess_files(
 
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
+                    file_obj.seek(0)  # Reset the file pointer to the beginning
                     content = preprocessor.preprocess_file(file_obj, file_type, **kwargs)
 
                 # Handle different return types
@@ -180,7 +181,7 @@ async def process_query_endpoint(
         request = QueryRequest(**json.loads(json_data))
         logging.info(f"Processing query with {len(request.files_metadata or [])} files")
         session_dir = temp_file_manager.get_temp_dir()
-        
+        print("Calling preprocess_files")
         try:
             preprocessed_data = await preprocess_files(
                 files=files,

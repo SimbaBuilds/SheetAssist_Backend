@@ -48,7 +48,7 @@ app.include_router(process_query.router)
 # Example usage
 if __name__ == "__main__":    
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="localhost", port=port)
+    uvicorn.run("app.main:app", host="localhost", port=port, reload=True)
 
 
 
