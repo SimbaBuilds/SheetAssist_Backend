@@ -6,6 +6,7 @@ import contextlib
 from typing import Optional
 from app.schemas import SandboxResult
 from app.utils.code_processing import transform_ast
+from datetime import datetime
 
 
 class EnhancedPythonInterpreter:
@@ -24,7 +25,7 @@ class EnhancedPythonInterpreter:
             'openpyxl': __import__('openpyxl'),
             'math': __import__('math'),
             'statistics': __import__('statistics'),
-            'datetime': __import__('datetime'),
+            'datetime': __import__('datetime').datetime,
             'json': __import__('json'),
             'csv': __import__('csv'),
             'PyPDF2': __import__('PyPDF2'),
@@ -80,7 +81,7 @@ class EnhancedPythonInterpreter:
                 }
                 self.whitelist = {
                     'pandas', 'numpy', 'PyMuPDF', 'openpyxl',
-                    'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
+                    'datetime', 'datetime.datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
                     'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
                     'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
                     'fitz', 'io', 're', 'chardet', 'tabula', 'zipfile'  # Added new packages

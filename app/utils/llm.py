@@ -22,28 +22,30 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
         data_description = ""
         for idx, file_data in enumerate(data):
             var_name = f'data_{idx}' if idx > 0 else 'data'
-            data_description += f"\n{var_name} ({file_data.data_type}):\n{file_data.snapshot}\n"
+            data_description += f"\nVariable Name: {var_name}\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n"
         
         user_message = f"Available Data:{data_description}\n\nQuery: {query}"
 
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
-            {"role": "system", "content": """Generate Python code for the given query. 
+            {"role": "system", "content": """ 
                 You are being given a preprocessed version of the user provided files.
                 The generated code should be enclosed in one set of triple backticks.
-                Do not forget your imports.
                 The data is available in variables named 'data', 'data_1', 'data_2', etc.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
+                Generate Python code for the given query.   
+                Do not forget your imports.
+                Use the simplest method to return the desired value.
                 Do not include print statements -- ensure the last line returns the desired value.
-                If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variables. 
+                If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
              """},
             {"role": "user", "content": user_message}
         ]
     )
-    print(f"LLM called with message: {user_message}\nCode generated from query: {response.choices[0].message.content}")
+    print(f"LLM called with message: {user_message}\nCode generated from query: \n {response.choices[0].message.content}")
     
     if not response or not response.choices:
         raise ValueError("Empty response from OpenAI API")
@@ -80,12 +82,12 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
         messages=[
             {"role": "system", "content": """Analyze the result of the provided error free code that did not 
                 satisfy the user's original query.  Then, return a new script to try.
-                The generated code should be enclosed in one set of triple backticks.
-                Do not forget your imports.
                 The data is available in variables named 'data', 'data_1', 'data_2', etc.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
+                The generated code should be enclosed in one set of triple backticks.
+                Do not forget your imports.
                 Do not include print statements -- ensure the last line returns the desired value."""},
             {"role": "user", "content": f""" Here is the original user query, code, and LLM produced analysis:
                 Original Query:\n{result.original_query}\n\n
