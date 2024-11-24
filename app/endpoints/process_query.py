@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.schemas import FileDataInfo, QueryResponse, FileInfo, FileMetadata
+from app.schemas import FileDataInfo, QueryResponse, FileInfo, FileMetadata, TruncatedSandboxResult
 import json
 from app.utils.file_management import temp_file_manager
 from app.utils.vision_processing import VisionProcessor
@@ -211,8 +211,8 @@ async def process_query_endpoint(
             data=preprocessed_data
         )
         result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
-        print("Query processed")
-        print("Output preferences:", request.output_preferences.type)
+        print("Query processed with return value:", result.return_value, "and error:", result.error)
+        print("Output preferences type:", request.output_preferences.type, "and format:", request.output_preferences.format)
         # Handle output based on type
         if request.output_preferences.type == "download":
             # Get the desired output format, defaulting based on data type
@@ -246,8 +246,16 @@ async def process_query_endpoint(
             temp_file_manager.mark_for_cleanup(tmp_path, session_dir)
             background_tasks.add_task(temp_file_manager.cleanup_marked)
             
+
+            truncated_result = TruncatedSandboxResult(
+                original_query=result.original_query,
+                print_output=result.print_output,
+                error=result.error,
+                timed_out=result.timed_out,
+                return_value_snapshot=result.return_value_snapshot
+            )
             return QueryResponse(
-                result = result,
+                result = truncated_result,
                 status="success",
                 message="File ready for download",
                 files=[FileInfo(
@@ -271,9 +279,10 @@ async def process_query_endpoint(
             temp_file_manager.cleanup_marked()  # Clean up immediately
 
             return QueryResponse(
-                result = result,
+                result = truncated_result,
                 status="success",
-                message="Data successfully uploaded to destination"
+                message="Data successfully uploaded to destination",
+                files=None
             )
         
         else:
@@ -293,8 +302,10 @@ async def process_query_endpoint(
             
         logging.error(f"Process query error: {e.__class__.__name__}")
         return QueryResponse(
+            result = truncated_result,
             status="error",
-            message=error_msg
+            message= "an error occurred while processing your request -- please try again",
+            files=None
         )
 
 @router.get("/download/{filename}")

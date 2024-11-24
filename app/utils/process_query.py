@@ -58,17 +58,17 @@ def process_query(
         
         # Error handling for initial execution
         error_attempts = 1
-        while result.error and error_attempts < 6:
-            print("Error:", result.error)
+        while result.error and error_attempts < 3: #CHANGE BACK TO 6 LATER
             print("\n\nError attempt:", error_attempts)
-            suggested_code = gen_from_error(result)
+            suggested_code = gen_from_error(result, error_attempts)
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
             print("New code:", cleaned_code)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
+            print("Error:", result.error)
             error_attempts += 1
             if error_attempts == 5:
-                result.error = "Execution failed after 5 attempts"
+                result.error = "Request failed -- please try a more specific prompt"
                 return result
             
         # Analysis and improvement loop
@@ -129,13 +129,13 @@ def process_query(
                 error_attempts += 1
                 print("Error attempt:", error_attempts)
                 if error_attempts == 5:
-                    result.error = "Execution failed after 5 attempts"
+                    result.error = "Request failed -- please try a more specific prompt"
                     return result      
                     
             analysis_attempts += 1
             print("Analysis attempt:", analysis_attempts)
             if analysis_attempts == 5:
-                result.error = "Analysis failed after 5 attempts"
+                result.error = "Request failed -- please try a more specific prompt"
                 return result
 
         return result

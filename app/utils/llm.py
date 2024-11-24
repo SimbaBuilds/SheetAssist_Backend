@@ -54,7 +54,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
     return response.choices[0].message.content
 
 # generate new code from error -- result goes to sandbox
-def gen_from_error(result: SandboxResult) -> str:
+def gen_from_error(result: SandboxResult, error_attempts: int) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     response = client.chat.completions.create(
         model="gpt-4o",  
@@ -74,7 +74,8 @@ def gen_from_error(result: SandboxResult) -> str:
                 Error:\n{result.error}"""}
         ]
     )
-    print(f"LLM called with original query, code, and error:\n{result.original_query}\n\n{result.code}\n\n{result.error}\n\n")
+    print(f"""Gen from error called -- attempt {error_attempts}, query: \n{result.original_query} 
+          \ncode: \n{result.code} \nerror: \n{result.error}""")
     return response.choices[0].message.content
 
 # generate new code from analysis -- result goes to a_s_r

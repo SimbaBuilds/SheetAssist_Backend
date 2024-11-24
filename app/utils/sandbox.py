@@ -33,7 +33,6 @@ class EnhancedPythonInterpreter:
             're': __import__('re'),      # For regular expressions
             'chardet': __import__('chardet'),  # For character encoding detection
             'tabula': __import__('tabula'),  # For extracting tables from PDFs
-            'zipfile': __import__('zipfile')  # For handling compressed files
         }
     
     # method to define dangerous builtins
@@ -83,7 +82,7 @@ class EnhancedPythonInterpreter:
                     'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
                     'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
                     'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
-                    'fitz', 'io', 're', 'chardet', 'tabula', 'zipfile'  # Added new packages
+                    'fitz', 'io', 're', 'chardet', 'tabula'  # Added new packages
                 }
 
             def find_spec(self, fullname, path, target=None):

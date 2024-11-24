@@ -57,6 +57,13 @@ class SandboxResult(BaseModel):
     class Config:
         arbitrary_types_allowed = True  # Allow any Python type for return_value
 
+class TruncatedSandboxResult(BaseModel):
+    original_query: str 
+    print_output: Optional[str] = None
+    error: Optional[str] = None
+    timed_out: Optional[bool] = None
+    return_value_snapshot: Optional[str] = None
+
 class FileInfo(BaseModel):
     """Information about a downloadable file"""
     file_path: str
@@ -67,7 +74,7 @@ class FileInfo(BaseModel):
 
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
-    result: SandboxResult
+    result: TruncatedSandboxResult
     status: str  # "success" or "error"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files
