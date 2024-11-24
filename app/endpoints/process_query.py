@@ -247,6 +247,7 @@ async def process_query_endpoint(
             background_tasks.add_task(temp_file_manager.cleanup_marked)
             
             return QueryResponse(
+                result = result,
                 status="success",
                 message="File ready for download",
                 files=[FileInfo(
@@ -270,6 +271,7 @@ async def process_query_endpoint(
             temp_file_manager.cleanup_marked()  # Clean up immediately
 
             return QueryResponse(
+                result = result,
                 status="success",
                 message="Data successfully uploaded to destination"
             )
@@ -296,7 +298,7 @@ async def process_query_endpoint(
         )
 
 @router.get("/download/{filename}")
-async def download_file(filename: str):
+async def download_file(filename: str) -> FileResponse:
     """
     Serve a processed file for download
     

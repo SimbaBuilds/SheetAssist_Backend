@@ -27,21 +27,6 @@ class QueryRequest(BaseModel):
     output_preferences: OutputPreferences  # no longer Optional
 
 
-class FileInfo(BaseModel):
-    """Information about a downloadable file"""
-    file_path: str
-    media_type: str
-    filename: str
-    download_url: Optional[str] = None
-
-class QueryResponse(BaseModel):
-    """Unified response model for all query processing results"""
-    status: str  # "success" or "error"
-    message: str  # Description of result or error message
-    files: Optional[List[FileInfo]] = None  # For downloadable files
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 
@@ -72,6 +57,20 @@ class SandboxResult(BaseModel):
     class Config:
         arbitrary_types_allowed = True  # Allow any Python type for return_value
 
+class FileInfo(BaseModel):
+    """Information about a downloadable file"""
+    file_path: str
+    media_type: str
+    filename: str
+    download_url: Optional[str] = None
 
 
+class QueryResponse(BaseModel):
+    """Unified response model for all query processing results"""
+    result: SandboxResult
+    status: str  # "success" or "error"
+    message: str  # Description of result or error message
+    files: Optional[List[FileInfo]] = None  # For downloadable files
 
+    class Config:
+        arbitrary_types_allowed = True

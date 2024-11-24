@@ -38,7 +38,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Generate Python code for the given query.   
                 Do not forget your imports.
-                Don't try to concatenate to an empty dataframe -- create a new one instead.
+                Don't try to concatenate to an empty dataframe.  Instead, create a new dataframe.
                 Use the simplest method to return the desired value.
                 Do not include print statements -- ensure the last line returns the desired value.
                 If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
@@ -64,6 +64,7 @@ def gen_from_error(result: SandboxResult) -> str:
                 Do not forget your imports.
                 The data is available in variables named 'data', 'data_1', 'data_2', etc.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
+                Don't try to concatenate to an empty dataframe.  Instead, create a new dataframe.
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
@@ -90,6 +91,7 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
+                Don't try to concatenate to an empty dataframe.  Instead, create a new dataframe.
                 Do not include print statements -- ensure the last line returns the desired value."""},
             {"role": "user", "content": f""" Here is the original user query, code, and LLM produced analysis:
                 Original Query:\n{result.original_query}\n\n
