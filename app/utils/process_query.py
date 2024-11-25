@@ -31,6 +31,7 @@ def process_query(
     try:
         # Initial code generation and execution
         suggested_code = gen_from_query(query, data)
+        unprocessed_llm_output = suggested_code 
         cleaned_code = extract_code(suggested_code)
         result = sandbox.execute_code(query, cleaned_code, namespace=namespace)  
         
@@ -45,8 +46,8 @@ def process_query(
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
             print("Error:", result.error)
             error_attempts += 1
-            if error_attempts == 5:
-                result.error = "Request failed -- please try a more specific prompt"
+            if error_attempts == 3:  #CHANGE TO 6 LATER
+                result.error = "Failed to interpret query. Please try rephrasing your request."
                 return result
             
         # Analysis and improvement loop
@@ -107,13 +108,13 @@ def process_query(
                 error_attempts += 1
                 print("Error attempt:", error_attempts)
                 if error_attempts == 5:
-                    result.error = "Request failed -- please try a more specific prompt"
+                    result.error = "Failed to interpret query. Please try rephrasing your request."
                     return result      
                     
             analysis_attempts += 1
             print("Analysis attempt:", analysis_attempts)
             if analysis_attempts == 5:
-                result.error = "Request failed -- please try a more specific prompt"
+                result.error = "Failed to interpret query. Please try rephrasing your request."
                 return result
 
         return result

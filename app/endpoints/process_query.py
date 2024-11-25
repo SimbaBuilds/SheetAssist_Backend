@@ -213,6 +213,10 @@ async def process_query_endpoint(
         )
         result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
         print("Query processed with return value snapshot:", result.return_value_snapshot, "and error:", result.error)
+
+        if result.error:
+            raise HTTPException(status_code=400, detail=result.error + " -- please try rephrasing your request")
+        
         print("Output preferences type:", request.output_preferences.type, "and format:", request.output_preferences.format)
         # Handle output based on type
         if request.output_preferences.type == "download":
@@ -228,19 +232,19 @@ async def process_query_endpoint(
 
             # Create temporary file in requested format
             if output_format == 'pdf':
-                tmp_path = create_pdf(result.return_value)
+                tmp_path = create_pdf(result.return_value, request.query, preprocessed_data)
                 media_type = 'application/pdf'
             elif output_format == 'xlsx':
-                tmp_path = create_xlsx(result.return_value)
+                tmp_path = create_xlsx(result.return_value, request.query, preprocessed_data)
                 media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             elif output_format == 'docx':
-                tmp_path = create_docx(result.return_value)
+                tmp_path = create_docx(result.return_value, request.query, preprocessed_data)
                 media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             elif output_format == 'txt':
-                tmp_path = create_txt(result.return_value)
+                tmp_path = create_txt(result.return_value, request.query, preprocessed_data)
                 media_type = 'text/plain'
             else:  # csv
-                tmp_path = create_csv(result.return_value)
+                tmp_path = create_csv(result.return_value, request.query, preprocessed_data)
                 media_type = 'text/csv'
 
             # Add cleanup task but DON'T execute immediately

@@ -136,7 +136,8 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
         messages=[
             {"role": "system", "content": """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.
                 The data can be of any type (DataFrame, string, list, etc.).
-                Respond with either "yes, the result satisfies the user's original query" 
+                File creation will be handled after this step: dataframes will later be converted to csv, xlsx etc... text will later be converted to txt, docx, etc... so do not judge based on return object type or whether a file was created.
+                Respond with either "yes, the result seems to satisfy the user's query" 
                 or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does not satisfy the user's original query]"
              """},
             {"role": "user", "content": f""" 
@@ -187,5 +188,35 @@ def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
     # Parse the JSON response and return the boolean
     result = json.loads(response.choices[0].message.content)
     return result["is_positive"], analysis_result
+
+def file_namer(query: str, data: List[FileDataInfo]) -> str:
+    """Generate a suitable filename for the query result"""
+    
+    if data and len(data) > 0:
+        data_description = ""
+        for idx, file_data in enumerate(data):
+            var_name = f'data_{idx}' if idx > 0 else 'data'
+            data_description += f"\nVariable Name: {var_name}\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n"
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",  # Using smaller model since this is a simple task
+        messages=[
+            {"role": "system", "content": """Generate a short, descriptive filename (without extension) for the data being processed.
+                The filename should be:
+                - Lowercase
+                - Use underscores instead of spaces
+                - Be descriptive but concise (max 3 underscore separated words)
+                - Avoid special characters
+                Return only the filename, nothing else."""},
+            {"role": "user", "content": f"""Based on this query and data, suggest a filename:
+                Query: {query}
+                Available Data: {data_description}"""}
+        ]
+    )
+    
+    filename = response.choices[0].message.content.strip().lower()
+    # Ensure filename is clean and safe
+    filename = "".join(c for c in filename if c.isalnum() or c in ['_', '-'])
+    return filename
 
 
