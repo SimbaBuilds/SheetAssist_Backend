@@ -16,7 +16,6 @@ if not os.getenv("OPENAI_API_KEY"):
 # generate code from user query -- result goes to sandbox
 def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
     
-    user_message = query
     if data and len(data) > 0:
         # Build data description for multiple files
         data_description = ""
@@ -24,29 +23,30 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
             var_name = f'data_{idx}' if idx > 0 else 'data'
             data_description += f"\nVariable Name: {var_name}\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n"
         
-        user_message = f"Available Data:{data_description}\n\nQuery: {query}"
 
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """ 
-                You are being given a preprocessed version of the user provided files.
+                You are a Python code generator that can read and process data from user provided files given a query.
+                You are being given a preprocessed version of user provided files.
+                The data is available in variables named 'data', 'data_1', 'data_2', etc.  
+                Assume all data variables mentioned in the query already exist -- don't check for existence.
                 The generated code should be enclosed in one set of triple backticks.
-                The data is available in variables named 'data', 'data_1', 'data_2', etc.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
+                Don't try to concatenate to an empty dataframe.  Instead, create a new dataframe.
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
-                Generate Python code for the given query.   
                 Do not forget your imports.
-                Don't try to concatenate to an empty dataframe.  Instead, create a new dataframe.
                 Use the simplest method to return the desired value.
                 Do not include print statements -- ensure the last line returns the desired value.
                 If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
+                Generate Python code for the given query.   
              """},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": f"Available Data:\n{data_description}\n\nQuery:\n{query}"}
         ]
     )
-    print(f"LLM called with message: {user_message}\nCode generated from query: \n {response.choices[0].message.content}")
+    print(f"LLM called with available data: {data_description} and query: {query} \nCode generated from query: \n {response.choices[0].message.content}")
     
     if not response or not response.choices:
         raise ValueError("Empty response from OpenAI API")
@@ -54,8 +54,17 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
     return response.choices[0].message.content
 
 # generate new code from error -- result goes to sandbox
-def gen_from_error(result: SandboxResult, error_attempts: int) -> str:
+def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDataInfo]) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
+    
+    if data and len(data) > 0:
+    # Build data description for multiple files
+        data_description = ""
+        for idx, file_data in enumerate(data):
+            var_name = f'data_{idx}' if idx > 0 else 'data'
+            data_description += f"\nVariable Name: {var_name}\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n"
+
+    
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
@@ -68,7 +77,8 @@ def gen_from_error(result: SandboxResult, error_attempts: int) -> str:
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
-            {"role": "user", "content": f""" Here is the original user query, code, and error:
+            {"role": "user", "content": f""" Here is the original available data, user query, code, and error:
+                Available Data:\n{data_description}\n\n
                 Original Query:\n{result.original_query}\n\n
                 Code:\n{result.code}\n\n
                 Error:\n{result.error}"""}
@@ -79,8 +89,16 @@ def gen_from_error(result: SandboxResult, error_attempts: int) -> str:
     return response.choices[0].message.content
 
 # generate new code from analysis -- result goes to a_s_r
-def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
+def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[FileDataInfo]) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
+    
+    if data and len(data) > 0:
+    # Build data description for multiple files
+        data_description = ""
+        for idx, file_data in enumerate(data):
+            var_name = f'data_{idx}' if idx > 0 else 'data'
+            data_description += f"\nVariable Name: {var_name}\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n"    
+    
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
@@ -94,9 +112,10 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str) -> str:
                 Do not forget your imports.
                 Don't try to concatenate to an empty dataframe.  Instead, create a new dataframe.
                 Do not include print statements -- ensure the last line returns the desired value."""},
-            {"role": "user", "content": f""" Here is the original user query, code, and LLM produced analysis:
+            {"role": "user", "content": f""" Here is the original user query, available data, code, and LLM produced analysis:
                 Original Query:\n{result.original_query}\n\n
-                Code:\n{result.code}\n
+                Available Data:\n{data_description}\n\n
+                Code:\n{result.code}\n\n
                 Analysis:\n{analysis_result}"""}
         ]
     )

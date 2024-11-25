@@ -179,6 +179,7 @@ async def process_query_endpoint(
 ) -> QueryResponse:
     try:
         request = QueryRequest(**json.loads(json_data))
+        print
         logging.info(f"Processing query with {len(request.files_metadata or [])} files")
         session_dir = temp_file_manager.get_temp_dir()
         print("Calling preprocess_files")
@@ -211,7 +212,7 @@ async def process_query_endpoint(
             data=preprocessed_data
         )
         result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
-        print("Query processed with return value:", result.return_value, "and error:", result.error)
+        print("Query processed with return value snapshot:", result.return_value_snapshot, "and error:", result.error)
         print("Output preferences type:", request.output_preferences.type, "and format:", request.output_preferences.format)
         # Handle output based on type
         if request.output_preferences.type == "download":
@@ -242,11 +243,12 @@ async def process_query_endpoint(
                 tmp_path = create_csv(result.return_value)
                 media_type = 'text/csv'
 
-            # Mark files for cleanup after response is sent
-            temp_file_manager.mark_for_cleanup(tmp_path, session_dir)
+            # Add cleanup task but DON'T execute immediately
             background_tasks.add_task(temp_file_manager.cleanup_marked)
             
-
+            # Update download URL to match client expectations
+            download_url = f"/download?file_path={tmp_path}"
+            
             truncated_result = TruncatedSandboxResult(
                 original_query=result.original_query,
                 print_output=result.print_output,
@@ -255,14 +257,14 @@ async def process_query_endpoint(
                 return_value_snapshot=result.return_value_snapshot
             )
             return QueryResponse(
-                result = truncated_result,
+                result=truncated_result,
                 status="success",
                 message="File ready for download",
                 files=[FileInfo(
                     file_path=str(tmp_path),
                     media_type=media_type,
-                    filename=f'query_results.{output_format}',
-                    download_url=f"/api/process_query/download/query_results.{output_format}"
+                    filename=os.path.basename(tmp_path),
+                    download_url=download_url  # Updated download URL format
                 )]
             )
 
@@ -276,10 +278,11 @@ async def process_query_endpoint(
                 request.output_preferences.destination_url
             )
 
-            temp_file_manager.cleanup_marked()  # Clean up immediately
+            # Only cleanup immediately for online type
+            temp_file_manager.cleanup_marked()
 
             return QueryResponse(
-                result = truncated_result,
+                result=truncated_result,
                 status="success",
                 message="Data successfully uploaded to destination",
                 files=None
@@ -308,43 +311,44 @@ async def process_query_endpoint(
             files=None
         )
 
-@router.get("/download/{filename}")
-async def download_file(filename: str) -> FileResponse:
+@router.get("/download")
+async def download_file(
+    file_path: str,
+    background_tasks: BackgroundTasks
+) -> FileResponse:
     """
     Serve a processed file for download
     
     Args:
-        filename: Name of the file to download
+        file_path: Full path to the file to download
+        background_tasks: FastAPI background tasks handler
     """
     try:
-        # Get the base directory where temporary files are stored
-        base_dir = temp_file_manager.base_dir
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        # Determine the media type based on file extension
+        filename = os.path.basename(file_path)
+        extension = filename.split('.')[-1].lower()
+        media_types = {
+            'pdf': 'application/pdf',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt': 'text/plain',
+            'csv': 'text/csv'
+        }
         
-        # Search for the file in all session directories
-        for session_dir in base_dir.glob("session_*"):
-            file_path = session_dir / filename
-            if file_path.exists():
-                # Determine the media type based on file extension
-                extension = filename.split('.')[-1].lower()
-                media_types = {
-                    'pdf': 'application/pdf',
-                    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    'txt': 'text/plain',
-                    'csv': 'text/csv'
-                }
-                
-                media_type = media_types.get(extension, 'application/octet-stream')
-                
-                # Return the file as a response
-                return FileResponse(
-                    path=str(file_path),
-                    media_type=media_type,
-                    filename=filename,
-                    background=None  # Don't delete the file immediately after sending
-                )
+        media_type = media_types.get(extension, 'application/octet-stream')
         
-        raise HTTPException(status_code=404, detail="File not found")
+        # Add cleanup task to run after file is sent
+        background_tasks.add_task(temp_file_manager.cleanup_marked)
+        
+        # Return the file as a response
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=filename
+        )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error serving file: {str(e)}")

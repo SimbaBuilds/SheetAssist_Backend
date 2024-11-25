@@ -5,26 +5,6 @@ from typing import List
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 
-def _preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensures DataFrame has proper structure and handles NA values appropriately"""
-    if isinstance(df, pd.DataFrame):
-        if df.empty:
-            # If DataFrame is empty but has columns, preserve them
-            if len(df.columns) > 0:
-                return df
-            # If completely empty, create with default structure
-            return pd.DataFrame({'placeholder': []})
-        else:
-            # Handle NA values based on column dtype
-            for column in df.columns:
-                if df[column].dtype == 'object' or df[column].dtype == 'string':
-                    df[column] = df[column].fillna('')
-                elif df[column].dtype in ['int64', 'int32']:
-                    df[column] = df[column].fillna(0)
-                elif df[column].dtype in ['float64', 'float32']:
-                    df[column] = df[column].fillna(0.0)
-                # Add more type handling as needed
-    return df
 
 def process_query(
     query: str, 
@@ -40,8 +20,6 @@ def process_query(
         for idx, file_data in enumerate(data):
             var_name = f'data_{idx}' if idx > 0 else 'data'
             # Preprocess DataFrame before adding to namespace
-            if isinstance(file_data.content, pd.DataFrame):
-                file_data.content = _preprocess_dataframe(file_data.content)
             namespace[var_name] = file_data.content
             
             # Print information about the data
@@ -59,8 +37,8 @@ def process_query(
         # Error handling for initial execution
         error_attempts = 1
         while result.error and error_attempts < 3: #CHANGE BACK TO 6 LATER
-            print("\n\nError attempt:", error_attempts)
-            suggested_code = gen_from_error(result, error_attempts)
+            print(f"\n\nError attempt {error_attempts}:")
+            suggested_code = gen_from_error(result, error_attempts, data)
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
             print("New code:", cleaned_code)
@@ -101,7 +79,7 @@ def process_query(
             if success:
                 #SUCCESS
                 print("\nSuccess!\n")
-                print("Unprocessed LLM output:\n", unprocessed_llm_output) 
+                print("Successful LLM output:\n", unprocessed_llm_output) 
                 result = SandboxResult(
                     original_query=query, 
                     print_output="", 
@@ -113,7 +91,7 @@ def process_query(
                 return result 
             
             # Gen new code from analysis
-            new_code = gen_from_analysis(result, analysis_result)
+            new_code = gen_from_analysis(result, analysis_result, data)
             unprocessed_llm_output = new_code 
             cleaned_code = extract_code(new_code)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
@@ -122,7 +100,7 @@ def process_query(
             error_attempts = 1
             while result.error and error_attempts < 6:
                 print("Error:", result.error)
-                suggested_code = gen_from_error(result)
+                suggested_code = gen_from_error(result, error_attempts, data)
                 cleaned_code = extract_code(suggested_code)
                 print("New code:", cleaned_code)
                 result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
