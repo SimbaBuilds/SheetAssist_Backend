@@ -117,22 +117,21 @@ def create_csv(data: Any) -> str:
     tmp_path = tempfile.mktemp(suffix='.csv')
     
     if isinstance(data, pd.DataFrame):
+        # Write DataFrame directly to CSV with proper column separation
         data.to_csv(tmp_path, index=False)
     else:
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            if isinstance(data, (dict, list)):
-                if isinstance(data, dict):
-                    # Convert single dict to DataFrame and then to CSV
-                    pd.DataFrame([data]).to_csv(f, index=False)
-                else:
-                    # Convert list of dicts or list of values to CSV
-                    if all(isinstance(item, dict) for item in data):
-                        pd.DataFrame(data).to_csv(f, index=False)
-                    else:
-                        pd.DataFrame({"Value": data}).to_csv(f, index=False)
+        # Convert other data types to DataFrame first, then to CSV
+        if isinstance(data, (dict, list)):
+            if isinstance(data, dict):
+                df = pd.DataFrame([data])
             else:
-                # For simple types, create a single-cell CSV
-                f.write("Value\n")
-                f.write(f"{str(data)}\n")
+                if all(isinstance(item, dict) for item in data):
+                    df = pd.DataFrame(data)
+                else:
+                    df = pd.DataFrame(data)  # Let pandas handle the conversion
+            df.to_csv(tmp_path, index=False)
+        else:
+            # For simple types, create a single-column CSV without the "Value" header
+            pd.DataFrame([str(data)]).to_csv(tmp_path, index=False, header=False)
     
     return tmp_path
