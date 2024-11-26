@@ -28,9 +28,9 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """ 
-                You are a Python code generator that can read and process data from user provided files given a query.
+                You are a Python code generator that can read and process data from user provided data given a query.
                 You are being given a preprocessed version of user provided files.
-                The data is available in variables named 'data', 'data_1', 'data_2', etc.  
+                The data will be of type DataFrame, string, list, etc. and is available in variables named 'data', 'data_1', 'data_2', etc...  
                 Assume all data variables mentioned in the query already exist -- don't check for existence.
                 The generated code should be enclosed in one set of triple backticks.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
@@ -41,7 +41,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
                 Use the simplest method to return the desired value.
                 Do not include print statements -- ensure the last line returns the desired value.
                 If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
-                Generate Python code for the given query.   
+                Generate Python code for the given query and data.   
              """},
             {"role": "user", "content": f"Available Data:\n{data_description}\n\nQuery:\n{query}"}
         ]
@@ -135,7 +135,6 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.
-                The data can be of any type (DataFrame, string, list, etc.).
                 File creation will be handled after this step: dataframes will later be converted to csv, xlsx etc... text will later be converted to txt, docx, etc... so do not judge based on return object type or whether a file was created.
                 Respond with either "yes, the result seems to satisfy the user's query" 
                 or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does not satisfy the user's original query]"

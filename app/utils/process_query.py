@@ -34,17 +34,19 @@ def process_query(
         suggested_code = gen_from_query(query, data)
         unprocessed_llm_output = suggested_code 
         cleaned_code = extract_code(suggested_code)
-        result = sandbox.execute_code(query, cleaned_code, namespace=namespace)  
+        result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
+        print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
         
         # Error handling for initial execution
-        error_attempts = 1
+        error_attempts = 0
         while result.error and error_attempts < 3: #CHANGE BACK TO 6 LATER
-            print(f"\n\nError attempt {error_attempts}:")
+            print(f"\n\nError analysis {error_attempts}:")
             suggested_code = gen_from_error(result, error_attempts, data)
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
             print("New code:", cleaned_code)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
+            print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
             print("Error:", result.error)
             error_attempts += 1
             if error_attempts == 3:  #CHANGE TO 6 LATER
@@ -54,7 +56,7 @@ def process_query(
         # Analysis and improvement loop
         analysis_attempts = 1
         while analysis_attempts < 6:    
-            print("Analysis attempt:", analysis_attempts)
+            print("Post-error analysis:", analysis_attempts)
             old_data = data
             
             # Create new FileDataInfo based on return value type
@@ -99,15 +101,15 @@ def process_query(
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
 
             # Restart error handling for new attempt 
-            error_attempts = 1
+            error_attempts = 0
             while result.error and error_attempts < 6:
+                print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
                 suggested_code = gen_from_error(result, error_attempts, data)
                 cleaned_code = extract_code(suggested_code)
                 print("New code:", cleaned_code)
                 result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
                 error_attempts += 1
-                print("Error attempt:", error_attempts)
                 if error_attempts == 5:
                     result.error = "Failed to interpret query. Please try rephrasing your request."
                     return result      

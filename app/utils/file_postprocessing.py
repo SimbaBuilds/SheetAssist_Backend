@@ -19,17 +19,51 @@ from fastapi import HTTPException
 def prepare_dataframe(data: Any) -> pd.DataFrame:
     """Prepare and standardize any data type into a clean DataFrame"""
     
-    # Convert input to DataFrame if it isn't already
-    if isinstance(data, pd.DataFrame):
+    # Step 1: Handle string input that contains DataFrame representation
+    if isinstance(data, str) or (isinstance(data, list) and len(data) == 1 and isinstance(data[0], str)):
+        print("\nData is a string or a list of strings\n")
+        input_str = data[0] if isinstance(data, list) else data
+        
+        # Step 2: Clean up the DataFrame string representation
+        # Remove shape information and parentheses
+        cleaned_str = input_str.replace('[1 rows x 10 columns],)', '').strip('()')
+        
+        # Step 3: Split the cleaned string into rows
+        rows = [row.strip() for row in cleaned_str.split('\n') if row.strip()]
+        
+        # Step 4: Split each row into columns
+        # First row contains headers
+        headers = rows[0].split()
+        
+        # Process data rows
+        data_rows = []
+        for row in rows[1:]:
+            # Split on multiple spaces to separate columns
+            values = [val.strip() for val in row.split('  ') if val.strip()]
+            data_rows.append(values)
+        
+        # Step 5: Create DataFrame from processed data
+        df = pd.DataFrame(data_rows, columns=headers)
+        
+    elif isinstance(data, pd.DataFrame):
+        print("\nData is already a DataFrame\n")
         df = data.copy()
     elif isinstance(data, dict):
+        print("\nData is a dictionary\n")
         df = pd.DataFrame([data])
-    elif isinstance(data, list):
-        if all(isinstance(item, dict) for item in data):
-            df = pd.DataFrame(data)
+    elif isinstance(data, list) and all(isinstance(item, dict) for item in data):
+        print("\nData is a list of dictionaries\n")
+        df = pd.DataFrame(data)
+    elif isinstance(data, tuple):
+        # If first element is a DataFrame, return that
+        print(f"\nData is a single value of type {type(data).__name__}\n")
+        if isinstance(data[0], pd.DataFrame):
+            df = data[0]
+        # Otherwise convert tuple to DataFrame
         else:
-            df = pd.DataFrame({'Value': data})
+            df = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
     else:
+        print("\nData is a single value\n")
         df = pd.DataFrame({'Value': [data]})
     
     # Clean and standardize the DataFrame
@@ -43,13 +77,15 @@ def prepare_dataframe(data: Any) -> pd.DataFrame:
         
         # Convert problematic data types
         for col in df.columns:
-            # Convert lists or dicts in cells to strings
             if df[col].apply(lambda x: isinstance(x, (list, dict))).any():
                 df[col] = df[col].apply(lambda x: str(x) if isinstance(x, (list, dict)) else x)
             
             # Ensure numeric columns are properly formatted
-            if df[col].dtype in ['float64', 'int64']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+            try:
+                if df[col].dtype in ['float64', 'int64'] or df[col].str.match(r'^-?\d*\.?\d+$').all():
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            except:
+                pass
         
         # Remove any problematic characters from string columns
         str_columns = df.select_dtypes(include=['object']).columns

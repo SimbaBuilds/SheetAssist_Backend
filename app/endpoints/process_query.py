@@ -14,7 +14,7 @@ from app.schemas import QueryRequest
 from fastapi.responses import FileResponse
 import pandas as pd
 from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv, handle_destination_upload
-from app.utils.data_processing import sanitize_error_message, _create_return_value_snapshot, get_data_snapshot
+from app.utils.data_processing import sanitize_error_message, get_data_snapshot
 from fastapi import BackgroundTasks
 import io
 from typing import Dict
@@ -159,8 +159,8 @@ async def process_query_endpoint(
             sandbox=sandbox,
             data=preprocessed_data
         )
-        result.return_value_snapshot = get_data_snapshot(result.return_value, result.return_value_type)
-        print("Query processed with return value snapshot:", result.return_value_snapshot, "and error:", result.error)
+        result.return_value_snapshot = get_data_snapshot(result.return_value, type(result.return_value).__name__)
+        print("Query processed with return value snapshot:\n", result.return_value_snapshot, "\ntype:", type(result.return_value).__name__, "\nand error:", result.error)
 
         if result.error:
             raise HTTPException(status_code=400, detail=result.error + " -- please try rephrasing your request")
@@ -255,7 +255,7 @@ async def process_query_endpoint(
         except:
             error_msg = "An unexpected error occurred"
             
-        logging.error(f"Process query error: {e.__class__.__name__}")
+        logging.error(f"Process query error: {error_msg}")
         
         # Create an error truncated_result if it wasn't created in the try block
         if truncated_result is None:
