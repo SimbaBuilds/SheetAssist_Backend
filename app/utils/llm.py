@@ -206,6 +206,7 @@ def file_namer(query: str, data: List[FileDataInfo]) -> str:
                 - Use underscores instead of spaces
                 - Be descriptive but concise (max 3 underscore separated words)
                 - Avoid special characters
+                - Avoid technical language (i.e. dataframe, list, etc.)
                 Return only the filename, nothing else."""},
             {"role": "user", "content": f"""Based on this query and data, suggest a filename:
                 Query: {query}

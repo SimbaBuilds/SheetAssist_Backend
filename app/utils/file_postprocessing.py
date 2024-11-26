@@ -56,7 +56,7 @@ def prepare_dataframe(data: Any) -> pd.DataFrame:
         df = pd.DataFrame(data)
     elif isinstance(data, tuple):
         # If first element is a DataFrame, return that
-        print(f"\nData is a single value of type {type(data).__name__}\n")
+        print(f"\nData is of type {type(data).__name__}\n")
         if isinstance(data[0], pd.DataFrame):
             df = data[0]
         # Otherwise convert tuple to DataFrame
@@ -97,6 +97,18 @@ def prepare_dataframe(data: Any) -> pd.DataFrame:
         
     return df
 
+def prepare_text(data: Any) -> str:
+
+    if isinstance(data, tuple):
+        print(f"\nData is of type {type(data).__name__}\n")
+        extracted_text = ""
+        if isinstance(data[0], str):
+            extracted_text = data[0]
+        else:
+            extracted_text = str([data], columns=[f'Value_{i}' for i in range(len(data))])
+
+    return extracted_text
+
 def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     """Create CSV file from prepared DataFrame"""
     filename = file_namer(query, old_data)
@@ -126,23 +138,12 @@ def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
 
 def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     """Create Excel file from various data types"""
+    
     filename = file_namer(query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.xlsx')
-    
-    if isinstance(new_data, pd.DataFrame):
-        new_data.to_excel(tmp_path, index=False)
-    else:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        
-        if isinstance(new_data, (dict, list)):
-            # Convert to string and write as single cell
-            ws['A1'] = json.dumps(new_data, indent=2)
-        else:
-            ws['A1'] = str(new_data)
-            
-        wb.save(tmp_path)
-    
+    df = prepare_dataframe(new_data)
+    df.to_excel(tmp_path, index=False)
+
     return tmp_path
 
 def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
@@ -195,24 +196,8 @@ def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.docx')
     doc = Document()
     
-    if isinstance(new_data, pd.DataFrame):
-        # Add table
-        table = doc.add_table(rows=len(new_data)+1, cols=len(new_data.columns))
-        
-        # Add headers
-        for j, column in enumerate(new_data.columns):
-            table.cell(0, j).text = str(column)
-            
-        # Add data
-        for i, row in enumerate(new_data.values):
-            for j, cell in enumerate(row):
-                table.cell(i+1, j).text = str(cell)
-                
-    elif isinstance(new_data, (dict, list)):
-        doc.add_paragraph(json.dumps(new_data, indent=2))
-    else:
-        doc.add_paragraph(str(new_data))
-    
+    extracted_text = prepare_text(new_data)
+    doc.add_paragraph(str(extracted_text))
     doc.save(tmp_path)
     return tmp_path
 
@@ -220,15 +205,9 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     """Create text file from various data types"""
     filename = file_namer(query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.txt')
-    
+    extracted_text = prepare_text(new_data)
     with open(tmp_path, 'w', encoding='utf-8') as f:
-        if isinstance(new_data, pd.DataFrame):
-            f.write(new_data.to_string())
-        elif isinstance(new_data, (dict, list)):
-            f.write(json.dumps(new_data, indent=2))
-        else:
-            f.write(str(new_data))
-    
+        f.write(extracted_text)
     return tmp_path
 
 async def handle_destination_upload(data: Any, destination_url: str) -> bool:
