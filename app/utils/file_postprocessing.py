@@ -98,7 +98,7 @@ def prepare_dataframe(data: Any) -> pd.DataFrame:
     return df
 
 def prepare_text(data: Any) -> str:
-
+    
     if isinstance(data, tuple):
         print(f"\nData is of type {type(data).__name__}\n")
         extracted_text = ""
@@ -107,6 +107,11 @@ def prepare_text(data: Any) -> str:
         else:
             extracted_text = str([data], columns=[f'Value_{i}' for i in range(len(data))])
 
+    elif isinstance(data, str):
+        extracted_text = data
+    else:
+        extracted_text = str(data)
+        
     return extracted_text
 
 def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
