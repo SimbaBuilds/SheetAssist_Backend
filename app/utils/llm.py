@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from typing import List
 from app.schemas import SandboxResult, FileDataInfo
 import json
-from typing import Tuple
+from typing import Tuple, Dict, Any
 
 load_dotenv(override=True)
 api_key = os.getenv("OPENAI_API_KEY")
@@ -122,7 +122,7 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[Fi
     return response.choices[0].message.content
 
 # post-error result processing - processes random sample of result -- result goes to sentiment analysis function
-def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], new_data: FileDataInfo) -> str:
+def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], new_data: FileDataInfo, analyzer_context: Dict[str, Any]) -> str:
     """Analyze the result of a sandboxed code execution and return an analysis"""
     
     # Build old data snapshot
@@ -135,7 +135,9 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.
-                File creation will be handled after this step: dataframes will later be converted to csv, xlsx etc... text will later be converted to txt, docx, etc... so do not judge based on return object type or whether a file was created.
+                File creation will be handled after this step: dataframes will later be converted to csv, xlsx etc... text will later be converted to txt, docx, etc... 
+                so do not judge based on return object type or whether a file was created.
+                I am also providing you with dataset diff information that is relevant for most spreadsheet/dataframe related queries.
                 Respond with either "yes, the result seems to satisfy the user's query" 
                 or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does not satisfy the user's original query]"
              """},
@@ -193,9 +195,8 @@ def file_namer(query: str, data: List[FileDataInfo]) -> str:
     
     if data and len(data) > 0:
         data_description = ""
-        for idx, file_data in enumerate(data):
-            var_name = f'data_{idx}' if idx > 0 else 'data'
-            data_description += f"\nVariable Name: {var_name}\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n"
+        for file_data in data:
+            data_description += f"\nData Type: {file_data.data_type}\nSnapshot:\n{file_data.snapshot}\n Original file name: {file_data.original_file_name}\n"
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",  # Using smaller model since this is a simple task
@@ -206,9 +207,9 @@ def file_namer(query: str, data: List[FileDataInfo]) -> str:
                 - Use underscores instead of spaces
                 - Be descriptive but concise (max 3 underscore separated words)
                 - Avoid special characters
-                - Avoid technical language (i.e. dataframe, list, etc.)
                 Return only the filename, nothing else."""},
-            {"role": "user", "content": f"""Based on this query and data, suggest a filename:
+            {"role": "user", "content": f"""Based on the query and data below, suggest a filename. 
+                Avoid technical language (i.e. dataframe, list, etc.)
                 Query: {query}
                 Available Data: {data_description}"""}
         ]

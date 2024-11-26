@@ -1,7 +1,7 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
 from app.utils.code_processing import extract_code
-from app.utils.data_processing import get_data_snapshot
+from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, DatasetDiff, prepare_analyzer_context
 from typing import List
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
@@ -39,7 +39,7 @@ def process_query(
         
         # Error handling for initial execution
         error_attempts = 0
-        while result.error and error_attempts < 3: #CHANGE BACK TO 6 LATER
+        while result.error and error_attempts < 3: #TODO: CHANGE TO 6 LATER
             print(f"\n\nError analysis {error_attempts}:")
             suggested_code = gen_from_error(result, error_attempts, data)
             unprocessed_llm_output = suggested_code 
@@ -49,7 +49,7 @@ def process_query(
             print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
             print("Error:", result.error)
             error_attempts += 1
-            if error_attempts == 3:  #CHANGE TO 6 LATER
+            if error_attempts == 3:  #TODO: CHANGE TO 6 LATER
                 result.error = "Failed to interpret query. Please try rephrasing your request."
                 return result
             
@@ -59,25 +59,24 @@ def process_query(
             print("Post-error analysis:", analysis_attempts)
             old_data = data
             
-            # Create new FileDataInfo based on return value type
-            if isinstance(result.return_value, pd.DataFrame):
-                new_data = FileDataInfo(
-                    content=result.return_value,
-                    snapshot=get_data_snapshot(result.return_value, "DataFrame"),
-                    data_type="DataFrame",
-                    original_file_name=data[0].original_file_name if data else None
-                )
-            else:
-                new_data = FileDataInfo(
-                    content=result.return_value,
-                    snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__),
-                    data_type=type(result.return_value).__name__,
-                    original_file_name=data[0].original_file_name if data else None
-                )
-
-            #ADD MORE CASES^ ?    
+            # Create new FileDataInfo based on return value type (get_data_snapshot handles tuples)
+            new_data = FileDataInfo(
+                content=result.return_value, #likely a tuple containing a dataframe
+                snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__), 
+                data_type=type(result.return_value).__name__,
+                original_file_name=data[0].original_file_name if data else None
+            )
             
-            analysis_result = analyze_sandbox_result(result, old_data, new_data)
+            #dataset diff logic here
+            analyzer_context = {}
+            for i in range(len(old_data)):
+                if isinstance(old_data[i].content, pd.DataFrame):
+                    for j, item in enumerate(new_data.content):
+                        if isinstance(item, pd.DataFrame):
+                            diff_key = f"diff{i+1}_{j+1}"
+                            analyzer_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
+
+            analysis_result = analyze_sandbox_result(result, old_data, new_data, analyzer_context) 
             success, analysis_result = sentiment_analysis(analysis_result)
             print("Analysis result:", analysis_result)
             if success:
