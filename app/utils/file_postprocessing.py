@@ -11,6 +11,103 @@ import openpyxl
 from app.schemas import FileDataInfo
 from typing import List
 from app.utils.llm import file_namer
+import csv
+from app.utils.online_document_integrations import DocumentIntegrations
+import logging
+from fastapi import HTTPException
+
+def prepare_dataframe(data: Any) -> pd.DataFrame:
+    """Prepare and standardize any data type into a clean DataFrame"""
+    
+    # Convert input to DataFrame if it isn't already
+    if isinstance(data, pd.DataFrame):
+        df = data.copy()
+    elif isinstance(data, dict):
+        df = pd.DataFrame([data])
+    elif isinstance(data, list):
+        if all(isinstance(item, dict) for item in data):
+            df = pd.DataFrame(data)
+        else:
+            df = pd.DataFrame({'Value': data})
+    else:
+        df = pd.DataFrame({'Value': [data]})
+    
+    # Clean and standardize the DataFrame
+    try:
+        # Clean column names
+        df.columns = df.columns.str.strip()
+        df.columns = df.columns.str.replace(r'[^\w\s-]', '_', regex=True)
+        
+        # Handle missing values
+        df = df.fillna('')
+        
+        # Convert problematic data types
+        for col in df.columns:
+            # Convert lists or dicts in cells to strings
+            if df[col].apply(lambda x: isinstance(x, (list, dict))).any():
+                df[col] = df[col].apply(lambda x: str(x) if isinstance(x, (list, dict)) else x)
+            
+            # Ensure numeric columns are properly formatted
+            if df[col].dtype in ['float64', 'int64']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Remove any problematic characters from string columns
+        str_columns = df.select_dtypes(include=['object']).columns
+        for col in str_columns:
+            df[col] = df[col].astype(str).str.replace('\x00', '')
+            
+    except Exception as e:
+        print(f"Warning during DataFrame preparation: {str(e)}")
+        
+    return df
+
+def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+    """Create CSV file from prepared DataFrame"""
+    filename = file_namer(query, old_data)
+    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.csv')
+    
+    # Prepare the DataFrame
+    df = prepare_dataframe(new_data)
+    
+    # Write to CSV with consistent parameters
+    try:
+        df.to_csv(
+            tmp_path,
+            index=False,
+            encoding='utf-8',
+            sep=',',
+            quoting=csv.QUOTE_MINIMAL,
+            quotechar='"',
+            escapechar='\\',
+            lineterminator='\n',
+            float_format='%.2f'
+        )
+    except Exception as e:
+        print(f"Error writing CSV: {str(e)}")
+        raise
+    
+    return tmp_path
+
+def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+    """Create Excel file from various data types"""
+    filename = file_namer(query, old_data)
+    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.xlsx')
+    
+    if isinstance(new_data, pd.DataFrame):
+        new_data.to_excel(tmp_path, index=False)
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        
+        if isinstance(new_data, (dict, list)):
+            # Convert to string and write as single cell
+            ws['A1'] = json.dumps(new_data, indent=2)
+        else:
+            ws['A1'] = str(new_data)
+            
+        wb.save(tmp_path)
+    
+    return tmp_path
 
 def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     """Create PDF file from various data types"""
@@ -56,27 +153,6 @@ def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     doc.build(elements)
     return tmp_path
 
-def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
-    """Create Excel file from various data types"""
-    filename = file_namer(query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.xlsx')
-    
-    if isinstance(new_data, pd.DataFrame):
-        new_data.to_excel(tmp_path, index=False)
-    else:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        
-        if isinstance(new_data, (dict, list)):
-            # Convert to string and write as single cell
-            ws['A1'] = json.dumps(new_data, indent=2)
-        else:
-            ws['A1'] = str(new_data)
-            
-        wb.save(tmp_path)
-    
-    return tmp_path
-
 def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     """Create Word document from various data types"""
     filename = file_namer(query, old_data)
@@ -119,36 +195,26 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     
     return tmp_path
 
-def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
-    """Create CSV file from various data types"""
-    filename = file_namer(query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.csv')
+async def handle_destination_upload(data: Any, destination_url: str) -> bool:
+    """Upload data to various destination types"""
+    try:
+        doc_integrations = DocumentIntegrations()
+        url_lower = destination_url.lower()
+        
+        if "docs.google.com" in url_lower:
+            if "document" in url_lower:
+                return await doc_integrations.append_to_google_doc(data, destination_url)
+            elif "spreadsheets" in url_lower:
+                return await doc_integrations.append_to_google_sheet(data, destination_url)
+        
+        elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+            if "docx" in url_lower:
+                return await doc_integrations.append_to_office_doc(data, destination_url)
+            elif "xlsx" in url_lower:
+                return await doc_integrations.append_to_office_sheet(data, destination_url)
+        
+        raise ValueError(f"Unsupported destination URL type: {destination_url}")
     
-    if isinstance(new_data, pd.DataFrame):
-        # Ensure clean CSV output with proper column separation
-        new_data.reset_index(drop=True).to_csv(
-            tmp_path,
-            index=False,  # Don't include row numbers
-            sep=',',
-            encoding='utf-8',
-            quoting=1,  # Quote all non-numeric values
-            quotechar='"',  # Use double quotes for text fields
-            line_terminator='\n'  # Ensure proper line endings
-        )
-    else:
-        # Convert other data types to DataFrame first, then to CSV
-        print("new_data is not a DataFrame")
-        if isinstance(new_data, (dict, list)):
-            if isinstance(new_data, dict):
-                df = pd.DataFrame([new_data])
-            else:
-                if all(isinstance(item, dict) for item in new_data):
-                    df = pd.DataFrame(new_data)
-                else:
-                    df = pd.DataFrame({'Value': new_data})
-            df.to_csv(tmp_path, index=False, sep=',', encoding='utf-8')
-        else:
-            # For simple types, create a single-column CSV
-            pd.DataFrame([new_data]).to_csv(tmp_path, index=False, header=False, sep=',', encoding='utf-8')
-    
-    return tmp_path
+    except Exception as e:
+        logging.error(f"Failed to upload to destination: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")

@@ -13,46 +13,14 @@ import logging
 from app.schemas import QueryRequest
 from fastapi.responses import FileResponse
 import pandas as pd
-from app.utils.document_integrations import DocumentIntegrations
-from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv
+from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv, handle_destination_upload
+from app.utils.data_processing import sanitize_error_message, _create_return_value_snapshot, get_data_snapshot
 from fastapi import BackgroundTasks
 import io
 from typing import Dict
+
+
 router = APIRouter()
-def sanitize_error_message(e: Exception) -> str:
-    """Sanitize error messages to remove binary data"""
-    return str(e).encode('ascii', 'ignore').decode('ascii')
-
-def _create_return_value_snapshot(self) -> str:
-    """Creates a string representation of the return value"""
-    try:
-        if isinstance(self.return_value, tuple):
-            return ', '.join(str(item) for item in self.return_value)
-        return str(self.return_value)
-    except Exception:
-        return "<unprintable value>"
-
-def get_data_snapshot(content: Any, data_type: str) -> str:
-    """Generate appropriate snapshot based on data type"""
-    if data_type == "DataFrame":
-        return content.head(10).to_string()
-    elif data_type == "json":
-        # For JSON, return first few key-value pairs or array elements
-        if isinstance(content, dict):
-            snapshot_dict = dict(list(content.items())[:5])
-            return json.dumps(snapshot_dict, indent=2)
-        elif isinstance(content, list):
-            return json.dumps(content[:5], indent=2)
-        return str(content)[:500]
-    elif data_type == "text":
-        # Return first 500 characters for text
-        return content[:500] + ("..." if len(content) > 500 else "")
-    elif data_type == "image":
-        content.file.seek(0)
-        size = len(content.file.read())
-        content.file.seek(0)
-        return f"Image file: {content.filename}, Size: {size} bytes"
-    return str(content)[:500]
 
 async def preprocess_files(
     files: List[UploadFile],
@@ -147,29 +115,6 @@ async def preprocess_files(
 
     return processed_data
 
-async def handle_destination_upload(data: Any, destination_url: str) -> bool:
-    """Upload data to various destination types"""
-    try:
-        doc_integrations = DocumentIntegrations()
-        url_lower = destination_url.lower()
-        
-        if "docs.google.com" in url_lower:
-            if "document" in url_lower:
-                return await doc_integrations.append_to_google_doc(data, destination_url)
-            elif "spreadsheets" in url_lower:
-                return await doc_integrations.append_to_google_sheet(data, destination_url)
-        
-        elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
-            if "docx" in url_lower:
-                return await doc_integrations.append_to_office_doc(data, destination_url)
-            elif "xlsx" in url_lower:
-                return await doc_integrations.append_to_office_sheet(data, destination_url)
-        
-        raise ValueError(f"Unsupported destination URL type: {destination_url}")
-    
-    except Exception as e:
-        logging.error(f"Failed to upload to destination: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_endpoint(
@@ -178,6 +123,9 @@ async def process_query_endpoint(
     background_tasks: BackgroundTasks = BackgroundTasks()
 ) -> QueryResponse:
     try:
+        # Initialize truncated_result as None at the start
+        truncated_result = None
+        
         request = QueryRequest(**json.loads(json_data))
         print
         logging.info(f"Processing query with {len(request.files_metadata or [])} files")
@@ -211,7 +159,7 @@ async def process_query_endpoint(
             sandbox=sandbox,
             data=preprocessed_data
         )
-        result.return_value_snapshot = _create_return_value_snapshot(result.return_value)
+        result.return_value_snapshot = get_data_snapshot(result.return_value, result.return_value_type)
         print("Query processed with return value snapshot:", result.return_value_snapshot, "and error:", result.error)
 
         if result.error:
@@ -308,10 +256,21 @@ async def process_query_endpoint(
             error_msg = "An unexpected error occurred"
             
         logging.error(f"Process query error: {e.__class__.__name__}")
+        
+        # Create an error truncated_result if it wasn't created in the try block
+        if truncated_result is None:
+            truncated_result = TruncatedSandboxResult(
+                original_query=request.query,
+                print_output="",
+                error=error_msg,
+                timed_out=False,
+                return_value_snapshot=""
+            )
+            
         return QueryResponse(
-            result = truncated_result,
+            result=truncated_result,
             status="error",
-            message= "an error occurred while processing your request -- please try again",
+            message="an error occurred while processing your request -- please try again",
             files=None
         )
 

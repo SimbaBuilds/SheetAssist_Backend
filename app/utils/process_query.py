@@ -1,6 +1,7 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
 from app.utils.code_processing import extract_code
+from app.utils.data_processing import get_data_snapshot
 from typing import List
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
@@ -60,14 +61,14 @@ def process_query(
             if isinstance(result.return_value, pd.DataFrame):
                 new_data = FileDataInfo(
                     content=result.return_value,
-                    snapshot=result.return_value.head(10).to_string(),
+                    snapshot=get_data_snapshot(result.return_value, "DataFrame"),
                     data_type="DataFrame",
                     original_file_name=data[0].original_file_name if data else None
                 )
             else:
                 new_data = FileDataInfo(
                     content=result.return_value,
-                    snapshot=str(result.return_value)[:1000] if result.return_value is not None else None,
+                    snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__),
                     data_type=type(result.return_value).__name__,
                     original_file_name=data[0].original_file_name if data else None
                 )
