@@ -127,9 +127,8 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
     
     # Build old data snapshot
     old_data_snapshot = ""
-    for idx, data in enumerate(old_data):
-        var_name = f'data_{idx}' if idx > 0 else 'data'
-        old_data_snapshot += f"Variable name: {var_name}\nData type: {data.data_type}\nSnapshot:\n{data.snapshot}\n\n"
+    for data in old_data:
+        old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nSnapshot:\n{data.snapshot}\n\n"
             
     response = client.chat.completions.create(
         model="gpt-4o",  
@@ -137,15 +136,19 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
             {"role": "system", "content": """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.
                 File creation will be handled after this step: dataframes will later be converted to csv, xlsx etc... text will later be converted to txt, docx, etc... 
                 so do not judge based on return object type or whether a file was created.
-                I am also providing you with dataset diff information that is relevant for most spreadsheet/dataframe related queries.
+                I am providing you with metadata and spanshots of the old and new data as well as
+                dataset diff information that is relevant for most spreadsheet/dataframe related queries.
+                Diff1_1 corresponds to the diff between the first dataframe in the old data and the first dataframe in the new data.
+                Diff1_2 corresponds to the diff between the first dataframe in the old data and the second dataframe in the new data etc...
                 Respond with either "yes, the result seems to satisfy the user's query" 
-                or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does not satisfy the user's original query]"
+                or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does or does not satisfy the user's original query]"
              """},
             {"role": "user", "content": f""" 
-                Here is the original user query and snapshots of the new and old data:
-                Original Query:\n{result.original_query}\n\n
-                Old Data:\n{old_data_snapshot}\n\n
-                New Data ({new_data.data_type}):\n{new_data.snapshot}\n\n
+                Here is the original user query, snapshots of the new and old data, and dataset diff information:
+                Original Query:\n{result.original_query}\n
+                Old Data Snapshots:\n{old_data_snapshot}\n
+                New Data Snapshot: {new_data.snapshot}\n
+                Dataset Diff Information:{analyzer_context}\n
                 """}
         ]
     )
