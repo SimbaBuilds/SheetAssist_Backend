@@ -10,6 +10,13 @@ from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
 from app.utils.vision_processing import VisionProcessor
 from tempfile import SpooledTemporaryFile
+from typing import Dict, Tuple
+from app.utils.data_processing import sanitize_error_message, get_data_snapshot
+from fastapi import UploadFile
+from app.schemas import FileDataInfo, FileMetadata
+from typing import List
+import logging
+
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -384,3 +391,98 @@ class FilePreprocessor:
             return error_msg.encode('ascii', 'ignore').decode('ascii')
         except:
             return "Error processing file"
+
+
+
+def preprocess_files(
+    files: List[UploadFile],
+    files_metadata: List[FileMetadata],
+    web_urls: List[str],
+    query: str,
+    session_dir
+) -> List[FileDataInfo]:
+    """Helper function to preprocess files and web URLs"""
+    preprocessor = FilePreprocessor()
+    processed_data = []
+    
+    # Process web URLs if provided
+    for url in web_urls:
+        try:
+            logging.info(f"Processing URL: {url}")
+            content = preprocessor.preprocess_file(url, 'web_url')
+            data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
+            processed_data.append(
+                FileDataInfo(
+                    content=content,
+                    snapshot=get_data_snapshot(content, data_type),
+                    data_type=data_type,
+                    original_file_name=url.split('/')[-1],
+                    url=url
+                )
+            )
+        except Exception as e:
+            error_msg = sanitize_error_message(e)
+            logging.error(f"Error processing URL {url}: {error_msg}")
+            raise Exception(f"Error processing URL {url}: {error_msg}")
+    
+    # Process uploaded files using metadata
+    if files and files_metadata:
+        for metadata in files_metadata:
+            try:
+                file = files[metadata.index]
+                logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
+                
+                # Map MIME types to FilePreprocessor types
+                mime_to_processor = {
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+                    'text/csv': 'csv',
+                    'application/json': 'json',
+                    'text/plain': 'txt',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+                    'image/png': 'png',
+                    'image/jpeg': 'jpg',
+                    'image/jpg': 'jpg',
+                    'application/pdf': 'pdf'
+                }
+                
+                file_type = mime_to_processor.get(metadata.type)
+                if not file_type:
+                    raise ValueError(f"Unsupported MIME type: {metadata.type}")
+
+                # Handle special cases for images and PDFs that need additional parameters
+                kwargs = {}
+                if file_type in ['png', 'jpg', 'jpeg']:
+                    kwargs['output_path'] = str(session_dir / f"{metadata.name}.jpeg")
+                elif file_type == 'pdf':
+                    kwargs['query'] = query
+
+                # Process the file
+                with io.BytesIO(file.file.read()) as file_obj:
+                    file_obj.seek(0)  # Reset the file pointer to the beginning
+                    content = preprocessor.preprocess_file(file_obj, file_type, **kwargs)
+
+                # Handle different return types
+                if file_type == 'pdf':
+                    content, data_type, is_readable = content  # Unpack PDF processor return values
+                    metadata_info = {"is_readable": is_readable}
+                else:
+                    data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
+                    metadata_info = {}
+
+                processed_data.append(
+                    FileDataInfo(
+                        content=content,
+                        snapshot=get_data_snapshot(content, data_type),
+                        data_type=data_type,
+                        original_file_name=metadata.name,
+                        metadata=metadata_info,
+                        new_file_path=kwargs.get('output_path')  # For images
+                    )
+                )
+
+            except Exception as e:
+                error_msg = sanitize_error_message(e)
+                logging.error(f"Error processing file {metadata.name}: {error_msg}")
+                raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
+
+    return processed_data

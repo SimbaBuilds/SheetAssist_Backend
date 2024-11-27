@@ -4,117 +4,22 @@ from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.schemas import FileDataInfo, QueryResponse, FileInfo, FileMetadata, TruncatedSandboxResult
+from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult
 import json
 from app.utils.file_management import temp_file_manager
-from app.utils.vision_processing import VisionProcessor
 import os
 import logging
 from app.schemas import QueryRequest
 from fastapi.responses import FileResponse
 import pandas as pd
-from app.utils.file_postprocessing import create_pdf, create_xlsx, create_docx, create_txt, create_csv, handle_destination_upload
-from app.utils.data_processing import sanitize_error_message, get_data_snapshot
+from app.utils.file_postprocessing import handle_destination_upload, handle_download
+from app.utils.data_processing import get_data_snapshot
+from app.utils.file_preprocessing import preprocess_files
 from fastapi import BackgroundTasks
-import io
-from typing import Dict
+
 
 
 router = APIRouter()
-
-async def preprocess_files(
-    files: List[UploadFile],
-    files_metadata: List[FileMetadata],
-    web_urls: List[str],
-    query: str,
-    session_dir
-) -> List[FileDataInfo]:
-    """Helper function to preprocess files and web URLs"""
-    preprocessor = FilePreprocessor()
-    processed_data = []
-    
-    # Process web URLs if provided
-    for url in web_urls:
-        try:
-            logging.info(f"Processing URL: {url}")
-            content = preprocessor.preprocess_file(url, 'web_url')
-            data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
-            processed_data.append(
-                FileDataInfo(
-                    content=content,
-                    snapshot=get_data_snapshot(content, data_type),
-                    data_type=data_type,
-                    original_file_name=url.split('/')[-1],
-                    url=url
-                )
-            )
-        except Exception as e:
-            error_msg = sanitize_error_message(e)
-            logging.error(f"Error processing URL {url}: {error_msg}")
-            raise Exception(f"Error processing URL {url}: {error_msg}")
-    
-    # Process uploaded files using metadata
-    if files and files_metadata:
-        for metadata in files_metadata:
-            try:
-                file = files[metadata.index]
-                logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
-                
-                # Map MIME types to FilePreprocessor types
-                mime_to_processor = {
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-                    'text/csv': 'csv',
-                    'application/json': 'json',
-                    'text/plain': 'txt',
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-                    'image/png': 'png',
-                    'image/jpeg': 'jpg',
-                    'image/jpg': 'jpg',
-                    'application/pdf': 'pdf'
-                }
-                
-                file_type = mime_to_processor.get(metadata.type)
-                if not file_type:
-                    raise ValueError(f"Unsupported MIME type: {metadata.type}")
-
-                # Handle special cases for images and PDFs that need additional parameters
-                kwargs = {}
-                if file_type in ['png', 'jpg', 'jpeg']:
-                    kwargs['output_path'] = str(session_dir / f"{metadata.name}.jpeg")
-                elif file_type == 'pdf':
-                    kwargs['query'] = query
-
-                # Process the file
-                with io.BytesIO(file.file.read()) as file_obj:
-                    file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = preprocessor.preprocess_file(file_obj, file_type, **kwargs)
-
-                # Handle different return types
-                if file_type == 'pdf':
-                    content, data_type, is_readable = content  # Unpack PDF processor return values
-                    metadata_info = {"is_readable": is_readable}
-                else:
-                    data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
-                    metadata_info = {}
-
-                processed_data.append(
-                    FileDataInfo(
-                        content=content,
-                        snapshot=get_data_snapshot(content, data_type),
-                        data_type=data_type,
-                        original_file_name=metadata.name,
-                        metadata=metadata_info,
-                        new_file_path=kwargs.get('output_path')  # For images
-                    )
-                )
-
-            except Exception as e:
-                error_msg = sanitize_error_message(e)
-                logging.error(f"Error processing file {metadata.name}: {error_msg}")
-                raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
-
-    return processed_data
-
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_endpoint(
@@ -132,7 +37,7 @@ async def process_query_endpoint(
         session_dir = temp_file_manager.get_temp_dir()
         print("Calling preprocess_files")
         try:
-            preprocessed_data = await preprocess_files(
+            preprocessed_data = preprocess_files(
                 files=files,
                 files_metadata=request.files_metadata,
                 web_urls=request.web_urls,
@@ -140,17 +45,7 @@ async def process_query_endpoint(
                 session_dir=session_dir
             )
         except Exception as e:
-            try:
-                error_msg = str(e)
-                if not error_msg.isascii() or len(error_msg) > 200:
-                    error_msg = f"Error processing files: {e.__class__.__name__}"
-                else:
-                    error_msg = error_msg.encode('ascii', 'ignore').decode('ascii')
-            except:
-                error_msg = "Error processing files"
-                
-            logging.error(f"File preprocessing error: {e.__class__.__name__}")
-            raise ValueError(error_msg)
+            raise ValueError(e)
 
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
@@ -159,6 +54,7 @@ async def process_query_endpoint(
             sandbox=sandbox,
             data=preprocessed_data
         )
+        #return value is a tuple 
         result.return_value_snapshot = get_data_snapshot(result.return_value, type(result.return_value).__name__)
         print("Query processed with return value snapshot:\n", result.return_value_snapshot, "\ntype:", type(result.return_value).__name__, "\nand error:", result.error)
 
@@ -168,33 +64,7 @@ async def process_query_endpoint(
         print("Output preferences type:", request.output_preferences.type, "and format:", request.output_preferences.format)
         # Handle output based on type
         if request.output_preferences.type == "download":
-            # Get the desired output format, defaulting based on data type
-            output_format = request.output_preferences.format
-            if not output_format:
-                if isinstance(result.return_value, pd.DataFrame):
-                    output_format = 'csv'
-                elif isinstance(result.return_value, (dict, list)):
-                    output_format = 'json'
-                else:
-                    output_format = 'txt'
-
-            # Create temporary file in requested format
-            if output_format == 'pdf':
-                tmp_path = create_pdf(result.return_value, request.query, preprocessed_data)
-                media_type = 'application/pdf'
-            elif output_format == 'xlsx':
-                tmp_path = create_xlsx(result.return_value, request.query, preprocessed_data)
-                media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            elif output_format == 'docx':
-                tmp_path = create_docx(result.return_value, request.query, preprocessed_data)
-                media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            elif output_format == 'txt':
-                tmp_path = create_txt(result.return_value, request.query, preprocessed_data)
-                media_type = 'text/plain'
-            else:  # csv
-                tmp_path = create_csv(result.return_value, request.query, preprocessed_data)
-                media_type = 'text/csv'
-
+            tmp_path, media_type = handle_download(result, request, preprocessed_data)
             # Add cleanup task but DON'T execute immediately
             background_tasks.add_task(temp_file_manager.cleanup_marked)
             
@@ -212,7 +82,7 @@ async def process_query_endpoint(
                 result=truncated_result,
                 status="success",
                 message="File ready for download",
-                files=[FileInfo(
+                files=[FileInfo(   #TODO: change to list of FileDataInfo
                     file_path=str(tmp_path),
                     media_type=media_type,
                     filename=os.path.basename(tmp_path),
@@ -225,7 +95,7 @@ async def process_query_endpoint(
                 raise ValueError("destination_url is required for online type")
                 
             # Handle destination URL upload
-            await handle_destination_upload(
+            handle_destination_upload(
                 result.return_value,
                 request.output_preferences.destination_url
             )

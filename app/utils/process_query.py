@@ -76,6 +76,7 @@ def process_query(
                             diff_key = f"diff{i+1}_{j+1}"
                             analyzer_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
 
+            print("\n\nAnalyzer context:\n", analyzer_context, "\n\n")
             analysis_result = analyze_sandbox_result(result, old_data, new_data, analyzer_context) 
             success, analysis_result = sentiment_analysis(analysis_result)
             print("Analysis result:", analysis_result)
