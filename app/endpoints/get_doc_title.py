@@ -54,6 +54,18 @@ async def get_provider_token(user_id: str, provider: str, supabase_client) -> Op
         logger.error(f"Error fetching {provider} token: {str(e)}")
         return None
 
+async def remove_provider_token(user_id: str, provider: str, supabase_client) -> None:
+    """Remove invalid token from the database"""
+    try:
+        logger.info(f"Removing invalid {provider} token for user {user_id}")
+        response = supabase_client.table('user_documents_access') \
+            .delete() \
+            .match({'user_id': user_id, 'provider': provider}) \
+            .execute()
+        logger.info(f"Successfully removed {provider} token")
+    except Exception as e:
+        logger.error(f"Error removing {provider} token: {str(e)}")
+
 async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Optional[TokenInfo]:
     """Refresh Google OAuth token and update in database"""
     try:
@@ -215,7 +227,21 @@ async def get_document_titles(
                     status_code=401,
                     detail="Google authentication required. Please connect your Google account."
                 )
-            title = await get_google_title(url, google_token, supabase)
+            try:
+                title = await get_google_title(url, google_token, supabase)
+                if title is None:
+                    # If token refresh failed, we should remove the invalid token
+                    await remove_provider_token(user_id, 'google', supabase)
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Google authentication expired. Please reconnect your Google account."
+                    )
+            except Exception as e:
+                logger.error(f"Error processing Google URL: {str(e)}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Error accessing Google document. Please reconnect your Google account."
+                )
             
         # Handle Microsoft URLs
         elif any(domain in url for domain in ['office.com', 'live.com', 'onedrive.live.com']):
