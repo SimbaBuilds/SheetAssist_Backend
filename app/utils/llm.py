@@ -84,7 +84,7 @@ def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDa
                 Error:\n{result.error}"""}
         ]
     )
-    print(f"""Gen from error called -- attempt {error_attempts}, query: \n{result.original_query} 
+    print(f"""Gen from error called, attempt: {error_attempts}, query: \n{result.original_query} 
           \ncode: \n{result.code} \nerror: \n{result.error}""")
     return response.choices[0].message.content
 

@@ -16,8 +16,8 @@ from app.utils.file_postprocessing import handle_destination_upload, handle_down
 from app.utils.data_processing import get_data_snapshot
 from app.utils.file_preprocessing import preprocess_files
 from fastapi import BackgroundTasks
-
-
+from bs4 import BeautifulSoup
+import requests
 
 router = APIRouter()
 
@@ -140,48 +140,57 @@ async def process_query_endpoint(
         return QueryResponse(
             result=truncated_result,
             status="error",
-            message="an error occurred while processing your request -- please try again",
+            message="An error occurred while processing your request -- please try again or rephrase your request",
             files=None
         )
 
-@router.get("/download")
-async def download_file(
-    file_path: str,
-    background_tasks: BackgroundTasks
-) -> FileResponse:
-    """
-    Serve a processed file for download
+    titles = []
     
-    Args:
-        file_path: Full path to the file to download
-        background_tasks: FastAPI background tasks handler
-    """
-    try:
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="File not found")
+    for url in request.urls:
+        try:
+            # Add headers to mimic a browser request
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
             
-        # Determine the media type based on file extension
-        filename = os.path.basename(file_path)
-        extension = filename.split('.')[-1].lower()
-        media_types = {
-            'pdf': 'application/pdf',
-            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'txt': 'text/plain',
-            'csv': 'text/csv'
-        }
-        
-        media_type = media_types.get(extension, 'application/octet-stream')
-        
-        # Add cleanup task to run after file is sent
-        background_tasks.add_task(temp_file_manager.cleanup_marked)
-        
-        # Return the file as a response
-        return FileResponse(
-            path=file_path,
-            media_type=media_type,
-            filename=filename
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error serving file: {str(e)}")
+            response = requests.get(url, headers=headers, timeout=5)
+            response.raise_for_status()
+            
+            # Parse the HTML content
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Try to get title from different sources
+            title = None
+            
+            # For Google Docs
+            if 'docs.google.com' in url:
+                title = soup.find('title').text.replace(' - Google Docs', '')
+            
+            # For Google Sheets
+            elif 'sheets.google.com' in url:
+                title = soup.find('title').text.replace(' - Google Sheets', '')
+            
+            # For Microsoft Office Online
+            elif 'office.com' in url or 'office365.com' in url:
+                title = soup.find('title').text.split(' - ')[0]
+            
+            # Default fallback
+            else:
+                title_tag = soup.find('title')
+                if title_tag:
+                    title = title_tag.text.strip()
+                else:
+                    # Try to find any prominent heading
+                    h1 = soup.find('h1')
+                    if h1:
+                        title = h1.text.strip()
+                    else:
+                        title = url  # Fallback to URL if no title found
+            
+            titles.append(DocumentTitle(url=url, title=title))
+            
+        except Exception as e:
+            # If there's any error, use the URL as the title
+            titles.append(DocumentTitle(url=url, title=url))
+    
+    return titles

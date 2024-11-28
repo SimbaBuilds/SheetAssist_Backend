@@ -1,10 +1,5 @@
-import pandas as pd
-from typing import Union, Tuple, Any, List, Optional, Dict
+from typing import Any, List, Optional
 from pydantic import BaseModel
-from fastapi import UploadFile 
-from datetime import datetime
-from uuid import UUID
-
 
 
 class OutputPreferences(BaseModel):
@@ -25,8 +20,6 @@ class QueryRequest(BaseModel):
     files_metadata: Optional[List[FileMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional
-
-
 
 
 
@@ -81,3 +74,5 @@ class QueryResponse(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+

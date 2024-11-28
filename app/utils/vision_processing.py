@@ -73,7 +73,7 @@ class VisionProcessor:
                             {
                                 "type": "text",
                                 "text": f"""
-                                Extract all relevant information from this image based on this user query: {query}. 
+                                Extract and organize all relevant information from this image based on this user query: {query}. 
                                 If formatting in the image provides information, indicate as much in your response 
                                 (e.g. large text at the top of the image: title: [large text], 
                                 tabular data: table: [tabular data], etc...).
@@ -148,7 +148,12 @@ class VisionProcessor:
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"Extract the relevant information from page {page_num + 1} of this PDF based on this user query: {query}"
+                                    "text": f"""Extract and organize the relevant informatio from page {page_num + 1} of 
+                                    this PDF based on this user query: {query}.
+                                    If formatting in the image provides information, indicate as much in your response 
+                                    (e.g. large text at the top of the image: title: [large text], 
+                                    tabular data: table: [tabular data], etc...).
+                                    """
                                 },
                                 {
                                     "type": "image_url",

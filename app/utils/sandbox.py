@@ -30,6 +30,7 @@ class EnhancedPythonInterpreter:
             'PyPDF2': __import__('PyPDF2'),
             'fitz': __import__('fitz'),  # PyMuPDF for advanced PDF processing
             'io': __import__('io'),      # For StringIO/BytesIO operations
+            'StringIO': __import__('io').StringIO,  # Add this line
             're': __import__('re'),      # For regular expressions
             'chardet': __import__('chardet'),  # For character encoding detection
             'tabula': __import__('tabula'),  # For extracting tables from PDFs
@@ -82,7 +83,7 @@ class EnhancedPythonInterpreter:
                     'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
                     'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
                     'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
-                    'fitz', 'io', 're', 'chardet', 'tabula'  # Added new packages
+                    'fitz', 'io', 'StringIO', 're', 'chardet', 'tabula'  # Added new packages
                 }
 
             def find_spec(self, fullname, path, target=None):

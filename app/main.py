@@ -5,12 +5,11 @@ sys.path.append(project_root)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.endpoints import process_query
+from app.endpoints import process_query, download, get_title
 import uvicorn
 
 app = FastAPI()
 
-#FASTAPI
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Specify domains if needed
@@ -19,33 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-#include endpoints via router
-#region
 app.include_router(process_query.router)
-#endregion
+app.include_router(download.router)
+app.include_router(get_title.router)
 
 
-# development
-# file_paths = ['course_data.csv']
-# data_info_list = []
-
-# # Read the CSV files
-# for file_path in file_paths:
-#     df = pd.read_csv(file_path)
-#     # Store data info in a DataInfo object
-#     data_info = FileDataInfo(
-#         content=df, 
-#         snapshot=str(df.head(10)), 
-#         data_type="DataFrame", 
-#         original_file_name=file_path
-#     )
-#     data_info_list.append(data_info)
-
-# query = "Remove courses with less than 20 active students from this list."
-    
-
-# Example usage
 if __name__ == "__main__":    
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("app.main:app", host="localhost", port=port, reload=True)

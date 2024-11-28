@@ -44,7 +44,7 @@ def process_query(
             suggested_code = gen_from_error(result, error_attempts, data)
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
-            print("New code:", cleaned_code)
+            print("New LLM output\n:", unprocessed_llm_output)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
             print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
             print("Error:", result.error)
