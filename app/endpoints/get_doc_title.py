@@ -7,7 +7,7 @@ from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
 import requests
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Annotated
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
@@ -75,6 +75,12 @@ async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Option
         
         # Refresh the credentials
         creds.refresh(Request())
+        logger.info(f"Refreshed Google token: {creds.token}")
+        
+        # Calculate new expiry time
+        expiry_timestamp = int(creds.expiry.timestamp())
+        current_timestamp = int(datetime.now().timestamp())
+        expires_in = expiry_timestamp - current_timestamp
         
         # Create new token info
         new_token_info = TokenInfo(
@@ -83,8 +89,9 @@ async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Option
             token_type='Bearer',
             scope=' '.join(creds.scopes),
             expires_at=(datetime.now(timezone.utc) + 
-                       datetime.timedelta(seconds=creds.expiry.timestamp() - datetime.now().timestamp())
-                      ).isoformat()
+                       timedelta(seconds=expires_in)
+                      ).isoformat(),
+            user_id=token_info.user_id
         )
         
         # Update token in database
@@ -100,7 +107,7 @@ async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Option
             }) \
             .execute()
             
-        logger.info("Successfully refreshed Google token")
+        logger.info("Successfully updated Google token in database")
         return new_token_info
         
     except RefreshError as e:
@@ -129,15 +136,15 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
         )
         response.raise_for_status()
         token_data = response.json()
-        
+        logger.info(f"Received token data: {token_data}")
         # Create new token info
         new_token_info = TokenInfo(
             access_token=token_data['access_token'],
-            refresh_token=token_data.get('refresh_token', token_info.refresh_token),  # Use old refresh token if new one not provided
+            refresh_token=token_data.get('refresh_token', token_info.refresh_token),
             token_type=token_data['token_type'],
             scope=token_data['scope'],
             expires_at=(datetime.now(timezone.utc) + 
-                       datetime.timedelta(seconds=int(token_data['expires_in']))
+                       timedelta(seconds=int(token_data['expires_in']))
                       ).isoformat(),
             user_id=token_info.user_id
         )
@@ -155,7 +162,7 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
             }) \
             .execute()
             
-        logger.info("Successfully refreshed Microsoft token")
+        logger.info("Successfully updated Microsoft token in database")
         return new_token_info
         
     except requests.exceptions.RequestException as e:
@@ -238,19 +245,28 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
             logger.error(f"Could not extract item ID from URL: {url}")
             return None
 
-        # Call Microsoft Graph API
+        # First attempt with current token
         headers = {
             'Authorization': f"{token_info.token_type} {token_info.access_token}",
             'Content-Type': 'application/json'
         }
         
-        # Use the item ID directly - no need to split for OneDrive
         api_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}"
-
-        logger.info(f"Calling Microsoft Graph API: {api_url}")
         response = requests.get(api_url, headers=headers)
+        
+        # If unauthorized, try refreshing token and retry
+        if response.status_code == 401:
+            logger.warning("Received 401 error, attempting token refresh")
+            token_info = await refresh_microsoft_token(token_info, supabase)
+            if not token_info:
+                logger.error("Failed to refresh Microsoft token after 401")
+                return None
+                
+            # Retry with new token
+            headers['Authorization'] = f"{token_info.token_type} {token_info.access_token}"
+            response = requests.get(api_url, headers=headers)
+        
         response.raise_for_status()
-        logger.info(f"Received response from Microsoft Graph API: {response.json()}")
         return response.json().get('name')
 
     except Exception as e:
