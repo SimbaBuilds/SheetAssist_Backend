@@ -174,6 +174,7 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
 
 async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> str | None:
     """Get document title using Google Drive API"""
+    logger.info(f"Fetching Google doc title for URL: {url}")
     try:
         # Check if token is expired
         expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
@@ -207,13 +208,33 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
         # Build the service
         service = build('drive', 'v3', credentials=creds)
         
-        # Get file metadata
-        file = service.files().get(fileId=file_id, fields='name').execute()
-        return file.get('name')
+        try:
+            # Get file metadata
+            file = service.files().get(fileId=file_id, fields='name').execute()
+            return file.get('name')
+        except Exception as api_error:
+            # Handle specific Google API errors
+            if 'invalid_grant' in str(api_error):
+                logger.warning("Invalid grant error, attempting token refresh")
+                token_info = await refresh_google_token(token_info, supabase)
+                if token_info:
+                    # Retry once with new token
+                    creds = Credentials(
+                        token=token_info.access_token,
+                        refresh_token=token_info.refresh_token,
+                        token_uri='https://oauth2.googleapis.com/token',
+                        client_id=os.getenv('GOOGLE_CLIENT_ID'),
+                        client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+                        scopes=token_info.scope.split(' ')
+                    )
+                    service = build('drive', 'v3', credentials=creds)
+                    file = service.files().get(fileId=file_id, fields='name').execute()
+                    return file.get('name')
+            raise  # Re-raise if it's not an invalid_grant error or if retry failed
 
     except Exception as e:
-        print(f"Error fetching Google doc title: {e}")
-        return None
+        logger.error(f"Error fetching Google doc title: {str(e)}")
+        return None  # Return None instead of the error string to maintain consistency
 
 async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> str | None:
     """Get document title using Microsoft Graph API"""
@@ -273,7 +294,7 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
         logger.error(f"Error fetching Microsoft doc title: {str(e)}")
         return None
 
-@router.post("/get_document_titles", response_model=DocumentTitleResponse)
+@router.post("/get_document_titles", response_model=List[DocumentTitleResponse])
 async def get_document_titles(
     request: URLRequest,
     user_id: Annotated[str, Depends(get_current_user)],
@@ -287,74 +308,74 @@ async def get_document_titles(
             error="Authentication required"
         ) for url in request.urls]
 
-    title = DocumentTitleResponse()
+    titles = []
     
     for url in request.urls:
         # Handle Google URLs
         if any(domain in url for domain in ['docs.google.com', 'sheets.google.com']):
             google_token = await get_provider_token(user_id, 'google', supabase)
             if not google_token:
-                title = DocumentTitleResponse(
+                titles.append(DocumentTitleResponse(
                     url=url,
                     success=False,
                     error="Google authentication required. Please connect your Google account."
-                )
+                ))
                 continue
 
             try:
                 title = await get_google_title(url, google_token, supabase)
                 if title is None:
-                    title = DocumentTitleResponse(
+                    titles.append(DocumentTitleResponse(
                         url=url,
                         success=False,
-                        error="Failed to access Google document. Please reconnect your Google account."
-                    )
+                        error="Error accessing Google document. Please reconnect your Google account."
+                    ))
                 else:
-                    title = DocumentTitleResponse(
+                    titles.append(DocumentTitleResponse(
                         url=url,
                         title=title,
                         success=True
-                    )
+                    ))
             except Exception as e:
                 logger.error(f"Error processing Google URL: {str(e)}")
-                title = DocumentTitleResponse(
+                titles.append(DocumentTitleResponse(
                     url=url,
                     success=False,
                     error="Error accessing Google document. Please reconnect your Google account."
-                )
+                ))
             
         # Handle Microsoft URLs
         elif any(domain in url for domain in ['office.com', 'live.com', 'onedrive.live.com']):
             microsoft_token = await get_provider_token(user_id, 'microsoft', supabase)
             logger.info(f"Retrieved Microsoft token: {microsoft_token}")
             if not microsoft_token:
-                title = DocumentTitleResponse(
+                titles.append(DocumentTitleResponse(
                     url=url,
                     success=False,
                     error="Microsoft authentication required. Please connect your Microsoft account."
-                )
+                ))
                 continue
 
             title = await get_microsoft_title(url, microsoft_token, supabase)
             if title:
                 logger.info(f"Retrieved title: {title}")
-                title = DocumentTitleResponse(
+                titles.append(DocumentTitleResponse(
                     url=url,
                     title=title,
                     success=True
-                )
+                ))
             else:
                 logger.error(f"Failed to retrieve title for Microsoft document: {url}")
-                title = DocumentTitleResponse(
+                titles.append(DocumentTitleResponse(
                     url=url,
                     success=False,
-                    error="Failed to access Microsoft document. Please reconnect your Microsoft account."
-                )
+                    error="Error accessing Microsoft document. Please reconnect your Microsoft account."
+                ))
         else:
-            title = DocumentTitleResponse(
+            titles.append(DocumentTitleResponse(
                 url=url,
                 success=False,
                 error="Unsupported document type"
-            )
-
-    return title
+            ))
+    logger.info(f"Successfully processed document titles request with {len(titles)} titles\n {titles[0].url} and title {titles[0].title} and success {titles[0].success} and error {titles[0].error}")  
+    return titles

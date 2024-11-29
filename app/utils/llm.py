@@ -34,7 +34,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
                 Assume all data variables mentioned in the query already exist -- don't check for existence.
                 The generated code should be enclosed in one set of triple backticks.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
-                Don't try to concatenate to an empty or all-NA dataframe -- pandas no longer supports this.
+                Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not forget your imports.
@@ -73,7 +73,7 @@ def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDa
                 Do not forget your imports.
                 The data is available in variables named 'data', 'data_1', 'data_2', etc.
                 Each data variable may be of different types (DataFrame, string, list, etc.).
-                Don't try to concatenate to an empty or all-NA dataframe -- pandas no longer supports this.
+                Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
@@ -110,7 +110,7 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[Fi
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 The generated code should be enclosed in one set of triple backticks.
                 Do not forget your imports.
-                Don't try to concatenate to an empty or all-NA dataframe -- pandas no longer supports this.
+                Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
                 Do not include print statements -- ensure the last line returns the desired value."""},
             {"role": "user", "content": f""" Here is the original user query, available data, code, and LLM produced analysis:
                 Original Query:\n{result.original_query}\n\n
@@ -144,14 +144,18 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
                 or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does or does not satisfy the user's original query]"
              """},
             {"role": "user", "content": f""" 
-                Here is the original user query, snapshots of the new and old data, and dataset diff information:
+                Here is the original user query, snapshots of old data, a snapshot of the result, and dataset diff information:
                 Original Query:\n{result.original_query}\n
                 Old Data Snapshots:\n{old_data_snapshot}\n
-                New Data Snapshot: {new_data.snapshot}\n
+                Result Snapshot: {new_data.snapshot}\n
                 Dataset Diff Information:{analyzer_context}\n
                 """}
         ]
     )
+    print(f"""\n\nSandbox result analyzer called with Query: {result.original_query}\n
+                Old Data Snapshots:\n{old_data_snapshot}\n
+                Result Snapshot: {new_data.snapshot}\n
+                Dataset Diff Information:{analyzer_context}\n\n""")
     result = response.choices[0].message.content
     return result
 

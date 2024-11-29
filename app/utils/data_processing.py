@@ -69,11 +69,46 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
                         context_radius: int = 2) -> DatasetDiff:
     """
     Compute comprehensive diff between old and new datasets with context.
+    Handles dataframes with different shapes by comparing only common columns.
     """
-    # Find modified and new rows using index comparison
+    # Ensure we only compare common columns
+    common_columns = list(set(old_df.columns) & set(new_df.columns))
+    if not common_columns:
+        # If no common columns, treat all rows as added/deleted
+        return DatasetDiff(
+            added_rows=new_df if len(new_df) > 0 else pd.DataFrame(),
+            modified_rows=pd.DataFrame(),
+            deleted_rows=old_df if len(old_df) > 0 else pd.DataFrame(),
+            context_rows=pd.DataFrame(),
+            statistics={
+                'total_rows_old': len(old_df),
+                'total_rows_new': len(new_df),
+                'modified_rows_count': 0,
+                'added_rows_count': len(new_df),
+                'deleted_rows_count': len(old_df),
+                'column_changes': {
+                    'added_columns': list(set(new_df.columns) - set(old_df.columns)),
+                    'deleted_columns': list(set(old_df.columns) - set(new_df.columns))
+                }
+            },
+            metadata={
+                'change_patterns': {
+                    'is_schema_change': True,
+                    'common_columns': [],
+                    'added_columns': list(set(new_df.columns) - set(old_df.columns)),
+                    'deleted_columns': list(set(old_df.columns) - set(new_df.columns))
+                }
+            }
+        )
+
+    # Find modified and new rows using index comparison on common columns
     common_indices = old_df.index.intersection(new_df.index)
-    modified_mask = (old_df.loc[common_indices] != new_df.loc[common_indices]).any(axis=1)
-    modified_indices = common_indices[modified_mask]
+    if len(common_indices) > 0:
+        modified_mask = (old_df.loc[common_indices, common_columns] != 
+                        new_df.loc[common_indices, common_columns]).any(axis=1)
+        modified_indices = common_indices[modified_mask]
+    else:
+        modified_indices = pd.Index([])
     
     # Identify added and deleted rows
     added_indices = new_df.index.difference(old_df.index)
@@ -94,15 +129,18 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
         'modified_rows_count': len(modified_indices),
         'added_rows_count': len(added_indices),
         'deleted_rows_count': len(deleted_indices),
+        'column_changes': {
+            'added_columns': list(set(new_df.columns) - set(old_df.columns)),
+            'deleted_columns': list(set(old_df.columns) - set(new_df.columns))
+        },
         'column_statistics': {
             col: {
-                'old_mean': old_df[col].mean() if pd.api.types.is_numeric_dtype(old_df[col]) else None,
-                'new_mean': new_df[col].mean() if pd.api.types.is_numeric_dtype(new_df[col]) else None,
-                'modified_columns': old_df.columns[
-                    (old_df.loc[modified_indices] != new_df.loc[modified_indices]).any()
-                ].tolist() if len(modified_indices) > 0 else []
+                'old_mean': old_df[col].mean() if col in old_df.columns and pd.api.types.is_numeric_dtype(old_df[col]) else None,
+                'new_mean': new_df[col].mean() if col in new_df.columns and pd.api.types.is_numeric_dtype(new_df[col]) else None,
+                'modified_columns': [col for col in common_columns if len(modified_indices) > 0 and 
+                                   (old_df.loc[modified_indices, col] != new_df.loc[modified_indices, col]).any()]
             }
-            for col in old_df.columns
+            for col in set(old_df.columns) | set(new_df.columns)
         }
     }
     
@@ -115,9 +153,12 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
         'change_patterns': {
             'is_append_only': len(added_indices) > 0 and len(modified_indices) == 0 and len(deleted_indices) == 0,
             'is_modify_only': len(added_indices) == 0 and len(modified_indices) > 0 and len(deleted_indices) == 0,
+            'is_schema_change': len(set(new_df.columns) ^ set(old_df.columns)) > 0,
+            'common_columns': common_columns,
             'affected_columns': list(set(
                 col for idx in modified_indices
-                for col in old_df.columns[old_df.loc[idx] != new_df.loc[idx]]
+                for col in common_columns
+                if old_df.loc[idx, col] != new_df.loc[idx, col]
             )) if len(modified_indices) > 0 else []
         }
     }
@@ -133,24 +174,42 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
 
 def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Prepare comprehensive context for the analyzer LLM.
+    Prepare comprehensive context for the analyzer LLM, handling dataframes with different shapes.
     """
     # Compute the diff
     diff = compute_dataset_diff(old_df, new_df)
     
-    # Prepare the context
-    return {
+    # Prepare the context with enhanced schema change information
+    context = {
         'changes': {
             'added_rows': diff.added_rows.to_dict(orient='records'),
             'modified_rows': {
-                'before': old_df.loc[diff.modified_rows.index].to_dict(orient='records'),
+                'before': old_df.loc[diff.modified_rows.index].to_dict(orient='records') if not diff.modified_rows.empty else {},
                 'after': diff.modified_rows.to_dict(orient='records')
             },
-            'deleted_rows': diff.deleted_rows.to_dict(orient='records')
+            'deleted_rows': diff.deleted_rows.to_dict(orient='records'),
+            'schema_changes': {
+                'added_columns': diff.statistics.get('column_changes', {}).get('added_columns', []),
+                'deleted_columns': diff.statistics.get('column_changes', {}).get('deleted_columns', []),
+                'common_columns': diff.metadata['change_patterns'].get('common_columns', [])
+            }
         },
         'context': {
             'surrounding_rows': diff.context_rows.to_dict(orient='records'),
-            'statistics': diff.statistics,
-            'metadata': diff.metadata
+            'statistics': {
+                **diff.statistics,
+                'has_schema_changes': diff.metadata['change_patterns'].get('is_schema_change', False),
+                'total_column_changes': len(diff.statistics.get('column_changes', {}).get('added_columns', [])) + 
+                                      len(diff.statistics.get('column_changes', {}).get('deleted_columns', []))
+            },
+            'metadata': {
+                **diff.metadata,
+                'dataframe_shapes': {
+                    'old': {'rows': len(old_df), 'columns': len(old_df.columns)},
+                    'new': {'rows': len(new_df), 'columns': len(new_df.columns)}
+                }
+            }
         }
     }
+    
+    return context

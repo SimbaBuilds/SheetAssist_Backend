@@ -6,7 +6,7 @@ class OutputPreferences(BaseModel):
     type: str  # 'download' or 'online' - no longer Optional
     destination_url: Optional[str] = None
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
-
+    modify_existing: Optional[bool] = None
 class FileMetadata(BaseModel):
     """Metadata about an uploaded file from frontend"""
     name: str

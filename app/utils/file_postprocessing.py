@@ -23,6 +23,7 @@ import json
 import logging
 from typing import Any
 import os
+from app.utils.auth import SupabaseClient
 
 def prepare_dataframe(data: Any) -> pd.DataFrame:
     """Prepare and standardize any data type into a clean DataFrame"""
@@ -224,12 +225,16 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     return tmp_path
 
 class DocumentIntegrations:
-    def __init__(self):
+    def __init__(self, google_refresh_token: str):
         # Google credentials
-        self.google_creds = Credentials.from_authorized_user_info(
-            json.loads(os.getenv('GOOGLE_CREDENTIALS')),
-            ['https://www.googleapis.com/auth/documents',
-             'https://www.googleapis.com/auth/spreadsheets']
+        self.google_creds = Credentials(
+            token=None,
+            client_id=os.getenv('GOOGLE_CLIENT_ID'),
+            client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+            refresh_token=google_refresh_token,
+            token_uri='https://oauth2.googleapis.com/token',
+            scopes=['https://www.googleapis.com/auth/documents',
+                   'https://www.googleapis.com/auth/spreadsheets']
         )
         
         # Microsoft credentials
@@ -286,24 +291,24 @@ class DocumentIntegrations:
             # Extract spreadsheet ID from URL
             sheet_id = sheet_url.split('/d/')[1].split('/')[0]
             
-            # Create Google Sheets service
+            # Create Google Sheets service with proper scopes
             service = build('sheets', 'v4', credentials=self.google_creds)
             
-            # Create new sheet
-            sheet_title = "Query Results"
-            body = {
-                'requests': [{
-                    'addSheet': {
-                        'properties': {
-                            'title': sheet_title
-                        }
-                    }
-                }]
-            }
-            service.spreadsheets().batchUpdate(
-                spreadsheetId=sheet_id,
-                body=body
-            ).execute()
+            # Get sheet name from URL or fetch first sheet if not specified
+            sheet_name = None
+            if '#gid=' in sheet_url:
+                gid = sheet_url.split('#gid=')[1]
+                # Get spreadsheet metadata to find sheet name
+                sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+                for sheet in sheet_metadata.get('sheets', ''):
+                    if sheet.get('properties', {}).get('sheetId') == int(gid):
+                        sheet_name = sheet['properties']['title']
+                        break
+            
+            if not sheet_name:
+                # If no specific sheet found, get the first sheet name
+                sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+                sheet_name = sheet_metadata['sheets'][0]['properties']['title']
             
             # Format data for sheets
             if isinstance(data, pd.DataFrame):
@@ -316,14 +321,15 @@ class DocumentIntegrations:
             else:
                 values = [[str(data)]]
             
-            # Append data to new sheet
+            # Append data to sheet using values.append
             body = {
                 'values': values
             }
-            service.spreadsheets().values().update(
+            service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
-                range=f"{sheet_title}!A1",
+                range=f"{sheet_name}",  # Use the detected sheet name
                 valueInputOption='RAW',
+                insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
             
@@ -332,6 +338,10 @@ class DocumentIntegrations:
         except Exception as e:
             logging.error(f"Google Sheets append error: {str(e)}")
             raise
+
+    async def add_to_new_google_sheet(self, data: Any, sheet_name: str) -> bool:
+        """Add data to a new Google Sheet"""
+        pass
 
     async def append_to_office_doc(self, data: Any, doc_url: str) -> bool:
         """Append data to Office Word Online document"""
@@ -391,23 +401,45 @@ class DocumentIntegrations:
             logging.error(f"Office Excel append error: {str(e)}")
             raise 
 
-def handle_destination_upload(data: Any, destination_url: str) -> bool:
+    async def add_to_new_office_sheet(self, data: Any, sheet_name: str) -> bool:
+        """Add data to a new Office Excel Online workbook"""
+        pass
+
+async def handle_destination_upload(data: Any, destination_url: str, supabase: SupabaseClient, user_id: str) -> bool:
     """Upload data to various destination types"""
     try:
-        doc_integrations = DocumentIntegrations()
+        # Process tuple data if present
+        if isinstance(data, tuple):
+            if isinstance(data[0], pd.DataFrame):
+                data = data[0]
+            elif isinstance(data[0], str):
+                data = data[0]
+            else:
+                data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
+        
+        response = supabase.table('user_documents_access') \
+            .select('refresh_token') \
+            .match({'user_id': user_id, 'provider': 'google'}) \
+            .execute()
+        
+        if not response.data or len(response.data) == 0:
+            print(f"No Google token found for user {user_id}")
+            return None
+        google_refresh_token = response.data[0]['refresh_token']
+        doc_integrations = DocumentIntegrations(google_refresh_token)
         url_lower = destination_url.lower()
         
         if "docs.google.com" in url_lower:
             if "document" in url_lower:
-                return doc_integrations.append_to_google_doc(data, destination_url)
+                return await doc_integrations.append_to_google_doc(data, destination_url)
             elif "spreadsheets" in url_lower:
-                return doc_integrations.append_to_google_sheet(data, destination_url)
+                return await doc_integrations.append_to_google_sheet(data, destination_url)
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             if "docx" in url_lower:
-                return doc_integrations.append_to_office_doc(data, destination_url)
+                return await doc_integrations.append_to_office_doc(data, destination_url)
             elif "xlsx" in url_lower:
-                return doc_integrations.append_to_office_sheet(data, destination_url)
+                return await doc_integrations.append_to_office_sheet(data, destination_url)
         
         raise ValueError(f"Unsupported destination URL type: {destination_url}")
     

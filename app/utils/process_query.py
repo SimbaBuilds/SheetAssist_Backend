@@ -39,7 +39,7 @@ def process_query(
         
         # Error handling for initial execution
         error_attempts = 0
-        while result.error and error_attempts < 3: #TODO: CHANGE TO 6 LATER
+        while result.error and error_attempts < 6: #TODO: CHANGE TO 6 LATER
             print(f"\n\nError analysis {error_attempts}:")
             suggested_code = gen_from_error(result, error_attempts, data)
             unprocessed_llm_output = suggested_code 
@@ -49,7 +49,7 @@ def process_query(
             print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
             print("Error:", result.error)
             error_attempts += 1
-            if error_attempts == 3:  #TODO: CHANGE TO 6 LATER
+            if error_attempts == 6:  #TODO: CHANGE TO 6 LATER
                 result.error = "Failed to interpret query. Please try rephrasing your request."
                 return result
             
@@ -61,7 +61,7 @@ def process_query(
             
             # Create new FileDataInfo based on return value type (get_data_snapshot handles tuples)
             new_data = FileDataInfo(
-                content=result.return_value, #likely a tuple containing a dataframe
+                content=result.return_value, #likely a tuple containing a dataframe or string
                 snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__), 
                 data_type=type(result.return_value).__name__,
                 original_file_name=data[0].original_file_name if data else None
@@ -76,7 +76,6 @@ def process_query(
                             diff_key = f"diff{i+1}_{j+1}"
                             analyzer_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
 
-            print("\n\nAnalyzer context:\n", analyzer_context, "\n\n")
             analysis_result = analyze_sandbox_result(result, old_data, new_data, analyzer_context) 
             success, analysis_result = sentiment_analysis(analysis_result)
             print("Analysis result:", analysis_result)
@@ -97,6 +96,7 @@ def process_query(
             # Gen new code from analysis
             new_code = gen_from_analysis(result, analysis_result, data)
             unprocessed_llm_output = new_code 
+            print("New LLM output\n:", unprocessed_llm_output)
             cleaned_code = extract_code(new_code)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
 
@@ -106,8 +106,9 @@ def process_query(
                 print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
                 suggested_code = gen_from_error(result, error_attempts, data)
+                unprocessed_llm_output = suggested_code 
+                print("New LLM output\n:", unprocessed_llm_output)
                 cleaned_code = extract_code(suggested_code)
-                print("New code:", cleaned_code)
                 result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
                 error_attempts += 1
                 if error_attempts == 5:

@@ -1,5 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response
-from typing import List, Optional, Any, Union
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response, Depends
+from typing import List, Optional, Any, Union, Annotated
 from pydantic import BaseModel
 from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
@@ -16,26 +16,36 @@ from app.utils.file_postprocessing import handle_destination_upload, handle_down
 from app.utils.data_processing import get_data_snapshot
 from app.utils.file_preprocessing import preprocess_files
 from fastapi import BackgroundTasks
-from bs4 import BeautifulSoup
-import requests
+
+from supabase.client import Client as SupabaseClient
+from app.utils.auth import get_current_user, get_supabase_client
+
+# Add logging configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_endpoint(
+    user_id: Annotated[str, Depends(get_current_user)],
+    supabase: Annotated[SupabaseClient, Depends(get_supabase_client)],
     json_data: str = Form(...),
-    files: List[UploadFile] = File(None),
+    files: List[UploadFile] = File(default=[]),
     background_tasks: BackgroundTasks = BackgroundTasks()
 ) -> QueryResponse:
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
     try:
         # Initialize truncated_result as None at the start
         truncated_result = None
         
         request = QueryRequest(**json.loads(json_data))
-        print
-        logging.info(f"Processing query with {len(request.files_metadata or [])} files")
+        logger.info(f"Processing query for user {user_id} with {len(request.files_metadata or [])} files")
+        
         session_dir = temp_file_manager.get_temp_dir()
-        print("Calling preprocess_files")
+        logger.info("Calling preprocess_files")
         try:
             preprocessed_data = preprocess_files(
                 files=files,
@@ -54,14 +64,20 @@ async def process_query_endpoint(
             sandbox=sandbox,
             data=preprocessed_data
         )
-        #return value is a tuple 
+        
         result.return_value_snapshot = get_data_snapshot(result.return_value, type(result.return_value).__name__)
-        print("Query processed with return value snapshot:\n", result.return_value_snapshot, "\ntype:", type(result.return_value).__name__, "\nand error:", result.error)
+        logger.info(f"Query processed for user {user_id} with return value snapshot type: {type(result.return_value).__name__}")
 
         if result.error:
             raise HTTPException(status_code=400, detail=result.error + " -- please try rephrasing your request")
         
-        print("Output preferences type:", request.output_preferences.type, "and format:", request.output_preferences.format)
+        logger.info(f"""Output preferences for user {user_id}: 
+                    type={request.output_preferences.type}, 
+                    format={request.output_preferences.format}, 
+                    destination_url={request.output_preferences.destination_url}, 
+                    modify_existing={request.output_preferences.modify_existing}
+                    """)
+        
         # Handle output based on type
         if request.output_preferences.type == "download":
             tmp_path, media_type = handle_download(result, request, preprocessed_data)
@@ -82,11 +98,11 @@ async def process_query_endpoint(
                 result=truncated_result,
                 status="success",
                 message="File ready for download",
-                files=[FileInfo(   #TODO: change to list of FileDataInfo
+                files=[FileInfo(
                     file_path=str(tmp_path),
                     media_type=media_type,
                     filename=os.path.basename(tmp_path),
-                    download_url=download_url  # Updated download URL format
+                    download_url=download_url
                 )]
             )
 
@@ -95,9 +111,11 @@ async def process_query_endpoint(
                 raise ValueError("destination_url is required for online type")
                 
             # Handle destination URL upload
-            handle_destination_upload(
+            await handle_destination_upload(
                 result.return_value,
-                request.output_preferences.destination_url
+                request.output_preferences.destination_url,
+                supabase,
+                user_id
             )
 
             # Only cleanup immediately for online type
@@ -113,7 +131,6 @@ async def process_query_endpoint(
         else:
             raise ValueError(f"Invalid output type: {request.output_preferences.type}")
 
-
     except Exception as e:
         # Enhanced error handling for binary content
         try:
@@ -125,7 +142,7 @@ async def process_query_endpoint(
         except:
             error_msg = "An unexpected error occurred"
             
-        logging.error(f"Process query error: {error_msg}")
+        logger.error(f"Process query error for user {user_id}: {error_msg}")
         
         # Create an error truncated_result if it wasn't created in the try block
         if truncated_result is None:
@@ -143,54 +160,3 @@ async def process_query_endpoint(
             message="An error occurred while processing your request -- please try again or rephrase your request",
             files=None
         )
-
-    titles = []
-    
-    for url in request.urls:
-        try:
-            # Add headers to mimic a browser request
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            
-            response = requests.get(url, headers=headers, timeout=5)
-            response.raise_for_status()
-            
-            # Parse the HTML content
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Try to get title from different sources
-            title = None
-            
-            # For Google Docs
-            if 'docs.google.com' in url:
-                title = soup.find('title').text.replace(' - Google Docs', '')
-            
-            # For Google Sheets
-            elif 'sheets.google.com' in url:
-                title = soup.find('title').text.replace(' - Google Sheets', '')
-            
-            # For Microsoft Office Online
-            elif 'office.com' in url or 'office365.com' in url:
-                title = soup.find('title').text.split(' - ')[0]
-            
-            # Default fallback
-            else:
-                title_tag = soup.find('title')
-                if title_tag:
-                    title = title_tag.text.strip()
-                else:
-                    # Try to find any prominent heading
-                    h1 = soup.find('h1')
-                    if h1:
-                        title = h1.text.strip()
-                    else:
-                        title = url  # Fallback to URL if no title found
-            
-            titles.append(DocumentTitle(url=url, title=title))
-            
-        except Exception as e:
-            # If there's any error, use the URL as the title
-            titles.append(DocumentTitle(url=url, title=url))
-    
-    return titles

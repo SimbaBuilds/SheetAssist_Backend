@@ -69,8 +69,8 @@ class EnhancedPythonInterpreter:
         
         # Initialize interpreter with base namespace
         self.interpreter = code.InteractiveInterpreter(locals=self.base_namespace)
-
-        # Restricted import finder -- 
+        
+        # Store the RestrictedImporter class as an instance variable
         class RestrictedImporter:
             def __init__(self):
                 self.blacklist = {
@@ -83,7 +83,7 @@ class EnhancedPythonInterpreter:
                     'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
                     'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
                     'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
-                    'fitz', 'io', 'StringIO', 're', 'chardet', 'tabula'  # Added new packages
+                    'fitz', 'io', 'StringIO', 're', 'chardet', 'tabula'
                 }
 
             def find_spec(self, fullname, path, target=None):
@@ -93,9 +93,8 @@ class EnhancedPythonInterpreter:
                 if module_base not in self.whitelist:
                     raise ImportError(f"Only whitelisted packages can be imported. {fullname} is not whitelisted.")
                 return None
-
-        sys.meta_path.insert(0, RestrictedImporter()) #updates import finder using sys.meta_path machinery
-
+        
+        self.restricted_importer = RestrictedImporter()
 
     # method to capture stdout and stderr (output and errors) -- decorator for use with Python "with" statement
     @contextlib.contextmanager
@@ -124,27 +123,28 @@ class EnhancedPythonInterpreter:
         )
 
         def execute():
-            with self.capture_output() as (stdout, stderr):
-                try:
-                    # Transform AST to capture last expression
-                    tree = transform_ast(code)
-                    # Create namespace with safe builtins, allowed packages, and passed data
-                    ns = {
-                        '__builtins__': self.safe_builtins,
-                        **self.allowed_packages,
-                        **(namespace or {})  # Add the passed namespace if it exists
-                    }
-                    #run the code
-                    exec(compile(tree, '<ast>', 'exec'), ns)
-                    # Capture return value from the last expression in the AST
-                    result.return_value = ns.get('_result')
-                    # Captures print output
-                    result.print_output = stdout.getvalue()
-                    # Captures error output
-                    if stderr.getvalue():
-                        result.error = stderr.getvalue()
-                except Exception as e:
-                    result.error = str(e)
+            # Add and remove the restricted importer only during code execution
+            sys.meta_path.insert(0, self.restricted_importer)
+            try:
+                with self.capture_output() as (stdout, stderr):
+                    try:
+                        tree = transform_ast(code)
+                        ns = {
+                            '__builtins__': self.safe_builtins,
+                            **self.allowed_packages,
+                            **(namespace or {})
+                        }
+                        exec(compile(tree, '<ast>', 'exec'), ns)
+                        result.return_value = ns.get('_result')
+                        result.print_output = stdout.getvalue()
+                        if stderr.getvalue():
+                            result.error = stderr.getvalue()
+                    except Exception as e:
+                        result.error = str(e)
+            finally:
+                # Always remove the restricted importer after execution
+                if self.restricted_importer in sys.meta_path:
+                    sys.meta_path.remove(self.restricted_importer)
 
         thread = threading.Thread(target=execute)
         thread.daemon = True
