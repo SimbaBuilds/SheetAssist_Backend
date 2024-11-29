@@ -34,6 +34,12 @@ class TokenInfo(BaseModel):
     scope: str
     user_id: str
 
+class DocumentTitleResponse(BaseModel):
+    url: str
+    title: Optional[str] = None
+    error: Optional[str] = None
+    success: bool
+
 async def get_provider_token(user_id: str, provider: str, supabase_client) -> Optional[TokenInfo]:
     """Fetch token for a specific provider from user_documents_access table"""
     try:
@@ -53,17 +59,6 @@ async def get_provider_token(user_id: str, provider: str, supabase_client) -> Op
     except Exception as e:
         logger.error(f"Error fetching {provider} token: {str(e)}")
         return None
-
-    """Remove invalid token from the database"""
-    try:
-        logger.info(f"Removing invalid {provider} token for user {user_id}")
-        response = supabase_client.table('user_documents_access') \
-            .delete() \
-            .match({'user_id': user_id, 'provider': provider}) \
-            .execute()
-        logger.info(f"Successfully removed {provider} token")
-    except Exception as e:
-        logger.error(f"Error removing {provider} token: {str(e)}")
 
 async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Optional[TokenInfo]:
     """Refresh Google OAuth token and update in database"""
@@ -115,6 +110,61 @@ async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Option
         logger.error(f"Error refreshing Google token: {str(e)}")
         return None
 
+async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Optional[TokenInfo]:
+    """Refresh Microsoft OAuth token and update in database"""
+    try:
+        logger.info("Attempting to refresh Microsoft token")
+        
+        # Microsoft OAuth2 token refresh request
+        data = {
+            'client_id': os.getenv('MS_CLIENT_ID'),
+            'client_secret': os.getenv('MS_CLIENT_SECRET'),
+            'refresh_token': token_info.refresh_token,
+            'grant_type': 'refresh_token'
+        }
+        
+        response = requests.post(
+            'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+            data=data
+        )
+        response.raise_for_status()
+        token_data = response.json()
+        
+        # Create new token info
+        new_token_info = TokenInfo(
+            access_token=token_data['access_token'],
+            refresh_token=token_data.get('refresh_token', token_info.refresh_token),  # Use old refresh token if new one not provided
+            token_type=token_data['token_type'],
+            scope=token_data['scope'],
+            expires_at=(datetime.now(timezone.utc) + 
+                       datetime.timedelta(seconds=int(token_data['expires_in']))
+                      ).isoformat(),
+            user_id=token_info.user_id
+        )
+        
+        # Update token in database
+        response = supabase_client.table('user_documents_access') \
+            .update({
+                'access_token': new_token_info.access_token,
+                'refresh_token': new_token_info.refresh_token,
+                'expires_at': new_token_info.expires_at
+            }) \
+            .match({
+                'provider': 'microsoft',
+                'user_id': token_info.user_id
+            }) \
+            .execute()
+            
+        logger.info("Successfully refreshed Microsoft token")
+        return new_token_info
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to refresh Microsoft token - HTTP error: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Error refreshing Microsoft token: {str(e)}")
+        return None
+
 async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> str | None:
     """Get document title using Google Drive API"""
     try:
@@ -158,26 +208,34 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
         print(f"Error fetching Google doc title: {e}")
         return None
 
-async def get_microsoft_title(url: str, token_info: TokenInfo) -> str | None:
+async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> str | None:
     """Get document title using Microsoft Graph API"""
     try:
         # Check if token is expired
         expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
         if expires_at <= datetime.now(timezone.utc):
-            # Token is expired, should implement refresh logic here
-            print("Microsoft token is expired")
-            return None
+            logger.warning("Microsoft token is expired, attempting refresh")
+            token_info = await refresh_microsoft_token(token_info, supabase)
+            if not token_info:
+                logger.error("Failed to refresh Microsoft token")
+                return None
 
         # Extract item ID from URL
         item_id = None
-        if '://' in url:
+        if 'id=' in url:
+            # Handle OneDrive URLs
+            item_id = url.split('id=')[1].split('&')[0]
+        elif '://' in url:
+            # Handle SharePoint URLs
             path_parts = url.split('://')[-1].split('/')
             for i, part in enumerate(path_parts):
                 if part in ['view.aspx', 'edit.aspx']:
                     item_id = path_parts[i-1]
                     break
 
+        logger.info(f"Extracted item ID: {item_id}")
         if not item_id:
+            logger.error(f"Could not extract item ID from URL: {url}")
             return None
 
         # Call Microsoft Graph API
@@ -186,19 +244,20 @@ async def get_microsoft_title(url: str, token_info: TokenInfo) -> str | None:
             'Content-Type': 'application/json'
         }
         
-        response = requests.get(
-            f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}",
-            headers=headers
-        )
+        # Use the item ID directly - no need to split for OneDrive
+        api_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}"
+
+        logger.info(f"Calling Microsoft Graph API: {api_url}")
+        response = requests.get(api_url, headers=headers)
         response.raise_for_status()
-        
+        logger.info(f"Received response from Microsoft Graph API: {response.json()}")
         return response.json().get('name')
 
     except Exception as e:
-        print(f"Error fetching Microsoft doc title: {e}")
+        logger.error(f"Error fetching Microsoft doc title: {str(e)}")
         return None
 
-@router.post("/get_document_titles", response_model=List[DocumentTitle])
+@router.post("/get_document_titles", response_model=List[DocumentTitleResponse])
 async def get_document_titles(
     request: URLRequest,
     user_id: Annotated[str, Depends(get_current_user)],
@@ -206,54 +265,80 @@ async def get_document_titles(
 ):
     logger.info(f"Processing document titles request for user {user_id}")
     if not user_id:
-        logger.error("No user_id provided")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required"
-        )
+        return [DocumentTitleResponse(
+            url=url,
+            success=False,
+            error="Authentication required"
+        ) for url in request.urls]
 
     titles = []
     
     for url in request.urls:
-        title = None
-        
         # Handle Google URLs
         if any(domain in url for domain in ['docs.google.com', 'sheets.google.com']):
             google_token = await get_provider_token(user_id, 'google', supabase)
             if not google_token:
-                logger.error(f"Google token not found for user {user_id}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="Google authentication required. Please connect your Google account."
-                )
+                titles.append(DocumentTitleResponse(
+                    url=url,
+                    success=False,
+                    error="Google authentication required. Please connect your Google account."
+                ))
+                continue
+
             try:
                 title = await get_google_title(url, google_token, supabase)
                 if title is None:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Google authentication expired. Please reconnect your Google account."
-                    )
+                    titles.append(DocumentTitleResponse(
+                        url=url,
+                        success=False,
+                        error="Failed to access Google document. Please reconnect your Google account."
+                    ))
+                else:
+                    titles.append(DocumentTitleResponse(
+                        url=url,
+                        title=title,
+                        success=True
+                    ))
             except Exception as e:
                 logger.error(f"Error processing Google URL: {str(e)}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="Error accessing Google document. Please reconnect your Google account."
-                )
+                titles.append(DocumentTitleResponse(
+                    url=url,
+                    success=False,
+                    error="Error accessing Google document. Please reconnect your Google account."
+                ))
             
         # Handle Microsoft URLs
         elif any(domain in url for domain in ['office.com', 'live.com', 'onedrive.live.com']):
             microsoft_token = await get_provider_token(user_id, 'microsoft', supabase)
+            logger.info(f"Retrieved Microsoft token: {microsoft_token}")
             if not microsoft_token:
-                logger.error(f"Microsoft token not found for user {user_id}")
-                raise HTTPException(
-                    status_code=401,
-                    detail="Microsoft authentication required. Please connect your Microsoft account."
-                )
-            title = await get_microsoft_title(url, microsoft_token)
-            
-        titles.append(DocumentTitle(
-            url=url,
-            title=title or url  # Fallback to URL if title fetch fails
-        ))
+                titles.append(DocumentTitleResponse(
+                    url=url,
+                    success=False,
+                    error="Microsoft authentication required. Please connect your Microsoft account."
+                ))
+                continue
+
+            title = await get_microsoft_title(url, microsoft_token, supabase)
+            if title:
+                logger.info(f"Retrieved title: {title}")
+                titles.append(DocumentTitleResponse(
+                    url=url,
+                    title=title,
+                    success=True
+                ))
+            else:
+                logger.error(f"Failed to retrieve title for Microsoft document: {url}")
+                titles.append(DocumentTitleResponse(
+                    url=url,
+                    success=False,
+                    error="Failed to access Microsoft document. Please reconnect your Microsoft account."
+                ))
+        else:
+            titles.append(DocumentTitleResponse(
+                url=url,
+                success=False,
+                error="Unsupported document type"
+            ))
     
     return titles
