@@ -113,9 +113,19 @@ async def process_query_endpoint(
             # Handle destination URL upload
             await handle_destination_upload(
                 result.return_value,
-                request.output_preferences.destination_url,
+                request,
+                preprocessed_data,
                 supabase,
                 user_id
+            )
+
+            # Create truncated result before returning
+            truncated_result = TruncatedSandboxResult(
+                original_query=result.original_query,
+                print_output=result.print_output,
+                error=result.error,
+                timed_out=result.timed_out,
+                return_value_snapshot=result.return_value_snapshot
             )
 
             # Only cleanup immediately for online type

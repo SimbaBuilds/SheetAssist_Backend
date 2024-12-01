@@ -19,7 +19,12 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
         snapshots = []
         for item in content:
             if isinstance(item, pd.DataFrame):
-                snapshots.append(item.head(10).to_string())
+                df_info = f"DataFrame Info:\n"
+                df_info += f"Shape: {item.shape}\n"
+                df_info += f"Columns: {list(item.columns)}\n"
+                df_info += f"Data Types:\n{item.dtypes}\n"
+                df_info += f"\nFirst 10 rows:\n{item.head(10).to_string()}"
+                snapshots.append(df_info)
             elif isinstance(item, dict):
                 snapshot_dict = dict(list(item.items())[:5])
                 snapshots.append(json.dumps(snapshot_dict, indent=2))

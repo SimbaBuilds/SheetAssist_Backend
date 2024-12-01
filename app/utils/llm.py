@@ -133,15 +133,15 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
     # Build old data snapshot
     old_data_snapshot = ""
     for data in old_data:
-        old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nSnapshot:\n{data.snapshot}\n\n"
+        old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data.snapshot}\n\n"
             
     response = client.chat.completions.create(
         model="gpt-4o",  
         messages=[
             {"role": "system", "content": """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.
-                File creation will be handled after this step: dataframes will later be converted to csv, xlsx etc... text will later be converted to txt, docx, etc... 
+                File creation will be handled after this step: dataframes will later be converted to csv, xlsx, google sheet, etc... text will later be converted to txt, docx, google doc, etc... 
                 so do not judge based on return object type or whether a file was created.
-                I am providing you with metadata and spanshots of the old and new data as well as
+                I am providing you with metadata and snapshots of the old and new data as well as
                 dataset diff information that is relevant for most spreadsheet/dataframe related queries.
                 Diff1_1 corresponds to the diff between the first dataframe in the old data and the first dataframe in the new data.
                 Diff1_2 corresponds to the diff between the first dataframe in the old data and the second dataframe in the new data etc...
@@ -153,15 +153,18 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
                 Original Query:\n{result.original_query}\n
                 Old Data Snapshots:\n{old_data_snapshot}\n
                 Error Free Code:\n{result.code}\n
-                Result Snapshot: {new_data.snapshot}\n
-                Dataset Diff Information:{analyzer_context}\n
+                Result Snapshot:\n{new_data.snapshot}\n
+                Dataset Diff Information:\n{analyzer_context}\n
                 """}
         ]
     )
     print(f"""\n\nSandbox result analyzer called with Query: {result.original_query}\n
-                Old Data Snapshots:\n{old_data_snapshot}\n
-                Result Snapshot: {new_data.snapshot}\n
-                Dataset Diff Information:{analyzer_context}\n\n""")
+            Old Data Snapshots:\n{old_data_snapshot}\n
+            Error Free Code:\n{result.code}\n
+            Result Snapshot:\n{new_data.snapshot}\n
+            Dataset Diff Information:\n{analyzer_context}\n\n
+            """
+    )
     result = response.choices[0].message.content
     return result
 

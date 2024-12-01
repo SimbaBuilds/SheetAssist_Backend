@@ -8,7 +8,7 @@ from typing import Any
 import json
 from docx import Document
 import openpyxl
-from app.schemas import FileDataInfo, SandboxResult, QueryRequest
+from app.schemas import FileDataInfo, SandboxResult, QueryRequest, OutputPreferences
 from typing import List, Tuple
 from app.utils.llm import file_namer
 import csv
@@ -285,7 +285,7 @@ class DocumentIntegrations:
             logging.error(f"Google Docs append error: {str(e)}")
             raise
 
-    async def append_to_google_sheet(self, data: Any, sheet_url: str) -> bool:
+    async def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Google Sheet"""
         try:
             # Extract spreadsheet ID from URL
@@ -312,14 +312,36 @@ class DocumentIntegrations:
             
             # Format data for sheets
             if isinstance(data, pd.DataFrame):
-                values = data.values.tolist() # Skip headers
+                # Convert DataFrame to string values, handling Timestamps and NaN
+                df_copy = data.copy()
+                # Handle datetime columns
+                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
+                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                # Replace NaN values with empty string
+                df_copy = df_copy.fillna('')
+                values = df_copy.values.tolist()
             elif isinstance(data, (dict, list)):
                 if isinstance(data, dict):
-                    values = [[k, str(v)] for k, v in data.items()]
+                    # Convert any Timestamp values to strings and handle NaN
+                    processed_dict = {}
+                    for k, v in data.items():
+                        if isinstance(v, pd.Timestamp):
+                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
+                        elif pd.isna(v):  # Handle NaN values
+                            processed_dict[k] = ''
+                        else:
+                            processed_dict[k] = str(v)
+                    values = [[k, v] for k, v in processed_dict.items()]
                 else:
-                    values = [[str(item)] for item in data]
-            else:
-                values = [[str(data)]]
+                    # Convert any Timestamp values in list to strings and handle NaN
+                    values = []
+                    for v in data:
+                        if isinstance(v, pd.Timestamp):
+                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
+                        elif pd.isna(v):  # Handle NaN values
+                            values.append([''])
+                        else:
+                            values.append([str(v)])
             
             # Append data to sheet using values.append
             body = {
@@ -339,9 +361,86 @@ class DocumentIntegrations:
             logging.error(f"Google Sheets append error: {str(e)}")
             raise
 
-    async def add_to_new_google_sheet(self, data: Any, sheet_name: str) -> bool:
-        """Add data to a new Google Sheet"""
-        pass
+    async def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
+        """Add data to a new sheet within an existing Google Sheets workbook"""
+        try:
+            # Create Google Sheets service
+            service = build('sheets', 'v4', credentials=self.google_creds)
+            
+            # Extract spreadsheet ID from URL
+            sheet_id = sheet_url.split('/d/')[1].split('/')[0]
+            
+            # Generate a unique sheet name (e.g. "Query Results 1", "Query Results 2", etc.)
+            sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+            existing_sheets = [sheet['properties']['title'] for sheet in sheet_metadata['sheets']]
+            base_name = file_namer(query, old_data)
+            sheet_name = base_name
+            counter = 1
+            while sheet_name in existing_sheets:
+                sheet_name = f"{base_name} {counter}"
+                counter += 1
+            
+            # Add new sheet
+            body = {
+                'requests': [{
+                    'addSheet': {
+                        'properties': {
+                            'title': sheet_name
+                        }
+                    }
+                }]
+            }
+            response = service.spreadsheets().batchUpdate(
+                spreadsheetId=sheet_id,
+                body=body
+            ).execute()
+            
+            # Format data for sheets (same as before)
+            if isinstance(data, pd.DataFrame):
+                df_copy = data.copy()
+                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
+                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                df_copy = df_copy.fillna('')
+                values = [df_copy.columns.tolist()] + df_copy.values.tolist()
+            elif isinstance(data, (dict, list)):
+                if isinstance(data, dict):
+                    processed_dict = {}
+                    for k, v in data.items():
+                        if isinstance(v, pd.Timestamp):
+                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
+                        elif pd.isna(v):
+                            processed_dict[k] = ''
+                        else:
+                            processed_dict[k] = str(v)
+                    values = [[k, v] for k, v in processed_dict.items()]
+                else:
+                    values = []
+                    for v in data:
+                        if isinstance(v, pd.Timestamp):
+                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
+                        elif pd.isna(v):
+                            values.append([''])
+                        else:
+                            values.append([str(v)])
+            else:
+                values = [[str(data)]]
+            
+            # Write data to new sheet
+            body = {
+                'values': values
+            }
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range=f"{sheet_name}!A1",
+                valueInputOption='RAW',
+                body=body
+            ).execute()
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"New Google Sheet creation error: {str(e)}")
+            raise
 
     async def append_to_office_doc(self, data: Any, doc_url: str) -> bool:
         """Append data to Office Word Online document"""
@@ -369,7 +468,7 @@ class DocumentIntegrations:
             logging.error(f"Office Word append error: {str(e)}")
             raise
 
-    async def append_to_office_sheet(self, data: Any, sheet_url: str) -> bool:
+    async def append_to_current_office_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Office Excel Online workbook"""
         try:
             # Initialize Microsoft Graph client
@@ -383,17 +482,43 @@ class DocumentIntegrations:
             
             # Format data for Excel
             if isinstance(data, pd.DataFrame):
-                values = [data.columns.tolist()] + data.values.tolist()
+                # Convert DataFrame to string values, handling Timestamps and NaN
+                df_copy = data.copy()
+                # Handle datetime columns
+                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
+                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                # Replace NaN values with empty string
+                df_copy = df_copy.fillna('')
+                # Include column headers and data
+                values = [df_copy.columns.tolist()] + df_copy.values.tolist()
             elif isinstance(data, (dict, list)):
                 if isinstance(data, dict):
-                    values = [[k, str(v)] for k, v in data.items()]
+                    # Convert any Timestamp values to strings and handle NaN
+                    processed_dict = {}
+                    for k, v in data.items():
+                        if isinstance(v, pd.Timestamp):
+                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
+                        elif pd.isna(v):
+                            processed_dict[k] = ''
+                        else:
+                            processed_dict[k] = str(v)
+                    values = [[k, v] for k, v in processed_dict.items()]
                 else:
-                    values = [[str(item)] for item in data]
+                    # Convert any Timestamp values in list to strings and handle NaN
+                    values = []
+                    for v in data:
+                        if isinstance(v, pd.Timestamp):
+                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
+                        elif pd.isna(v):
+                            values.append([''])
+                        else:
+                            values.append([str(v)])
             else:
                 values = [[str(data)]]
             
             # Write data to worksheet
-            worksheet.range('A1').values = values
+            range_address = f"A1:${chr(65 + len(values[0]) - 1)}${len(values)}"
+            await worksheet.range(range_address).values.set(values)
             
             return True
             
@@ -401,11 +526,71 @@ class DocumentIntegrations:
             logging.error(f"Office Excel append error: {str(e)}")
             raise 
 
-    async def add_to_new_office_sheet(self, data: Any, sheet_name: str) -> bool:
-        """Add data to a new Office Excel Online workbook"""
-        pass
+    async def append_to_new_office_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
+        """Add data to a new sheet within an existing Office Excel workbook"""
+        try:
+            # Initialize Microsoft Graph client
+            graph_client = GraphServiceClient(self.ms_credential, self.ms_scopes)
+            
+            # Extract workbook ID from URL
+            workbook_id = sheet_url.split('/')[-2]
+            
+            # Generate a unique sheet name
+            workbook = await graph_client.me.drive.items[workbook_id].workbook.get()
+            worksheets = await graph_client.me.drive.items[workbook_id].workbook.worksheets.get()
+            existing_sheets = [ws.name for ws in worksheets]
+            
+            base_name = file_namer(query, old_data)
+            sheet_name = base_name
+            counter = 1
+            while sheet_name in existing_sheets:
+                sheet_name = f"{base_name} {counter}"
+                counter += 1
+            
+            # Create new worksheet in existing workbook
+            worksheet = await graph_client.me.drive.items[workbook_id].workbook.worksheets.add(sheet_name)
+            
+            # Format data for Excel (same as before)
+            if isinstance(data, pd.DataFrame):
+                df_copy = data.copy()
+                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
+                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                df_copy = df_copy.fillna('')
+                values = [df_copy.columns.tolist()] + df_copy.values.tolist()
+            elif isinstance(data, (dict, list)):
+                if isinstance(data, dict):
+                    processed_dict = {}
+                    for k, v in data.items():
+                        if isinstance(v, pd.Timestamp):
+                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
+                        elif pd.isna(v):
+                            processed_dict[k] = ''
+                        else:
+                            processed_dict[k] = str(v)
+                    values = [[k, v] for k, v in processed_dict.items()]
+                else:
+                    values = []
+                    for v in data:
+                        if isinstance(v, pd.Timestamp):
+                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
+                        elif pd.isna(v):
+                            values.append([''])
+                        else:
+                            values.append([str(v)])
+            else:
+                values = [[str(data)]]
+            
+            # Write data to new worksheet
+            range_address = f"A1:${chr(65 + len(values[0]) - 1)}${len(values)}"
+            await worksheet.range(range_address).values.set(values)
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"New Office Excel worksheet creation error: {str(e)}")
+            raise
 
-async def handle_destination_upload(data: Any, destination_url: str, supabase: SupabaseClient, user_id: str) -> bool:
+async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], supabase: SupabaseClient, user_id: str) -> bool:
     """Upload data to various destination types"""
     try:
         # Process tuple data if present
@@ -427,21 +612,27 @@ async def handle_destination_upload(data: Any, destination_url: str, supabase: S
             return None
         google_refresh_token = response.data[0]['refresh_token']
         doc_integrations = DocumentIntegrations(google_refresh_token)
-        url_lower = destination_url.lower()
+        url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
             if "document" in url_lower:
-                return await doc_integrations.append_to_google_doc(data, destination_url)
+                return await doc_integrations.append_to_google_doc(data, request.output_preferences.destination_url)
             elif "spreadsheets" in url_lower:
-                return await doc_integrations.append_to_google_sheet(data, destination_url)
+                if request.output_preferences.modify_existing:
+                    return await doc_integrations.append_to_current_google_sheet(data, request.output_preferences.destination_url)
+                else:
+                    return await doc_integrations.append_to_new_google_sheet(data, request.output_preferences.destination_url, old_data, request.query)
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             if "docx" in url_lower:
-                return await doc_integrations.append_to_office_doc(data, destination_url)
+                return await doc_integrations.append_to_office_doc(data, request.output_preferences.destination_url)
             elif "xlsx" in url_lower:
-                return await doc_integrations.append_to_office_sheet(data, destination_url)
+                if request.output_preferences.modify_existing:
+                    return await doc_integrations.append_to_current_office_sheet(data, request.output_preferences.destination_url)
+                else:
+                    return await doc_integrations.append_to_new_office_sheet(data, request.output_preferences.destination_url, old_data, request.query)
         
-        raise ValueError(f"Unsupported destination URL type: {destination_url}")
+        raise ValueError(f"Unsupported destination URL type: {request.output_preferences.destination_url}")
     
     except Exception as e:
         logging.error(f"Failed to upload to destination: {str(e)}")
