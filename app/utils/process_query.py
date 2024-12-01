@@ -39,9 +39,12 @@ def process_query(
         
         # Error handling for initial execution
         error_attempts = 0
+        past_errors = []
         while result.error and error_attempts < 6: #TODO: CHANGE TO 6 LATER
             print(f"\n\nError analysis {error_attempts}:")
-            suggested_code = gen_from_error(result, error_attempts, data)
+            print(f"Error: {result.error}") #WHY ALWAYS EXECUTING THIS LOOP?
+            past_errors.append(result.error)
+            suggested_code = gen_from_error(result, error_attempts, data, past_errors)
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
             print("New LLM output\n:", unprocessed_llm_output)
@@ -94,7 +97,7 @@ def process_query(
                 return result 
             
             # Gen new code from analysis
-            new_code = gen_from_analysis(result, analysis_result, data)
+            new_code = gen_from_analysis(result, analysis_result, data, past_errors)
             unprocessed_llm_output = new_code 
             print("New LLM output\n:", unprocessed_llm_output)
             cleaned_code = extract_code(new_code)
@@ -105,7 +108,8 @@ def process_query(
             while result.error and error_attempts < 6:
                 print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
-                suggested_code = gen_from_error(result, error_attempts, data)
+                past_errors.append(result.error)
+                suggested_code = gen_from_error(result, error_attempts, data, past_errors)
                 unprocessed_llm_output = suggested_code 
                 print("New LLM output\n:", unprocessed_llm_output)
                 cleaned_code = extract_code(suggested_code)

@@ -54,7 +54,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
     return response.choices[0].message.content
 
 # generate new code from error -- result goes to sandbox
-def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDataInfo]) -> str:
+def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDataInfo], past_errors: List[str]) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     
     if data and len(data) > 0:
@@ -77,11 +77,14 @@ def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDa
                 The return value can be of any type (DataFrame, string, number, etc.).
                 If you need to return multiple values, return them as a tuple: (value1, value2).
                 Do not include print statements -- ensure the last line returns the desired value."""},
-            {"role": "user", "content": f""" Here is the original available data, user query, code, and error:
+            {"role": "user", "content": f""" Here is the original available data, user query, code, past errors, and new error
+                - try not to repeat any of the past errors in your new solution:
                 Available Data:\n{data_description}\n\n
                 Original Query:\n{result.original_query}\n\n
                 Code:\n{result.code}\n\n
-                Error:\n{result.error}"""}
+                Past Errors:\n{past_errors}\n\n
+                New Error:\n{result.error}                
+                """}
         ]
     )
     print(f"""Gen from error called, attempt: {error_attempts}, query: \n{result.original_query} 
@@ -89,7 +92,7 @@ def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDa
     return response.choices[0].message.content
 
 # generate new code from analysis -- result goes to a_s_r
-def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[FileDataInfo]) -> str:
+def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[FileDataInfo], past_errors: List[str]) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
     
     if data and len(data) > 0:
@@ -112,11 +115,13 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[Fi
                 Do not forget your imports.
                 Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
                 Do not include print statements -- ensure the last line returns the desired value."""},
-            {"role": "user", "content": f""" Here is the original user query, available data, code, and LLM produced analysis:
+            {"role": "user", "content": f""" Here is the original user query, available data, code, past errors, and LLM produced analysis  
+                - try not to repeat any of the past errors in your new solution:
                 Original Query:\n{result.original_query}\n\n
                 Available Data:\n{data_description}\n\n
                 Code:\n{result.code}\n\n
-                Analysis:\n{analysis_result}"""}
+                Analysis:\n{analysis_result}\n\n
+                Past Errors:\n{past_errors}"""}
         ]
     )
     return response.choices[0].message.content
@@ -144,9 +149,10 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
                 or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does or does not satisfy the user's original query]"
              """},
             {"role": "user", "content": f""" 
-                Here is the original user query, snapshots of old data, a snapshot of the result, and dataset diff information:
+                Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
                 Original Query:\n{result.original_query}\n
                 Old Data Snapshots:\n{old_data_snapshot}\n
+                Error Free Code:\n{result.code}\n
                 Result Snapshot: {new_data.snapshot}\n
                 Dataset Diff Information:{analyzer_context}\n
                 """}

@@ -206,12 +206,32 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
             return None
 
         # Build the service
-        service = build('drive', 'v3', credentials=creds)
+        drive_service = build('drive', 'v3', credentials=creds)
+        sheet_id = url.split('/d/')[1].split('/')[0]
+        sheet_service = build('sheets', 'v4', credentials=creds)
+
+
         
         try:
             # Get file metadata
-            file = service.files().get(fileId=file_id, fields='name').execute()
-            return file.get('name')
+            file = drive_service.files().get(fileId=file_id, fields='name').execute()
+            # Get sheet name from URL or fetch first sheet if not specified
+            sheet_name = None
+            if '#gid=' in url:
+                gid = url.split('#gid=')[1]
+                # Get spreadsheet metadata to find sheet name
+                sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+                for sheet in sheet_metadata.get('sheets', ''):
+                    if sheet.get('properties', {}).get('sheetId') == int(gid):
+                        sheet_name = sheet['properties']['title']
+                        break
+            
+            if not sheet_name:
+                # If no specific sheet found, get the first sheet name
+                sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+                sheet_name = sheet_metadata['sheets'][0]['properties']['title']
+            doc_name = file.get('name')
+            return f"{doc_name} - {sheet_name}"
         except Exception as api_error:
             # Handle specific Google API errors
             if 'invalid_grant' in str(api_error):
@@ -227,8 +247,8 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
                         client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
                         scopes=token_info.scope.split(' ')
                     )
-                    service = build('drive', 'v3', credentials=creds)
-                    file = service.files().get(fileId=file_id, fields='name').execute()
+                    drive_service = build('drive', 'v3', credentials=creds)
+                    file = drive_service.files().get(fileId=file_id, fields='name').execute()
                     return file.get('name')
             raise  # Re-raise if it's not an invalid_grant error or if retry failed
 
