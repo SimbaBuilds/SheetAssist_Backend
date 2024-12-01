@@ -312,7 +312,7 @@ class DocumentIntegrations:
             
             # Format data for sheets
             if isinstance(data, pd.DataFrame):
-                values = [data.columns.tolist()] + data.values.tolist()
+                values = data.values.tolist() # Skip headers
             elif isinstance(data, (dict, list)):
                 if isinstance(data, dict):
                     values = [[k, str(v)] for k, v in data.items()]
