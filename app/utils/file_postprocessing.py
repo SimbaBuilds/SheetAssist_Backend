@@ -254,7 +254,7 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
 
 
 class DocumentIntegrations:
-    def __init__(self, google_refresh_token: str, ms_refresh_token: str):
+    def __init__(self, google_refresh_token: str):
         # Google credentials
         self.google_creds = Credentials(
             token=None,
@@ -262,13 +262,12 @@ class DocumentIntegrations:
             client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
             refresh_token=google_refresh_token,
             token_uri='https://oauth2.googleapis.com/token',
-            scopes=['https://www.googleapis.com/auth/documents',
-                   'https://www.googleapis.com/auth/spreadsheets']
+            scopes=['https://graph.microsoft.com/.default']
         )
 
-        # Initialize _drive_id
-        self._one_drive_id = None
-        self.ms_refresh_token = ms_refresh_token
+        # # Initialize _drive_id
+        # self._one_drive_id = None
+        # self.ms_refresh_token = ms_refresh_token
         
         # Add debug logging for Microsoft credentials
         logging.info("Initializing Microsoft credentials...")
@@ -281,18 +280,18 @@ class DocumentIntegrations:
                 authority='https://login.microsoftonline.com/common'
             )
 
-            # Acquire token using the refresh token with correct scopes
-            token_result = self.msal_app.acquire_token_by_refresh_token(
-                refresh_token=self.ms_refresh_token,
-                scopes=['Files.ReadWrite', 'Files.ReadWrite.All']
+            # Acquire token using the client credentials flow
+            token_result = self.msal_app.acquire_token_for_client(
+                scopes=['https://graph.microsoft.com/.default']
             )
 
             if 'access_token' in token_result:
                 self.ms_access_token = token_result['access_token']
                 self.expires_on = token_result['expires_in']
             else:
-                logging.error(f"Failed to acquire access token: {token_result.get('error')}")
-                raise Exception(f"Failed to acquire access token: {token_result.get('error_description')}")
+                error_message = token_result.get('error_description', 'Unknown error')
+                logging.error(f"Failed to acquire access token: {error_message}")
+                raise Exception(f"Failed to acquire access token: {error_message}")
 
             logging.info("Successfully acquired access token")
 
@@ -756,7 +755,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         ms_refresh_token = ms_response.data[0]['refresh_token']
 
 
-        doc_integrations = DocumentIntegrations(google_refresh_token, ms_refresh_token)
+        doc_integrations = DocumentIntegrations(google_refresh_token)
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
