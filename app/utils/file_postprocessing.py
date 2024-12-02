@@ -16,7 +16,6 @@ import logging
 from fastapi import HTTPException
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from azure.identity import ClientSecretCredential
 from msgraph import GraphServiceClient
 import pandas as pd
 import json
@@ -24,6 +23,34 @@ import logging
 from typing import Any
 import os
 from app.utils.auth import SupabaseClient
+from azure.core.credentials import AccessToken
+from datetime import datetime, timedelta
+from azure.core.credentials import TokenCredential
+from azure.identity import ClientSecretCredential, OnBehalfOfCredential
+from msal import ConfidentialClientApplication
+import aiohttp
+
+
+
+class CustomTokenCredential(TokenCredential):
+    def __init__(self, ms_refresh_token: str):
+        # Clean up token format
+        self.ms_refresh_token = ms_refresh_token.replace('Bearer ', '')
+        self.expires_on = int((datetime.now() + timedelta(hours=1)).timestamp())
+        logging.info(f"CustomTokenCredential initialized with token starting with: {self.ms_refresh_token[:20]}...")
+
+    def get_token(self, *scopes, **kwargs) -> AccessToken:
+        logging.info(f"get_token called with scopes: {scopes}")
+        logging.debug(f"Token starts with: {self.ms_refresh_token[:20]}...")
+        
+        try:
+            return AccessToken(
+                token=self.ms_refresh_token,
+                expires_on=self.expires_on
+            )
+        except Exception as e:
+            logging.error(f"Error in get_token: {str(e)}")
+            raise
 
 def prepare_dataframe(data: Any) -> pd.DataFrame:
     """Prepare and standardize any data type into a clean DataFrame"""
@@ -224,8 +251,10 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
         f.write(extracted_text)
     return tmp_path
 
+
+
 class DocumentIntegrations:
-    def __init__(self, google_refresh_token: str):
+    def __init__(self, google_refresh_token: str, ms_refresh_token: str):
         # Google credentials
         self.google_creds = Credentials(
             token=None,
@@ -236,18 +265,110 @@ class DocumentIntegrations:
             scopes=['https://www.googleapis.com/auth/documents',
                    'https://www.googleapis.com/auth/spreadsheets']
         )
+
+        # Initialize _drive_id
+        self._one_drive_id = None
+        self.ms_refresh_token = ms_refresh_token
         
-        # Microsoft credentials
-        self.ms_credential = ClientSecretCredential(
-            tenant_id=os.getenv('MS_TENANT_ID'),
-            client_id=os.getenv('MS_CLIENT_ID'),
-            client_secret=os.getenv('MS_CLIENT_SECRET')
-        )
-        self.ms_scopes = ['https://graph.microsoft.com/.default']
-        self.ms_client = GraphServiceClient(
-            credentials=self.ms_credential,
-            scopes=self.ms_scopes
-        )
+        # Add debug logging for Microsoft credentials
+        logging.info("Initializing Microsoft credentials...")
+        
+        try:
+            # Create the MSAL confidential client application
+            self.msal_app = ConfidentialClientApplication(
+                client_id=os.getenv('MS_CLIENT_ID'),
+                client_credential=os.getenv('MS_CLIENT_SECRET'),
+                authority='https://login.microsoftonline.com/common'
+            )
+
+            # Acquire token using the refresh token with correct scopes
+            token_result = self.msal_app.acquire_token_by_refresh_token(
+                refresh_token=self.ms_refresh_token,
+                scopes=['Files.ReadWrite', 'Files.ReadWrite.All']
+            )
+
+            if 'access_token' in token_result:
+                self.ms_access_token = token_result['access_token']
+                self.expires_on = token_result['expires_in']
+            else:
+                logging.error(f"Failed to acquire access token: {token_result.get('error')}")
+                raise Exception(f"Failed to acquire access token: {token_result.get('error_description')}")
+
+            logging.info("Successfully acquired access token")
+
+        except Exception as e:
+            logging.error(f"Failed to initialize Microsoft Graph client: {str(e)}")
+            raise
+
+    def _format_data_for_excel(self, data: Any) -> List[List[Any]]:
+        """Helper method to format data for Excel"""
+        if isinstance(data, pd.DataFrame):
+            df_copy = data.copy()
+            for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
+                df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            df_copy = df_copy.fillna('')
+            return [df_copy.columns.tolist()] + df_copy.values.tolist()
+        elif isinstance(data, (dict, list)):
+            if isinstance(data, dict):
+                processed_dict = {}
+                for k, v in data.items():
+                    if isinstance(v, pd.Timestamp):
+                        processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
+                    elif pd.isna(v):
+                        processed_dict[k] = ''
+                    else:
+                        processed_dict[k] = str(v)
+                return [[k, v] for k, v in processed_dict.items()]
+            else:
+                values = []
+                for v in data:
+                    if isinstance(v, pd.Timestamp):
+                        values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
+                    elif pd.isna(v):
+                        values.append([''])
+                    else:
+                        values.append([str(v)])
+                return values
+        return [[str(data)]]
+    
+    async def _get_one_drive_id(self) -> str:
+        """Get the drive ID using the Graph API for personal OneDrive"""
+        if not self._one_drive_id:
+            try:
+                logging.info("Attempting to get OneDrive ID...")
+
+                headers = {
+                    'Authorization': f'Bearer {self.ms_access_token}'
+                }
+                url = 'https://graph.microsoft.com/v1.0/me/drive'
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            drive_info = await response.json()
+                            self._one_drive_id = drive_info['id']
+                            logging.info(f"Successfully got OneDrive ID: {self._one_drive_id[:8]}...")
+                        else:
+                            response_text = await response.text()
+                            logging.error(f"Failed to get OneDrive ID: {response_text}")
+                            if "InvalidAuthenticationToken" in response_text:
+                                raise HTTPException(
+                                    status_code=401,
+                                    detail="Invalid or expired Microsoft access token. Please reconnect your Microsoft account."
+                                )
+                            else:
+                                raise HTTPException(
+                                    status_code=response.status,
+                                    detail=f"OneDrive access failed: {response_text}"
+                                )
+            except Exception as e:
+                logging.error(f"Failed to get OneDrive ID: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to get OneDrive ID: {str(e)}"
+                )
+
+        return self._one_drive_id
 
     async def append_to_google_doc(self, data: Any, doc_url: str) -> bool:
         """Append data to Google Doc"""
@@ -442,28 +563,62 @@ class DocumentIntegrations:
             logging.error(f"New Google Sheet creation error: {str(e)}")
             raise
 
+    async def _get_drive_and_item_info(self, file_url: str) -> Tuple[str, str]:
+        """Get drive ID and item ID from a OneDrive URL"""
+        try:
+            # Get drive ID
+            drive_id = await self._get_one_drive_id()
+
+            # Extract item ID from URL
+            if 'id=' not in file_url:
+                raise ValueError("Could not find item ID in OneDrive URL")
+
+            # Parse out the item ID between id= and next & or end of string
+            item_id = file_url.split('id=')[1].split('&')[0]
+            
+            if not item_id:
+                raise ValueError("Empty item ID extracted from OneDrive URL")
+
+            logging.info(f"Extracted item ID: {item_id}")
+            return drive_id, item_id
+
+        except Exception as e:
+            logging.error(f"Failed to get drive and item info: {str(e)}")
+            raise
+
     async def append_to_office_doc(self, data: Any, doc_url: str) -> bool:
         """Append data to Office Word Online document"""
         try:
-            # Initialize Microsoft Graph client
-            graph_client = GraphServiceClient(self.ms_credential, self.ms_scopes)
-            
-            # Extract document ID from URL
-            doc_id = doc_url.split('/')[-2]
-            
+            # Get drive and document info
+            drive_id, doc_id = await self._get_drive_and_item_info(doc_url)
+
             # Format content based on data type
             if isinstance(data, pd.DataFrame):
                 content = data.to_string()
-            elif isinstance(data, (dict, list)):
-                content = json.dumps(data, indent=2)
             else:
                 content = str(data)
-            
-            # Append content to document
-            graph_client.documents[doc_id].content.append(content)
-            
-            return True
-            
+
+            # Prepare the update payload
+            update_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{doc_id}/content"
+
+            headers = {
+                'Authorization': f'Bearer {self.ms_access_token}',
+                'Content-Type': 'text/plain'  # Adjust content type as needed
+            }
+
+            # Get current content (if needed)
+            # Append new content
+            # For simplicity, let's assume we're overwriting the content
+            async with aiohttp.ClientSession() as session:
+                async with session.put(update_url, headers=headers, data=content) as response:
+                    if response.status in [200, 201, 204]:
+                        logging.info("Successfully updated the Office document")
+                        return True
+                    else:
+                        response_text = await response.text()
+                        logging.error(f"Office Word append error: {response_text}")
+                        raise Exception(f"Office Word append error: {response_text}")
+
         except Exception as e:
             logging.error(f"Office Word append error: {str(e)}")
             raise
@@ -471,66 +626,44 @@ class DocumentIntegrations:
     async def append_to_current_office_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Office Excel Online workbook"""
         try:
-            # Initialize Microsoft Graph client
-            graph_client = GraphServiceClient(self.ms_credential, self.ms_scopes)
+            # Get drive ID
+            drive_id = await self._get_one_drive_id()
             
             # Extract workbook ID from URL
             workbook_id = sheet_url.split('/')[-2]
             
-            # Create new worksheet
-            worksheet = graph_client.workbook.worksheets.add("Query Results")
+            # Verify file exists and is Excel workbook
+            item = await self.ms_client.drives.by_drive_id(drive_id).items.by_item_id(workbook_id).get()
+            if not item.file or 'sheet' not in item.file.mime_type.lower():
+                raise ValueError("Specified file is not an Excel workbook")
             
             # Format data for Excel
-            if isinstance(data, pd.DataFrame):
-                # Convert DataFrame to string values, handling Timestamps and NaN
-                df_copy = data.copy()
-                # Handle datetime columns
-                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
-                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                # Replace NaN values with empty string
-                df_copy = df_copy.fillna('')
-                # Include column headers and data
-                values = [df_copy.columns.tolist()] + df_copy.values.tolist()
-            elif isinstance(data, (dict, list)):
-                if isinstance(data, dict):
-                    # Convert any Timestamp values to strings and handle NaN
-                    processed_dict = {}
-                    for k, v in data.items():
-                        if isinstance(v, pd.Timestamp):
-                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
-                        elif pd.isna(v):
-                            processed_dict[k] = ''
-                        else:
-                            processed_dict[k] = str(v)
-                    values = [[k, v] for k, v in processed_dict.items()]
-                else:
-                    # Convert any Timestamp values in list to strings and handle NaN
-                    values = []
-                    for v in data:
-                        if isinstance(v, pd.Timestamp):
-                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
-                        elif pd.isna(v):
-                            values.append([''])
-                        else:
-                            values.append([str(v)])
-            else:
-                values = [[str(data)]]
+            values = self._format_data_for_excel(data)
+            
+            # Get the active worksheet
+            workbook = await self.ms_client.drives.by_drive_id(drive_id).items.by_item_id(workbook_id).workbook.get()
+            worksheets = await self.ms_client.drives.by_drive_id(drive_id).items.by_item_id(workbook_id).workbook.worksheets.get()
+            active_sheet = worksheets.value[0]  # Get first worksheet
+            
+            # Find the next empty row
+            used_range = await self.ms_client.drives.by_drive_id(drive_id).items.by_item_id(workbook_id).workbook.worksheets.by_id(active_sheet.id).used_range.get()
+            next_row = used_range.row_count + 1
             
             # Write data to worksheet
-            range_address = f"A1:${chr(65 + len(values[0]) - 1)}${len(values)}"
-            await worksheet.range(range_address).values.set(values)
+            range_address = f"A{next_row}:${chr(65 + len(values[0]) - 1)}${next_row + len(values) - 1}"
+            await self.ms_client.drives.by_drive_id(drive_id).items.by_item_id(workbook_id).workbook.worksheets.by_id(active_sheet.id).range(range_address).values.set(values)
             
             return True
             
         except Exception as e:
             logging.error(f"Office Excel append error: {str(e)}")
-            raise 
+            raise
 
     async def append_to_new_office_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
         """Add data to a new sheet within an existing Office Excel workbook"""
         try:
             # Initialize Microsoft Graph client
-            graph_client = GraphServiceClient(self.ms_credential, self.ms_scopes)
+            graph_client = GraphServiceClient(self.ms_access_token)
             
             # Extract workbook ID from URL
             workbook_id = sheet_url.split('/')[-2]
@@ -602,16 +735,28 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
             else:
                 data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
         
-        response = supabase.table('user_documents_access') \
+        g_response = supabase.table('user_documents_access') \
             .select('refresh_token') \
             .match({'user_id': user_id, 'provider': 'google'}) \
             .execute()
         
-        if not response.data or len(response.data) == 0:
+        if not g_response.data or len(g_response.data) == 0:
             print(f"No Google token found for user {user_id}")
             return None
-        google_refresh_token = response.data[0]['refresh_token']
-        doc_integrations = DocumentIntegrations(google_refresh_token)
+        google_refresh_token = g_response.data[0]['refresh_token']
+
+        ms_response = supabase.table('user_documents_access') \
+            .select('refresh_token') \
+            .match({'user_id': user_id, 'provider': 'microsoft'}) \
+            .execute()
+        
+        if not ms_response.data or len(ms_response.data) == 0:
+            print(f"No Microsoft token found for user {user_id}")
+            return None
+        ms_refresh_token = ms_response.data[0]['refresh_token']
+
+
+        doc_integrations = DocumentIntegrations(google_refresh_token, ms_refresh_token)
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:

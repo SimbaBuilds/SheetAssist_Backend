@@ -308,7 +308,23 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
             response = requests.get(api_url, headers=headers)
         
         response.raise_for_status()
-        return response.json().get('name')
+        file_data = response.json()
+        file_name = file_data.get('name')
+
+        # If it's an Excel file, get the active sheet name
+        if file_data.get('file', {}).get('mimeType') == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+            workbook_api_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}/workbook/worksheets"
+            workbook_response = requests.get(workbook_api_url, headers=headers)
+            workbook_response.raise_for_status()
+            sheets_data = workbook_response.json()
+            
+            # Get the first sheet or the active sheet if available
+            if sheets_data.get('value'):
+                active_sheet = next((sheet for sheet in sheets_data['value'] if sheet.get('visibility') == 'Visible'), sheets_data['value'][0])
+                sheet_name = active_sheet.get('name')
+                return f"{file_name} - {sheet_name}"
+
+        return file_name
 
     except Exception as e:
         logger.error(f"Error fetching Microsoft doc title: {str(e)}")
