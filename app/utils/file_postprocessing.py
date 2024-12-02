@@ -24,33 +24,15 @@ from typing import Any
 import os
 from app.utils.auth import SupabaseClient
 from azure.core.credentials import AccessToken
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from azure.core.credentials import TokenCredential
 from azure.identity import ClientSecretCredential, OnBehalfOfCredential
 from msal import ConfidentialClientApplication
 import aiohttp
+import requests
 
 
 
-class CustomTokenCredential(TokenCredential):
-    def __init__(self, ms_refresh_token: str):
-        # Clean up token format
-        self.ms_refresh_token = ms_refresh_token.replace('Bearer ', '')
-        self.expires_on = int((datetime.now() + timedelta(hours=1)).timestamp())
-        logging.info(f"CustomTokenCredential initialized with token starting with: {self.ms_refresh_token[:20]}...")
-
-    def get_token(self, *scopes, **kwargs) -> AccessToken:
-        logging.info(f"get_token called with scopes: {scopes}")
-        logging.debug(f"Token starts with: {self.ms_refresh_token[:20]}...")
-        
-        try:
-            return AccessToken(
-                token=self.ms_refresh_token,
-                expires_on=self.expires_on
-            )
-        except Exception as e:
-            logging.error(f"Error in get_token: {str(e)}")
-            raise
 
 def prepare_dataframe(data: Any) -> pd.DataFrame:
     """Prepare and standardize any data type into a clean DataFrame"""
@@ -254,7 +236,10 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
 
 
 class DocumentIntegrations:
-    def __init__(self, google_refresh_token: str):
+    def __init__(self, google_refresh_token: str, microsoft_refresh_token: str = None):
+        # Initialize _one_drive_id
+        self._one_drive_id = None
+
         # Google credentials
         self.google_creds = Credentials(
             token=None,
@@ -262,42 +247,86 @@ class DocumentIntegrations:
             client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
             refresh_token=google_refresh_token,
             token_uri='https://oauth2.googleapis.com/token',
-            scopes=['https://graph.microsoft.com/.default']
+            scopes=['https://www.googleapis.com/auth/drive.file']
         )
 
-        # # Initialize _drive_id
-        # self._one_drive_id = None
-        # self.ms_refresh_token = ms_refresh_token
-        
-        # Add debug logging for Microsoft credentials
-        logging.info("Initializing Microsoft credentials...")
-        
+        # Microsoft auth setup
+        if microsoft_refresh_token:
+            try:
+                # Microsoft OAuth2 token refresh request
+                data = {
+                    'client_id': os.getenv('MS_CLIENT_ID'),
+                    'client_secret': os.getenv('MS_CLIENT_SECRET'),
+                    'refresh_token': microsoft_refresh_token,
+                    'grant_type': 'refresh_token',
+                    'scope': 'https://graph.microsoft.com/.default'  # Changed to match working implementation
+                }
+                
+                response = requests.post(
+                    'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+                    data=data
+                )
+                response.raise_for_status()
+                token_data = response.json()
+                
+                self.ms_access_token = token_data['access_token']
+                self.ms_refresh_token = token_data.get('refresh_token', microsoft_refresh_token)
+                self.ms_token_type = token_data['token_type']
+                self.ms_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_data['expires_in']))
+                
+                logging.info("Successfully initialized Microsoft credentials")
+
+            except Exception as e:
+                logging.error(f"Failed to initialize Microsoft credentials: {str(e)}")
+                raise
+
+    async def _refresh_microsoft_token(self) -> None:
+        """Refresh Microsoft OAuth token"""
         try:
-            # Create the MSAL confidential client application
-            self.msal_app = ConfidentialClientApplication(
-                client_id=os.getenv('MS_CLIENT_ID'),
-                client_credential=os.getenv('MS_CLIENT_SECRET'),
-                authority='https://login.microsoftonline.com/common'
+            logging.info("Attempting to refresh Microsoft token")
+            
+            data = {
+                'client_id': os.getenv('MS_CLIENT_ID'),
+                'client_secret': os.getenv('MS_CLIENT_SECRET'),
+                'refresh_token': self.ms_refresh_token,
+                'grant_type': 'refresh_token',
+                'scope': 'https://graph.microsoft.com/.default'  # Changed to match working implementation
+            }
+            
+            response = requests.post(
+                'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+                data=data
             )
-
-            # Acquire token using the client credentials flow
-            token_result = self.msal_app.acquire_token_for_client(
-                scopes=['https://graph.microsoft.com/.default']
-            )
-
-            if 'access_token' in token_result:
-                self.ms_access_token = token_result['access_token']
-                self.expires_on = token_result['expires_in']
-            else:
-                error_message = token_result.get('error_description', 'Unknown error')
-                logging.error(f"Failed to acquire access token: {error_message}")
-                raise Exception(f"Failed to acquire access token: {error_message}")
-
-            logging.info("Successfully acquired access token")
-
+            response.raise_for_status()
+            token_data = response.json()
+            
+            self.ms_access_token = token_data['access_token']
+            self.ms_refresh_token = token_data.get('refresh_token', self.ms_refresh_token)
+            self.ms_token_type = token_data['token_type']
+            self.ms_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_data['expires_in']))
+            
+            logging.info("Successfully refreshed Microsoft token")
+            
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Failed to refresh Microsoft token - HTTP error: {str(e)}")
+            raise HTTPException(status_code=401, detail="Failed to refresh Microsoft token")
         except Exception as e:
-            logging.error(f"Failed to initialize Microsoft Graph client: {str(e)}")
+            logging.error(f"Error refreshing Microsoft token: {str(e)}")
             raise
+
+    async def _ensure_valid_microsoft_token(self) -> None:
+        """Check and refresh Microsoft token if expired"""
+        if datetime.now(timezone.utc) >= self.ms_expires_at:
+            logging.info("Microsoft token is expired, refreshing...")
+            await self._refresh_microsoft_token()
+
+    async def _get_microsoft_headers(self) -> dict:
+        """Get valid Microsoft API headers with current token"""
+        await self._ensure_valid_microsoft_token()
+        return {
+            'Authorization': f"{self.ms_token_type} {self.ms_access_token}",
+            'Content-Type': 'application/json'
+        }
 
     def _format_data_for_excel(self, data: Any) -> List[List[Any]]:
         """Helper method to format data for Excel"""
@@ -591,23 +620,17 @@ class DocumentIntegrations:
             # Get drive and document info
             drive_id, doc_id = await self._get_drive_and_item_info(doc_url)
 
-            # Format content based on data type
+            # Format content
             if isinstance(data, pd.DataFrame):
                 content = data.to_string()
             else:
                 content = str(data)
 
-            # Prepare the update payload
+            # Get valid headers with current token
+            headers = await self._get_microsoft_headers()
+            
+            # Update document
             update_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{doc_id}/content"
-
-            headers = {
-                'Authorization': f'Bearer {self.ms_access_token}',
-                'Content-Type': 'text/plain'  # Adjust content type as needed
-            }
-
-            # Get current content (if needed)
-            # Append new content
-            # For simplicity, let's assume we're overwriting the content
             async with aiohttp.ClientSession() as session:
                 async with session.put(update_url, headers=headers, data=content) as response:
                     if response.status in [200, 201, 204]:
@@ -616,7 +639,10 @@ class DocumentIntegrations:
                     else:
                         response_text = await response.text()
                         logging.error(f"Office Word append error: {response_text}")
-                        raise Exception(f"Office Word append error: {response_text}")
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to update Office document: {response_text}"
+                        )
 
         except Exception as e:
             logging.error(f"Office Word append error: {str(e)}")
@@ -755,7 +781,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         ms_refresh_token = ms_response.data[0]['refresh_token']
 
 
-        doc_integrations = DocumentIntegrations(google_refresh_token)
+        doc_integrations = DocumentIntegrations(google_refresh_token, ms_refresh_token)
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
