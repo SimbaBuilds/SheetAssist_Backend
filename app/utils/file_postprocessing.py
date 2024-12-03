@@ -257,7 +257,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         ms_refresh_token = ms_response.data[0]['refresh_token']
 
 
-        doc_integrations = DocumentIntegrations(google_refresh_token, ms_refresh_token)
+        doc_integrations = DocumentIntegrations(google_refresh_token, ms_refresh_token, user_id, supabase)
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
