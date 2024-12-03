@@ -12,30 +12,12 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 import requests
 from typing import Any
-from pydantic import BaseModel
-from azure.core.credentials import AccessToken
-from azure.identity import ClientSecretCredential
-from msgraph import GraphServiceClient
-
-# Define logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
-# Add TokenInfo model
-class TokenInfo(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str
-    scope: str
-    expires_at: str
-    user_id: str
 
 class DocumentIntegrations:
-    def __init__(self, google_refresh_token: str, microsoft_refresh_token: str = None, user_id: str = None, supabase_client = None):
+    def __init__(self, google_refresh_token: str, microsoft_refresh_token: str = None):
         self._one_drive_id = None
-        self.user_id = user_id
-        self.supabase_client = supabase_client
 
         # Google credentials
         self.google_creds = Credentials(
@@ -49,41 +31,22 @@ class DocumentIntegrations:
 
         # Microsoft auth setup
         if microsoft_refresh_token:
-            self.token_info = TokenInfo(
-                access_token="",  # Will be set in _refresh_microsoft_token
-                refresh_token=microsoft_refresh_token,
-                token_type="",    # Will be set in _refresh_microsoft_token
-                scope="https://graph.microsoft.com/.default",
-                expires_at=datetime.now(timezone.utc).isoformat(),
-                user_id=user_id
-            )
+            self.ms_refresh_token = microsoft_refresh_token
             self._refresh_microsoft_token()
-            
-            # Create auth callback
-            def auth_callback(request):
-                request.headers.update({
-                    'Authorization': f'Bearer {self.token_info.access_token}',
-                    'Content-Type': 'application/json'
-                })
-                return request
-
-            # Initialize Microsoft Graph client
-            self.ms_client = GraphClient(
-                auth_provider=AuthProviderCallback(auth_callback),
-                base_url="https://graph.microsoft.com/v1.0"
+            self.ms_client = GraphServiceClient(
+                credentials=self.ms_access_token,
+                scopes=['https://graph.microsoft.com/.default']
             )
 
-    async def _refresh_microsoft_token(self) -> None:
-        """Refresh Microsoft OAuth token and update in database"""
+    def _refresh_microsoft_token(self) -> None:
+        """Refresh Microsoft OAuth token"""
         try:
-            logger.info("Attempting to refresh Microsoft token")
-            
-            # Microsoft OAuth2 token refresh request
             data = {
                 'client_id': os.getenv('MS_CLIENT_ID'),
                 'client_secret': os.getenv('MS_CLIENT_SECRET'),
-                'refresh_token': self.token_info.refresh_token,
-                'grant_type': 'refresh_token'
+                'refresh_token': self.ms_refresh_token,
+                'grant_type': 'refresh_token',
+                'scope': 'https://graph.microsoft.com/.default'
             }
             
             response = requests.post(
@@ -92,57 +55,33 @@ class DocumentIntegrations:
             )
             response.raise_for_status()
             token_data = response.json()
-            logger.info(f"Received token data: {token_data}")
             
-            # Update token info
-            self.token_info.access_token = token_data['access_token']
-            self.token_info.refresh_token = token_data.get('refresh_token', self.token_info.refresh_token)
-            self.token_info.token_type = token_data['token_type']
-            self.token_info.scope = token_data['scope']
-            self.token_info.expires_at = (datetime.now(timezone.utc) + 
-                                        timedelta(seconds=int(token_data['expires_in']))
-                                       ).isoformat()
+            # Store the token data
+            self.ms_access_token = token_data['access_token']
+            self.ms_refresh_token = token_data.get('refresh_token', self.ms_refresh_token)
+            self.ms_token_type = token_data['token_type']
+            self.ms_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_data['expires_in']))
             
             # Update the Graph client with new credentials
             self.ms_client = GraphServiceClient(
-                credentials=self.token_info.access_token,
-                scopes=[self.token_info.scope]
+                credentials=self.ms_access_token,
+                scopes=['https://graph.microsoft.com/.default']
             )
             
-            # Update token in database if supabase client is available
-            if self.supabase_client and self.user_id:
-                response = self.supabase_client.table('user_documents_access') \
-                    .update({
-                        'access_token': self.token_info.access_token,
-                        'refresh_token': self.token_info.refresh_token,
-                        'expires_at': self.token_info.expires_at
-                    }) \
-                    .match({
-                        'provider': 'microsoft',
-                        'user_id': self.user_id
-                    }) \
-                    .execute()
-                logger.info("Successfully updated Microsoft token in database")
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to refresh Microsoft token - HTTP error: {str(e)}")
-            raise HTTPException(status_code=401, detail="Failed to refresh Microsoft token")
         except Exception as e:
-            logger.error(f"Error refreshing Microsoft token: {str(e)}")
+            logging.error(f"Failed to refresh Microsoft token: {str(e)}")
             raise HTTPException(status_code=401, detail="Failed to refresh Microsoft token")
 
     async def _ensure_valid_microsoft_token(self) -> None:
         """Check and refresh Microsoft token if expired"""
-        current_time = datetime.now(timezone.utc)
-        token_expires_at = datetime.fromisoformat(self.token_info.expires_at.replace('Z', '+00:00'))
-        if current_time >= token_expires_at:
-            await self._refresh_microsoft_token()
+        if datetime.now(timezone.utc) >= self.ms_expires_at:
+            self._refresh_microsoft_token()
 
     async def _get_microsoft_headers(self) -> dict:
         """Get valid Microsoft API headers with current token"""
         await self._ensure_valid_microsoft_token()
         return {
-            'Authorization': f"{self.token_info.token_type} {self.token_info.access_token}",
+            'Authorization': f"{self.ms_token_type} {self.ms_access_token}",
             'Content-Type': 'application/json'
         }
 
@@ -234,33 +173,64 @@ class DocumentIntegrations:
     async def append_to_current_office_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Office Excel Online workbook"""
         try:
+            # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
-            # Get worksheets
-            response = await self.ms_client.get(
-                f'/drives/{drive_id}/items/{workbook_id}/workbook/worksheets'
-            )
-            worksheets = response.json()['value']
-            active_sheet = worksheets[0]  # Get first worksheet
-            
-            # Get used range
-            response = await self.ms_client.get(
-                f'/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange'
-            )
-            used_range = response.json()
-            next_row = used_range['rowCount'] + 1
-            
-            # Format data
-            values = self._format_data_for_excel(data)
-            
-            # Write data
-            range_address = f"A{next_row}:${chr(65 + len(values[0]) - 1)}${next_row + len(values) - 1}"
-            await self.ms_client.patch(
-                f'/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/range(address=\'{range_address}\')',
-                json={'values': values}
-            )
-            
-            return True
+            # Get active sessions and close them
+            sessions = await self._manage_office_session(workbook_id, action='list')
+            for session in sessions:
+                await self._manage_office_session(session, action='close')
+
+            # Create new session
+            session_id = await self._manage_office_session(workbook_id, action='create')
+
+            try:
+                # Format data for Excel
+                values = self._format_data_for_excel(data)
+                
+                # Get worksheets to find the active one
+                worksheets_response = await (self.ms_client
+                    .drives
+                    .by_drive_id(drive_id)
+                    .items
+                    .by_id(workbook_id)
+                    .workbook
+                    .worksheets
+                    .get())
+                active_sheet = worksheets_response.value[0]  # Get first worksheet
+                
+                # Find the next empty row
+                used_range = await (self.ms_client
+                    .drives
+                    .by_drive_id(drive_id)
+                    .items
+                    .by_id(workbook_id)
+                    .workbook
+                    .worksheets
+                    .by_id(active_sheet.id)
+                    .used_range
+                    .get())
+                next_row = used_range.row_count + 1
+                
+                # Write data to worksheet
+                range_address = f"A{next_row}:${chr(65 + len(values[0]) - 1)}${next_row + len(values) - 1}"
+                await (self.ms_client
+                    .drives
+                    .by_drive_id(drive_id)
+                    .items
+                    .by_id(workbook_id)
+                    .workbook
+                    .worksheets
+                    .by_id(active_sheet.id)
+                    .range(range_address)
+                    .values
+                    .set(values))
+                
+                return True
+            finally:
+                # Always close the session after we're done
+                if session_id:
+                    await self._manage_office_session(session_id, action='close')
             
         except Exception as e:
             logging.error(f"Office Excel append error: {str(e)}")
@@ -269,39 +239,59 @@ class DocumentIntegrations:
     async def append_to_new_office_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
         """Add data to a new sheet within an existing Office Excel workbook"""
         try:
+            # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
-            # Get existing worksheets
-            response = await self.ms_client.get(
-                f'/drives/{drive_id}/items/{workbook_id}/workbook/worksheets'
-            )
-            existing_sheets = [ws['name'] for ws in response.json()['value']]
-            
-            # Generate unique sheet name
-            base_name = file_namer(query, old_data)
-            sheet_name = base_name
-            counter = 1
-            while sheet_name in existing_sheets:
-                sheet_name = f"{base_name} {counter}"
-                counter += 1
-            
-            # Create new worksheet
-            response = await self.ms_client.post(
-                f'/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/add',
-                json={'name': sheet_name}
-            )
-            new_sheet = response.json()
-            
-            # Format and write data
-            values = self._format_data_for_excel(data)
-            range_address = f"A1:${chr(65 + len(values[0]) - 1)}${len(values)}"
-            
-            await self.ms_client.patch(
-                f'/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{new_sheet["id"]}/range(address=\'{range_address}\')',
-                json={'values': values}
-            )
-            
-            return True
+            # Get active sessions and close them
+            sessions = await self._manage_office_session(workbook_id, action='list')
+            for session in sessions:
+                await self._manage_office_session(session, action='close')
+
+            # Create new session
+            session_id = await self._manage_office_session(workbook_id, action='create')
+
+            try:
+                # Format data for Excel
+                values = self._format_data_for_excel(data)
+                
+                # Get existing worksheets
+                drive = await self.ms_client.drives.get()
+                drive_item = await drive.items.get()
+                worksheets_response = await (drive_item
+                    .workbook
+                    .worksheets
+                    .get())
+                existing_sheets = [ws.name for ws in worksheets_response.value]
+                
+                # Generate unique sheet name
+                base_name = file_namer(query, old_data)
+                sheet_name = base_name
+                counter = 1
+                while sheet_name in existing_sheets:
+                    sheet_name = f"{base_name} {counter}"
+                    counter += 1
+                
+                # Create new worksheet
+                worksheet = await (drive_item
+                    .workbook
+                    .worksheets
+                    .add(name=sheet_name))
+                
+                # Write data to new worksheet
+                range_address = f"A1:${chr(65 + len(values[0]) - 1)}${len(values)}"
+                await (drive_item
+                    .workbook
+                    .worksheets
+                    .item(id=worksheet.id)
+                    .range(range_address)
+                    .values
+                    .set(values))
+                
+                return True
+            finally:
+                # Always close the session after we're done
+                if session_id:
+                    await self._manage_office_session(session_id, action='close')
             
         except Exception as e:
             logging.error(f"New Office Excel worksheet creation error: {str(e)}")
