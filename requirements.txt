@@ -4,6 +4,8 @@
 #
 #    pip-compile
 #
+aiofiles==24.1.0
+    # via -r requirements.in
 aiohappyeyeballs==2.4.3
     # via aiohttp
 aiohttp==3.10.10

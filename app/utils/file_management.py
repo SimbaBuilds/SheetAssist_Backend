@@ -5,6 +5,7 @@ import tempfile
 import atexit
 from datetime import datetime, timedelta
 import logging
+from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -113,6 +114,20 @@ class TempFileManager:
                 logger.info(f"Cleaned up marked path: {path}")
             except Exception as e:
                 logger.error(f"Error cleaning up marked path {path}: {str(e)}")
+    
+    @asynccontextmanager
+    async def temp_session(self):
+        """Async context manager for temporary directory sessions"""
+        temp_dir = self.get_temp_dir()
+        try:
+            yield temp_dir
+        finally:
+            try:
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                    logging.info(f"Cleaned up temp directory: {temp_dir}")
+            except Exception as e:
+                logging.error(f"Error cleaning up temp directory {temp_dir}: {str(e)}")
 
 # Global instance
 temp_file_manager = TempFileManager() 
