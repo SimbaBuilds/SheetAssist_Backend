@@ -21,6 +21,10 @@ import logging
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
     
+    def __init__(self, num_images_processed: int = 0):
+        """Initialize FilePreprocessor with image counter"""
+        self.num_images_processed = num_images_processed
+
     @staticmethod
     def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO]) -> pd.DataFrame:
         """
@@ -203,6 +207,10 @@ class FilePreprocessor:
             if vision_result["status"] == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
+            # Increment the image counter
+            if hasattr(FilePreprocessor, 'num_images_processed'):
+                FilePreprocessor.num_images_processed += 1
+
             return vision_result["content"]
 
         except Exception as e:
@@ -338,6 +346,10 @@ class FilePreprocessor:
             
             if vision_result["status"] == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
+
+            # Increment the image counter for each page in unreadable PDF
+            if hasattr(FilePreprocessor, 'num_images_processed'):
+                FilePreprocessor.num_images_processed += doc.page_count
                 
             return vision_result["content"], "vision_extracted", False
 
@@ -393,16 +405,16 @@ class FilePreprocessor:
             return "Error processing file"
 
 
-
 def preprocess_files(
     files: List[UploadFile],
     files_metadata: List[FileMetadata],
     web_urls: List[str],
     query: str,
-    session_dir
-) -> List[FileDataInfo]:
+    session_dir,
+    num_images_processed: int = 0
+) -> Tuple[List[FileDataInfo], int]:
     """Helper function to preprocess files and web URLs"""
-    preprocessor = FilePreprocessor()
+    preprocessor = FilePreprocessor(num_images_processed)
     processed_data = []
     
     # Process web URLs if provided
@@ -485,4 +497,4 @@ def preprocess_files(
                 logging.error(f"Error processing file {metadata.name}: {error_msg}")
                 raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
 
-    return processed_data
+    return processed_data, preprocessor.num_images_processed

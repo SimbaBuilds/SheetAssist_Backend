@@ -46,13 +46,16 @@ async def process_query_endpoint(
         
         session_dir = temp_file_manager.get_temp_dir()
         logger.info("Calling preprocess_files")
+        num_images_processed = 0
+
         try:
-            preprocessed_data = preprocess_files(
+            preprocessed_data, num_images_processed = preprocess_files(
                 files=files,
                 files_metadata=request.files_metadata,
                 web_urls=request.web_urls,
                 query=request.query,
-                session_dir=session_dir
+                session_dir=session_dir,
+                num_images_processed=num_images_processed
             )
         except Exception as e:
             raise ValueError(e)
@@ -103,7 +106,8 @@ async def process_query_endpoint(
                     media_type=media_type,
                     filename=os.path.basename(tmp_path),
                     download_url=download_url
-                )]
+                )],
+                num_images_processed=num_images_processed
             )
 
         elif request.output_preferences.type == "online":
@@ -135,7 +139,8 @@ async def process_query_endpoint(
                 result=truncated_result,
                 status="success",
                 message="Data successfully uploaded to destination",
-                files=None
+                files=None,
+                num_images_processed=num_images_processed
             )
         
         else:
@@ -168,5 +173,6 @@ async def process_query_endpoint(
             result=truncated_result,
             status="error",
             message="An error occurred while processing your request -- please try again or rephrase your request",
-            files=None
+            files=None,
+            num_images_processed=num_images_processed
         )

@@ -7,6 +7,7 @@ class OutputPreferences(BaseModel):
     destination_url: Optional[str] = None
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
     modify_existing: Optional[bool] = None
+
 class FileMetadata(BaseModel):
     """Metadata about an uploaded file from frontend"""
     name: str
@@ -32,6 +33,7 @@ class FileDataInfo(BaseModel):
     new_file_path: Optional[str] = None
     url: Optional[str] = None
     metadata: Optional[dict] = None
+
 
     class Config:
         arbitrary_types_allowed = True  # Allow any Python type for content
@@ -71,6 +73,7 @@ class QueryResponse(BaseModel):
     status: str  # "success" or "error"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files
+    num_images_processed: int = 0
 
     class Config:
         arbitrary_types_allowed = True
