@@ -148,8 +148,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    @staticmethod
-    def process_image(file: Union[BinaryIO, str], output_path: str = None, query: str = None) -> Tuple[str, str]:
+    def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None) -> Tuple[str, str]:
         """
         Process image files (.png, .jpg, .jpeg) and extract content using vision processing
         
@@ -208,8 +207,7 @@ class FilePreprocessor:
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
             # Increment the image counter
-            if hasattr(FilePreprocessor, 'num_images_processed'):
-                FilePreprocessor.num_images_processed += 1
+            self.num_images_processed += 1
 
             return vision_result["content"]
 
@@ -288,8 +286,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    @staticmethod
-    def process_pdf(file: Union[BinaryIO, str], query: str = None) -> Tuple[str, str, bool]:
+    def process_pdf(self, file: Union[BinaryIO, str], query: str = None) -> Tuple[str, str, bool]:
         """
         Process PDF files and convert to string if readable, otherwise handle with vision
         
@@ -348,16 +345,15 @@ class FilePreprocessor:
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
             # Increment the image counter for each page in unreadable PDF
-            if hasattr(FilePreprocessor, 'num_images_processed'):
-                FilePreprocessor.num_images_processed += doc.page_count
+            self.num_images_processed += doc.page_count
+
                 
             return vision_result["content"], "vision_extracted", False
 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    @classmethod
-    def preprocess_file(cls, file: Union[BinaryIO, str], file_type: str, **kwargs) -> Union[pd.DataFrame, str]:
+    def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, **kwargs) -> Union[pd.DataFrame, str]:
         """
         Main method to preprocess files based on their type
         
@@ -370,20 +366,20 @@ class FilePreprocessor:
             Union[pd.DataFrame, str]: Processed data
         """
         processors = {
-            'xlsx': cls.process_excel,
-            'csv': cls.process_csv,
-            'json': cls.process_json,
-            'txt': cls.process_text,
-            'docx': cls.process_docx,
-            'png': cls.process_image,
-            'jpg': cls.process_image,
-            'jpeg': cls.process_image,
-            'web_url': cls.process_web_url,
-            'pdf': cls.process_pdf,
-            'gdoc': cls.process_web_url,
-            'gsheet': cls.process_web_url,
-            'office_doc': cls.process_web_url,
-            'office_sheet': cls.process_web_url
+            'xlsx': self.process_excel,
+            'csv': self.process_csv,
+            'json': self.process_json,
+            'txt': self.process_text,
+            'docx': self.process_docx,
+            'png': self.process_image,
+            'jpg': self.process_image,
+            'jpeg': self.process_image,
+            'web_url': self.process_web_url,
+            'pdf': self.process_pdf,
+            'gdoc': self.process_web_url,
+            'gsheet': self.process_web_url,
+            'office_doc': self.process_web_url,
+            'office_sheet': self.process_web_url
         }
         
         processor = processors.get(file_type.lower())

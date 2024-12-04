@@ -8,30 +8,31 @@ from googleapiclient.discovery import build
 from msgraph import GraphServiceClient
 import pandas as pd
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 import aiohttp
 import requests
 from typing import Any
+from supabase.client import Client as SupabaseClient
 
 
 
-class DocumentIntegrations:
-    def __init__(self, google_refresh_token: str, microsoft_refresh_token: str = None):
+class MicrosoftIntegration:
+    def __init__(self, supabase: SupabaseClient, user_id: str):
         self._one_drive_id = None
 
-        # Google credentials
-        self.google_creds = Credentials(
-            token=None,
-            client_id=os.getenv('GOOGLE_CLIENT_ID'),
-            client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
-            refresh_token=google_refresh_token,
-            token_uri='https://oauth2.googleapis.com/token',
-            scopes=['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-        )
+        ms_response = supabase.table('user_documents_access') \
+        .select('refresh_token') \
+        .match({'user_id': user_id, 'provider': 'microsoft'}) \
+        .execute()
+        
+        if not ms_response.data or len(ms_response.data) == 0:
+            print(f"No Microsoft token found for user {user_id}")
+            return None
+        ms_refresh_token = ms_response.data[0]['refresh_token']
 
         # Microsoft auth setup
-        if microsoft_refresh_token:
-            self.ms_refresh_token = microsoft_refresh_token
+        if ms_refresh_token:
+            self.ms_refresh_token = ms_refresh_token
             self._refresh_microsoft_token()
             self.ms_client = GraphServiceClient(
                 credentials=self.ms_access_token,
@@ -87,35 +88,37 @@ class DocumentIntegrations:
 
     def _format_data_for_excel(self, data: Any) -> List[List[Any]]:
         """Helper method to format data for Excel"""
+        def format_value(v: Any) -> str:
+            """Helper function to format individual values"""
+            if isinstance(v, pd.Timestamp):
+                return v.strftime('%Y-%m-%d %H:%M:%S')
+            elif isinstance(v, (datetime, date)):
+                return v.strftime('%Y-%m-%d')
+            elif pd.isna(v):
+                return ''
+            else:
+                return str(v)
+
         if isinstance(data, pd.DataFrame):
             df_copy = data.copy()
+            # Handle datetime columns
             for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
                 df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            # Replace NaN values with empty string
             df_copy = df_copy.fillna('')
+            # Convert any remaining date objects
+            for col in df_copy.columns:
+                if df_copy[col].dtype == 'object':
+                    df_copy[col] = df_copy[col].apply(format_value)
             return [df_copy.columns.tolist()] + df_copy.values.tolist()
         elif isinstance(data, (dict, list)):
             if isinstance(data, dict):
-                processed_dict = {}
-                for k, v in data.items():
-                    if isinstance(v, pd.Timestamp):
-                        processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
-                    elif pd.isna(v):
-                        processed_dict[k] = ''
-                    else:
-                        processed_dict[k] = str(v)
+                processed_dict = {k: format_value(v) for k, v in data.items()}
                 return [[k, v] for k, v in processed_dict.items()]
             else:
-                values = []
-                for v in data:
-                    if isinstance(v, pd.Timestamp):
-                        values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
-                    elif pd.isna(v):
-                        values.append([''])
-                    else:
-                        values.append([str(v)])
-                return values
-        return [[str(data)]]
-    
+                return [[format_value(v)] for v in data]
+        return [[format_value(data)]]
+
     async def _get_one_drive_id(self) -> str:
         """Get the drive ID using the Graph API for personal OneDrive"""
         if not self._one_drive_id:
@@ -171,8 +174,6 @@ class DocumentIntegrations:
                 async with session.delete(f'{base_url}/sessions/{item_id}', headers=headers) as response:
                     return response.status in [200, 204]
         return None
-
-    #MSFT INTEGRATIONS
 
     async def append_to_current_office_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Office Excel Online workbook"""
@@ -304,163 +305,4 @@ class DocumentIntegrations:
             
         except Exception as e:
             logging.error(f"New Office Excel worksheet creation error: {str(e)}")
-            raise
-
-    #GOOGLE INTEGRATIONS
-
-    async def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
-        """Append data to Google Sheet"""
-        try:
-            # Extract spreadsheet ID from URL
-            sheet_id = sheet_url.split('/d/')[1].split('/')[0]
-            
-            # Create Google Sheets service with proper scopes
-            service = build('sheets', 'v4', credentials=self.google_creds)
-            
-            # Get sheet name from URL or fetch first sheet if not specified
-            sheet_name = None
-            if '#gid=' in sheet_url:
-                gid = sheet_url.split('#gid=')[1]
-                # Get spreadsheet metadata to find sheet name
-                sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-                for sheet in sheet_metadata.get('sheets', ''):
-                    if sheet.get('properties', {}).get('sheetId') == int(gid):
-                        sheet_name = sheet['properties']['title']
-                        break
-            
-            if not sheet_name:
-                # If no specific sheet found, get the first sheet name
-                sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-                sheet_name = sheet_metadata['sheets'][0]['properties']['title']
-            
-            # Format data for sheets
-            if isinstance(data, pd.DataFrame):
-                # Convert DataFrame to string values, handling Timestamps and NaN
-                df_copy = data.copy()
-                # Handle datetime columns
-                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
-                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                # Replace NaN values with empty string
-                df_copy = df_copy.fillna('')
-                values = df_copy.values.tolist()
-            elif isinstance(data, (dict, list)):
-                if isinstance(data, dict):
-                    # Convert any Timestamp values to strings and handle NaN
-                    processed_dict = {}
-                    for k, v in data.items():
-                        if isinstance(v, pd.Timestamp):
-                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
-                        elif pd.isna(v):  # Handle NaN values
-                            processed_dict[k] = ''
-                        else:
-                            processed_dict[k] = str(v)
-                    values = [[k, v] for k, v in processed_dict.items()]
-                else:
-                    # Convert any Timestamp values in list to strings and handle NaN
-                    values = []
-                    for v in data:
-                        if isinstance(v, pd.Timestamp):
-                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
-                        elif pd.isna(v):  # Handle NaN values
-                            values.append([''])
-                        else:
-                            values.append([str(v)])
-            
-            # Append data to sheet using values.append
-            body = {
-                'values': values
-            }
-            service.spreadsheets().values().append(
-                spreadsheetId=sheet_id,
-                range=f"{sheet_name}",  # Use the detected sheet name
-                valueInputOption='RAW',
-                insertDataOption='INSERT_ROWS',
-                body=body
-            ).execute()
-            
-            return True
-            
-        except Exception as e:
-            logging.error(f"Google Sheets append error: {str(e)}")
-            raise
-
-    async def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
-        """Add data to a new sheet within an existing Google Sheets workbook"""
-        try:
-            # Create Google Sheets service
-            service = build('sheets', 'v4', credentials=self.google_creds)
-            
-            # Extract spreadsheet ID from URL
-            sheet_id = sheet_url.split('/d/')[1].split('/')[0]
-            
-            # Generate a unique sheet name (e.g. "Query Results 1", "Query Results 2", etc.)
-            sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-            existing_sheets = [sheet['properties']['title'] for sheet in sheet_metadata['sheets']]
-            base_name = file_namer(query, old_data)
-            sheet_name = base_name
-            counter = 1
-            while sheet_name in existing_sheets:
-                sheet_name = f"{base_name} {counter}"
-                counter += 1
-            
-            # Add new sheet
-            body = {
-                'requests': [{
-                    'addSheet': {
-                        'properties': {
-                            'title': sheet_name
-                        }
-                    }
-                }]
-            }
-            response = service.spreadsheets().batchUpdate(
-                spreadsheetId=sheet_id,
-                body=body
-            ).execute()
-            
-            # Format data for sheets (same as before)
-            if isinstance(data, pd.DataFrame):
-                df_copy = data.copy()
-                for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
-                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                df_copy = df_copy.fillna('')
-                values = [df_copy.columns.tolist()] + df_copy.values.tolist()
-            elif isinstance(data, (dict, list)):
-                if isinstance(data, dict):
-                    processed_dict = {}
-                    for k, v in data.items():
-                        if isinstance(v, pd.Timestamp):
-                            processed_dict[k] = v.strftime('%Y-%m-%d %H:%M:%S')
-                        elif pd.isna(v):
-                            processed_dict[k] = ''
-                        else:
-                            processed_dict[k] = str(v)
-                    values = [[k, v] for k, v in processed_dict.items()]
-                else:
-                    values = []
-                    for v in data:
-                        if isinstance(v, pd.Timestamp):
-                            values.append([v.strftime('%Y-%m-%d %H:%M:%S')])
-                        elif pd.isna(v):
-                            values.append([''])
-                        else:
-                            values.append([str(v)])
-            else:
-                values = [[str(data)]]
-            
-            # Write data to new sheet
-            body = {
-                'values': values
-            }
-            service.spreadsheets().values().update(
-                spreadsheetId=sheet_id,
-                range=f"{sheet_name}!A1",
-                valueInputOption='RAW',
-                body=body
-            ).execute()
-            
-            return True
-            
-        except Exception as e:
-            logging.error(f"New Google Sheet creation error: {str(e)}")
             raise

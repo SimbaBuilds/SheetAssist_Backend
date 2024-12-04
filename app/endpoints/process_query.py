@@ -57,6 +57,8 @@ async def process_query_endpoint(
                 session_dir=session_dir,
                 num_images_processed=num_images_processed
             )
+
+            logger.info(f"num_images_processed: {num_images_processed}")
         except Exception as e:
             raise ValueError(e)
 
@@ -74,12 +76,7 @@ async def process_query_endpoint(
         if result.error:
             raise HTTPException(status_code=400, detail=result.error + " -- please try rephrasing your request")
         
-        logger.info(f"""Output preferences for user {user_id}: 
-                    type={request.output_preferences.type}, 
-                    format={request.output_preferences.format}, 
-                    destination_url={request.output_preferences.destination_url}, 
-                    modify_existing={request.output_preferences.modify_existing}
-                    """)
+
         
         # Handle output based on type
         if request.output_preferences.type == "download":
@@ -97,6 +94,8 @@ async def process_query_endpoint(
                 timed_out=result.timed_out,
                 return_value_snapshot=result.return_value_snapshot
             )
+            logger.info(f"num_images_processed: {num_images_processed}")
+
             return QueryResponse(
                 result=truncated_result,
                 status="success",

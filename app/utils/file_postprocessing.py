@@ -18,7 +18,8 @@ import json
 import logging
 from typing import Any
 from app.utils.auth import SupabaseClient
-from app.utils.document_integrations import DocumentIntegrations
+from app.utils.google_integration import GoogleIntegration
+from app.utils.microsoft_integration import MicrosoftIntegration
 
 
 
@@ -236,41 +237,23 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
             else:
                 data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
         
-        g_response = supabase.table('user_documents_access') \
-            .select('refresh_token') \
-            .match({'user_id': user_id, 'provider': 'google'}) \
-            .execute()
-        
-        if not g_response.data or len(g_response.data) == 0:
-            print(f"No Google token found for user {user_id}")
-            return None
-        google_refresh_token = g_response.data[0]['refresh_token']
 
-        ms_response = supabase.table('user_documents_access') \
-            .select('refresh_token') \
-            .match({'user_id': user_id, 'provider': 'microsoft'}) \
-            .execute()
-        
-        if not ms_response.data or len(ms_response.data) == 0:
-            print(f"No Microsoft token found for user {user_id}")
-            return None
-        ms_refresh_token = ms_response.data[0]['refresh_token']
+        g_integration = GoogleIntegration(supabase, user_id)
+        msft_integration = MicrosoftIntegration(supabase, user_id)
 
-
-        doc_integrations = DocumentIntegrations(google_refresh_token, ms_refresh_token, user_id, supabase)
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
             if request.output_preferences.modify_existing:
-                return await doc_integrations.append_to_current_google_sheet(data, request.output_preferences.destination_url)
+                return await g_integration.append_to_current_google_sheet(data, request.output_preferences.destination_url)
             else:
-                return await doc_integrations.append_to_new_google_sheet(data, request.output_preferences.destination_url, old_data, request.query)
+                return await g_integration.append_to_new_google_sheet(data, request.output_preferences.destination_url, old_data, request.query)
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             if request.output_preferences.modify_existing:
-                return await doc_integrations.append_to_current_office_sheet(data, request.output_preferences.destination_url)
+                return await msft_integration.append_to_current_office_sheet(data, request.output_preferences.destination_url)
             else:
-                return await doc_integrations.append_to_new_office_sheet(data, request.output_preferences.destination_url, old_data, request.query)
+                return await msft_integration.append_to_new_office_sheet(data, request.output_preferences.destination_url, old_data, request.query)
     
         raise ValueError(f"Unsupported destination URL type: {request.output_preferences.destination_url}")
     
