@@ -127,9 +127,13 @@ class DocumentIntegrations:
                         self._one_drive_id = drive_info['id']
                     else:
                         response_text = await response.text()
-                        if "InvalidAuthenticationToken" in response_text:
+                        error_data = await response.json()
+                        error_code = error_data.get('error', {}).get('code', 'Unknown')
+                        if error_code == "InvalidAuthenticationToken":
                             raise HTTPException(status_code=401, detail="Invalid or expired Microsoft access token")
-                        raise HTTPException(status_code=response.status, detail=f"OneDrive access failed: {response_text}")
+                        elif error_code == "ResourceNotFound":
+                            raise HTTPException(status_code=404, detail="OneDrive not found for this account")
+                        raise HTTPException(status_code=response.status, detail=f"OneDrive access failed: {error_code} - {response_text}")
         return self._one_drive_id
 
     async def _get_one_drive_and_item_info(self, file_url: str) -> Tuple[str, str]:
@@ -176,61 +180,57 @@ class DocumentIntegrations:
             # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
-            # Get active sessions and close them
-            sessions = await self._manage_office_session(workbook_id, action='list')
-            for session in sessions:
-                await self._manage_office_session(session, action='close')
-
-            # Create new session
-            session_id = await self._manage_office_session(workbook_id, action='create')
-
-            try:
-                # Format data for Excel
-                values = self._format_data_for_excel(data)
+            headers = await self._get_microsoft_headers()
+            values = self._format_data_for_excel(data)
+            
+            # Get the first worksheet
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
+                    headers=headers
+                ) as response:
+                    if response.status != 200:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to get worksheets: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
+                    worksheets = await response.json()
+                    active_sheet = worksheets['value'][0]
                 
-                # Get worksheets to find the active one
-                worksheets_response = await (self.ms_client
-                    .drives
-                    .by_drive_id(drive_id)
-                    .items
-                    .by_id(workbook_id)
-                    .workbook
-                    .worksheets
-                    .get())
-                active_sheet = worksheets_response.value[0]  # Get first worksheet
-                
-                # Find the next empty row
-                used_range = await (self.ms_client
-                    .drives
-                    .by_drive_id(drive_id)
-                    .items
-                    .by_id(workbook_id)
-                    .workbook
-                    .worksheets
-                    .by_id(active_sheet.id)
-                    .used_range
-                    .get())
-                next_row = used_range.row_count + 1
+                # Get the used range to find next empty row
+                async with session.get(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
+                    headers=headers
+                ) as response:
+                    if response.status != 200:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to get used range: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
+                    used_range = await response.json()
+                    next_row = used_range['rowCount'] + 1
                 
                 # Write data to worksheet
                 range_address = f"A{next_row}:${chr(65 + len(values[0]) - 1)}${next_row + len(values) - 1}"
-                await (self.ms_client
-                    .drives
-                    .by_drive_id(drive_id)
-                    .items
-                    .by_id(workbook_id)
-                    .workbook
-                    .worksheets
-                    .by_id(active_sheet.id)
-                    .range(range_address)
-                    .values
-                    .set(values))
+                request_body = {
+                    'values': values
+                }
+                
+                async with session.patch(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/range(address=\'{range_address}\')',
+                    headers=headers,
+                    json=request_body
+                ) as response:
+                    if response.status not in [200, 204]:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to update range: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
                 
                 return True
-            finally:
-                # Always close the session after we're done
-                if session_id:
-                    await self._manage_office_session(session_id, action='close')
             
         except Exception as e:
             logging.error(f"Office Excel append error: {str(e)}")
@@ -242,26 +242,23 @@ class DocumentIntegrations:
             # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
-            # Get active sessions and close them
-            sessions = await self._manage_office_session(workbook_id, action='list')
-            for session in sessions:
-                await self._manage_office_session(session, action='close')
-
-            # Create new session
-            session_id = await self._manage_office_session(workbook_id, action='create')
-
-            try:
-                # Format data for Excel
-                values = self._format_data_for_excel(data)
-                
+            headers = await self._get_microsoft_headers()
+            values = self._format_data_for_excel(data)
+            
+            async with aiohttp.ClientSession() as session:
                 # Get existing worksheets
-                drive = await self.ms_client.drives.get()
-                drive_item = await drive.items.get()
-                worksheets_response = await (drive_item
-                    .workbook
-                    .worksheets
-                    .get())
-                existing_sheets = [ws.name for ws in worksheets_response.value]
+                async with session.get(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
+                    headers=headers
+                ) as response:
+                    if response.status != 200:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to get worksheets: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
+                    worksheets = await response.json()
+                    existing_sheets = [ws['name'] for ws in worksheets['value']]
                 
                 # Generate unique sheet name
                 base_name = file_namer(query, old_data)
@@ -272,26 +269,38 @@ class DocumentIntegrations:
                     counter += 1
                 
                 # Create new worksheet
-                worksheet = await (drive_item
-                    .workbook
-                    .worksheets
-                    .add(name=sheet_name))
+                async with session.post(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/add',
+                    headers=headers,
+                    json={'name': sheet_name}
+                ) as response:
+                    if response.status != 201:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to create worksheet: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
+                    new_worksheet = await response.json()
                 
                 # Write data to new worksheet
                 range_address = f"A1:${chr(65 + len(values[0]) - 1)}${len(values)}"
-                await (drive_item
-                    .workbook
-                    .worksheets
-                    .item(id=worksheet.id)
-                    .range(range_address)
-                    .values
-                    .set(values))
+                request_body = {
+                    'values': values
+                }
+                
+                async with session.patch(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{new_worksheet["id"]}/range(address=\'{range_address}\')',
+                    headers=headers,
+                    json=request_body
+                ) as response:
+                    if response.status not in [200, 204]:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to update range: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
                 
                 return True
-            finally:
-                # Always close the session after we're done
-                if session_id:
-                    await self._manage_office_session(session_id, action='close')
             
         except Exception as e:
             logging.error(f"New Office Excel worksheet creation error: {str(e)}")
