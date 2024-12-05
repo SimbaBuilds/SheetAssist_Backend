@@ -175,8 +175,8 @@ class MicrosoftIntegration:
                     return response.status in [200, 204]
         return None
 
-    async def append_to_current_office_sheet(self, data: Any, sheet_url: str) -> bool:
-        """Append data to Office Excel Online workbook"""
+    async def append_to_current_office_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
+        """Append data to Office Excel Online workbook on the specified sheet"""
         try:
             # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
@@ -184,7 +184,7 @@ class MicrosoftIntegration:
             headers = await self._get_microsoft_headers()
             values = self._format_data_for_excel(data)
             
-            # Get the first worksheet
+            # Get all worksheets
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
@@ -197,7 +197,19 @@ class MicrosoftIntegration:
                             detail=f"Failed to get worksheets: {error_data.get('error', {}).get('message', 'Unknown error')}"
                         )
                     worksheets = await response.json()
-                    active_sheet = worksheets['value'][0]
+                    
+                    # Find the specified worksheet
+                    active_sheet = None
+                    for sheet in worksheets['value']:
+                        if sheet['name'].lower() == sheet_name.lower():
+                            active_sheet = sheet
+                            break
+                    
+                    if not active_sheet:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Worksheet '{sheet_name}' not found"
+                        )
                 
                 # Get the used range to find next empty row
                 async with session.get(
@@ -305,4 +317,45 @@ class MicrosoftIntegration:
             
         except Exception as e:
             logging.error(f"New Office Excel worksheet creation error: {str(e)}")
+            raise
+
+    async def extract_office_sheets_data(self, sheet_url: str) -> pd.DataFrame:
+        """Extract data from Office Excel workbook"""
+        try:
+            # Get drive ID and workbook ID
+            drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
+            
+            headers = await self._get_microsoft_headers()
+            async with aiohttp.ClientSession() as session:
+                # Get all data from the sheet
+                async with session.get(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
+                    headers=headers
+                ) as response:
+                    if response.status != 200:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to get worksheets: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
+                    worksheets = await response.json()
+                    active_sheet = worksheets['value'][0]
+                
+                # Get all data from the sheet
+                async with session.get(
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/range(address="A1")',
+                    headers=headers
+                ) as response:
+                    if response.status != 200:
+                        error_data = await response.json()
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Failed to get sheet data: {error_data.get('error', {}).get('message', 'Unknown error')}"
+                        )
+                    sheet_data = await response.json()
+                
+                return pd.DataFrame(sheet_data['values'])
+            
+        except Exception as e:
+            logging.error(f"Office Excel data extraction error: {str(e)}")
             raise

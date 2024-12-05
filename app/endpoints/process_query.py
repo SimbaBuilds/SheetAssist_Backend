@@ -55,6 +55,8 @@ async def process_query_endpoint(
                 web_urls=request.web_urls,
                 query=request.query,
                 session_dir=session_dir,
+                supabase=supabase,
+                user_id=user_id,
                 num_images_processed=num_images_processed
             )
 

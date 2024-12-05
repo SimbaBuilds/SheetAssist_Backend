@@ -318,11 +318,11 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
             workbook_response.raise_for_status()
             sheets_data = workbook_response.json()
             
-            # # Get the first sheet or the active sheet if available, CANNOT get sheet from URL
-            # if sheets_data.get('value'):
-            #     active_sheet = next((sheet for sheet in sheets_data['value'] if sheet.get('visibility') == 'Visible'), sheets_data['value'][0])
-            #     sheet_name = active_sheet.get('name')
-            #     return f"{file_name} - {sheet_name}"
+            sheet_name = ''
+            # Get the first sheet or the active sheet if available, CANNOT get sheet from URL
+            if sheets_data.get('value'):
+                active_sheet = next((sheet for sheet in sheets_data['value'] if sheet.get('visibility') == 'Visible'), sheets_data['value'][0])
+                sheet_name = active_sheet.get('name')
 
         if "." in file_name:
             file_name = file_name.split(".")[0]

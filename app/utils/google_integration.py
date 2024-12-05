@@ -184,3 +184,28 @@ class GoogleIntegration:
         except Exception as e:
             logging.error(f"New Google Sheet creation error: {str(e)}")
             raise
+
+    async def extract_google_sheets_data(self, sheet_url: str) -> pd.DataFrame:
+        """Extract data from Google Sheet"""
+        try:
+            # Extract spreadsheet ID from URL
+            sheet_id = sheet_url.split('/d/')[1].split('/')[0]
+            
+            # Create Google Sheets service
+            service = build('sheets', 'v4', credentials=self.google_creds)
+            
+            # Get all data from the sheet
+            result = service.spreadsheets().values().get(
+                spreadsheetId=sheet_id,
+                range='Sheet1'
+            ).execute()
+            values = result.get('values', [])
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(values[1:], columns=values[0])
+            
+            return df
+            
+        except Exception as e:
+            logging.error(f"Google Sheets data extraction error: {str(e)}")
+            raise

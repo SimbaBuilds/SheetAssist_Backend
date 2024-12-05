@@ -16,14 +16,27 @@ from fastapi import UploadFile
 from app.schemas import FileDataInfo, FileMetadata
 from typing import List
 import logging
+from app.utils.google_integration import GoogleIntegration
+from app.utils.microsoft_integration import MicrosoftIntegration
+from supabase import create_client, Client as SupabaseClient
+import asyncio
+import aiohttp
 
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
     
-    def __init__(self, num_images_processed: int = 0):
-        """Initialize FilePreprocessor with image counter"""
+    def __init__(self, num_images_processed: int = 0, supabase: SupabaseClient = None, user_id: str = None):
+        """Initialize the FilePreprocessor with optional authentication"""
         self.num_images_processed = num_images_processed
+        self.supabase = supabase
+        self.user_id = user_id
+        self.google_integration = None
+        self.microsoft_integration = None
+        
+        if supabase and user_id:
+            self.google_integration = GoogleIntegration(supabase, user_id)
+            self.microsoft_integration = MicrosoftIntegration(supabase, user_id)
 
     @staticmethod
     def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO]) -> pd.DataFrame:
@@ -215,76 +228,147 @@ class FilePreprocessor:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
     @staticmethod
-    def process_web_url(url: str) -> Union[pd.DataFrame, str]:
+    def process_gsheet_url(url: str, supabase: SupabaseClient = None, user_id: str = None) -> pd.DataFrame:
         """
-        Process web URLs (Google Sheets/Docs, Microsoft Excel/Word Online) and convert to appropriate format
+        Process Google Sheets URLs and convert to pandas DataFrame
         
         Args:
-            url: URL to the web document
+            url (str): URL of the Google Sheet file
+            supabase (SupabaseClient): Supabase client for authentication
+            user_id (str): User ID for authentication
             
         Returns:
-            Union[pd.DataFrame, str]: Processed data as DataFrame for spreadsheets or string for documents
+            pd.DataFrame: DataFrame containing the sheet data
+            
+        Raises:
+            ValueError: If URL is invalid or file cannot be accessed
         """
         try:
-            # Handle Google Sheets URLs
+            if not supabase or not user_id:
+                raise ValueError("Authentication required to access Google Sheets")
+
+            # Initialize Google integration
+            g_integration = GoogleIntegration(supabase, user_id)
+            
             if 'docs.google.com/spreadsheets' in url:
-                file_id = url.split('/d/')[1].split('/')[0]
-                export_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv"
-                return pd.read_csv(export_url)
-            
-            # Handle Google Docs URLs
-            elif 'docs.google.com/document' in url:
-                file_id = url.split('/d/')[1].split('/')[0]
-                export_url = f"https://docs.google.com/document/d/{file_id}/export?format=txt"
-                response = requests.get(export_url)
-                if response.status_code != 200:
-                    raise ValueError(f"Failed to fetch Google Doc: {url}")
-                return response.text
-            
-            # Handle Microsoft Excel Online URLs
-            elif 'xlsx' in url:
-                # Extract the sharing URL
-                response = requests.get(url, allow_redirects=True)
-                share_url = response.url
-                
-                # Convert to direct download link
-                download_url = share_url.replace('view.aspx', 'download.aspx')
-                response = requests.get(download_url)
-                if response.status_code != 200:
-                    raise ValueError(f"Failed to fetch Excel Online file: {url}")
+                try:
+                    # Extract file ID from URL
+                    file_id = url.split('/d/')[1].split('/')[0]
                     
-                return pd.read_excel(io.BytesIO(response.content))
-            
-            # Handle Microsoft Word Online URLs
-            elif 'docx' in url:
-                # Extract the sharing URL
-                response = requests.get(url, allow_redirects=True)
-                share_url = response.url
-                
-                # Convert to direct download link
-                download_url = share_url.replace('view.aspx', 'download.aspx')
-                response = requests.get(download_url)
-                if response.status_code != 200:
-                    raise ValueError(f"Failed to fetch Word Online file: {url}")
-                
-                doc = docx.Document(io.BytesIO(response.content))
-                return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
-            
-            # Handle direct Excel/CSV URLs
-            response = requests.get(url)
-            if response.status_code != 200:
-                raise ValueError(f"Failed to fetch URL: {url}")
-            
-            content_type = response.headers.get('content-type', '')
-            if 'csv' in content_type:
-                return pd.read_csv(io.StringIO(response.text))
-            elif 'excel' in content_type or 'spreadsheet' in content_type:
-                return pd.read_excel(io.BytesIO(response.content))
+                    # Use Google integration to get authenticated service
+                    service = g_integration.get_sheets_service()
+                    if not service:
+                        raise ValueError("Failed to initialize Google Sheets service")
+                    
+                    # Read the sheet data using authenticated service
+                    result = service.spreadsheets().values().get(
+                        spreadsheetId=file_id,
+                        range='A:ZZ'  # Get all data
+                    ).execute()
+                    
+                    # Convert to DataFrame
+                    values = result.get('values', [])
+                    if not values:
+                        return pd.DataFrame()
+                    
+                    headers = values[0]
+                    data = values[1:]
+                    return pd.DataFrame(data, columns=headers)
+                    
+                except Exception as e:
+                    raise ValueError(f"Failed to access Google Sheet: {str(e)}")
             else:
-                raise ValueError(f"Unsupported content type: {content_type}")
+                raise ValueError("Invalid Google Sheets URL format")
                 
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            error_msg = str(e)
+            if any(sensitive in error_msg.lower() for sensitive in ['token', 'key', 'auth', 'password', 'secret']):
+                error_msg = "Authentication error occurred while accessing the file"
+            raise ValueError(FilePreprocessor._sanitize_error(error_msg))
+
+    @staticmethod
+    async def process_msft_excel_url(url: str, supabase: SupabaseClient = None, user_id: str = None) -> pd.DataFrame:
+        """
+        Process Microsoft Excel Online URLs and convert to pandas DataFrame
+        
+        Args:
+            url (str): URL of the Microsoft Excel Online file
+            supabase (SupabaseClient): Supabase client for authentication
+            user_id (str): User ID for authentication
+            
+        Returns:
+            pd.DataFrame: DataFrame containing the sheet data
+            
+        Raises:
+            ValueError: If URL is invalid or file cannot be accessed
+        """
+        try:
+            if not supabase or not user_id:
+                raise ValueError("Authentication required to access Microsoft Excel files")
+
+            # Initialize Microsoft integration
+            msft_integration = MicrosoftIntegration(supabase, user_id)
+            
+            if any(domain in url.lower() for domain in ['onedrive.live.com', 'sharepoint.com']):
+                try:
+                    # Get drive ID and item ID from URL
+                    drive_id, item_id = await msft_integration._get_one_drive_and_item_info(url)
+                    
+                    # Get authenticated headers
+                    headers = await msft_integration._get_microsoft_headers()
+                    
+                    # Create a session for the workbook
+                    session_id = await msft_integration._manage_office_session(item_id, 'create')
+                    
+                    try:
+                        # Get the first worksheet
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(
+                                f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/workbook/worksheets',
+                                headers=headers
+                            ) as response:
+                                if response.status != 200:
+                                    raise ValueError("Failed to access Excel worksheet")
+                                worksheets = await response.json()
+                                if not worksheets['value']:
+                                    raise ValueError("No worksheets found in the workbook")
+                                
+                                active_sheet = worksheets['value'][0]
+                                
+                                # Get the used range to read all data
+                                async with session.get(
+                                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
+                                    headers=headers
+                                ) as range_response:
+                                    if range_response.status != 200:
+                                        raise ValueError("Failed to read worksheet data")
+                                    
+                                    range_data = await range_response.json()
+                                    values = range_data.get('values', [])
+                                    
+                                    if not values:
+                                        return pd.DataFrame()
+                                    
+                                    # Convert to DataFrame
+                                    headers = values[0]
+                                    data = values[1:]
+                                    return pd.DataFrame(data, columns=headers)
+                    
+                    finally:
+                        # Always close the session
+                        if session_id:
+                            await msft_integration._manage_office_session(session_id, 'close')
+                            
+                except Exception as e:
+                    raise ValueError(f"Failed to process Excel Online file: {str(e)}")
+            else:
+                raise ValueError("Invalid Microsoft Excel Online URL format")
+                
+        except Exception as e:
+            error_msg = str(e)
+            if any(sensitive in error_msg.lower() for sensitive in ['token', 'key', 'auth', 'password', 'secret']):
+                error_msg = "Authentication error occurred while accessing the file"
+            raise ValueError(FilePreprocessor._sanitize_error(error_msg))
 
     def process_pdf(self, file: Union[BinaryIO, str], query: str = None) -> Tuple[str, str, bool]:
         """
@@ -353,17 +437,9 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, **kwargs) -> Union[pd.DataFrame, str]:
+    def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, supabase: SupabaseClient = None, user_id: str = None) -> Union[str, pd.DataFrame]:
         """
-        Main method to preprocess files based on their type
-        
-        Args:
-            file: File object or path to file
-            file_type: Type of file (e.g., 'xlsx', 'csv', 'json', etc.)
-            **kwargs: Additional arguments for specific processors
-            
-        Returns:
-            Union[pd.DataFrame, str]: Processed data
+        Preprocess file based on its type
         """
         processors = {
             'xlsx': self.process_excel,
@@ -374,19 +450,16 @@ class FilePreprocessor:
             'png': self.process_image,
             'jpg': self.process_image,
             'jpeg': self.process_image,
-            'web_url': self.process_web_url,
             'pdf': self.process_pdf,
-            'gdoc': self.process_web_url,
-            'gsheet': self.process_web_url,
-            'office_doc': self.process_web_url,
-            'office_sheet': self.process_web_url
+            'gsheet': lambda url: self.process_gsheet_url(url, self.supabase, self.user_id),
+            'office_sheet': lambda url: asyncio.run(self.process_msft_excel_url(url, self.supabase, self.user_id))
         }
         
         processor = processors.get(file_type.lower())
         if not processor:
             raise ValueError(f"Unsupported file type: {file_type}")
         
-        return processor(file, **kwargs)
+        return processor(file)
 
     @staticmethod
     def _sanitize_error(e: Exception) -> str:
@@ -407,17 +480,26 @@ def preprocess_files(
     web_urls: List[str],
     query: str,
     session_dir,
+    supabase: SupabaseClient,
+    user_id: str,
     num_images_processed: int = 0
 ) -> Tuple[List[FileDataInfo], int]:
     """Helper function to preprocess files and web URLs"""
-    preprocessor = FilePreprocessor(num_images_processed)
+    preprocessor = FilePreprocessor(num_images_processed, supabase, user_id)
     processed_data = []
     
     # Process web URLs if provided
     for url in web_urls:
         try:
             logging.info(f"Processing URL: {url}")
-            content = preprocessor.preprocess_file(url, 'web_url')
+            if 'docs.google' in url:
+                content = preprocessor.process_gsheet_url(url, 'gsheet', supabase, user_id) 
+            elif 'onedrive.live' in url:
+                content = preprocessor.process_msft_excel_url(url, 'office_sheet', supabase, user_id)
+            else:
+                logging.error(f"Unsupported URL format: {url}")
+                continue
+            
             data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
             processed_data.append(
                 FileDataInfo(
