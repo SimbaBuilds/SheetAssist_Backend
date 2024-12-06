@@ -7,6 +7,12 @@ class OutputPreferences(BaseModel):
     destination_url: Optional[str] = None
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
     modify_existing: Optional[bool] = None
+    sheet_name: Optional[str] = None
+
+class InputUrl(BaseModel):
+    url: str
+    provider: str
+    sheet_name: Optional[str] = None
 
 class FileMetadata(BaseModel):
     """Metadata about an uploaded file from frontend"""
@@ -17,7 +23,7 @@ class FileMetadata(BaseModel):
     index: int
 
 class QueryRequest(BaseModel):
-    web_urls: Optional[List[str]] = []
+    input_urls: Optional[List[InputUrl]] = []
     files_metadata: Optional[List[FileMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional

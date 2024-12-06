@@ -185,27 +185,62 @@ class GoogleIntegration:
             logging.error(f"New Google Sheet creation error: {str(e)}")
             raise
 
+#preprocessing
     async def extract_google_sheets_data(self, sheet_url: str) -> pd.DataFrame:
-        """Extract data from Google Sheet"""
+        """
+        Extract data from a Google Sheets URL. The sheet name/id can be parsed from the URL if present.
+        
+        Args:
+            sheet_url (str): URL of the Google Sheet
+            
+        Returns:
+            pd.DataFrame: DataFrame containing the sheet data
+            
+        Raises:
+            ValueError: If URL is invalid or file cannot be accessed
+        """
+        if 'docs.google.com/spreadsheets' not in url:
+            raise ValueError("Invalid Google Sheets URL format")
+            
         try:
-            # Extract spreadsheet ID from URL
-            sheet_id = sheet_url.split('/d/')[1].split('/')[0]
+            # Extract file ID from URL
+            file_id = url.split('/d/')[1].split('/')[0]
             
-            # Create Google Sheets service
+            # Get the sheet name/gid from URL if present
+            sheet_range = 'A:ZZ'  # Default range
+            if '#gid=' in url:
+                gid = url.split('#gid=')[1].split('&')[0]
+                # Get sheet name from gid
+                service = build('sheets', 'v4', credentials=self.google_creds)
+                sheet_metadata = service.spreadsheets().get(spreadsheetId=file_id).execute()
+                for sheet in sheet_metadata.get('sheets', []):
+                    if sheet.get('properties', {}).get('sheetId') == int(gid):
+                        sheet_name = sheet['properties']['title']
+                        sheet_range = f"'{sheet_name}'!A:ZZ"
+                        break
+            
+            # Use Google integration to get authenticated service
             service = build('sheets', 'v4', credentials=self.google_creds)
+            if not service:
+                raise ValueError("Failed to initialize Google Sheets service")
             
-            # Get all data from the sheet
+            # Read the sheet data using authenticated service
             result = service.spreadsheets().values().get(
-                spreadsheetId=sheet_id,
-                range='Sheet1'
+                spreadsheetId=file_id,
+                range=sheet_range
             ).execute()
-            values = result.get('values', [])
             
             # Convert to DataFrame
-            df = pd.DataFrame(values[1:], columns=values[0])
+            values = result.get('values', [])
+            if not values:
+                return pd.DataFrame()
             
-            return df
+            headers = values[0]
+            data = values[1:]
+            return pd.DataFrame(data, columns=headers)
             
         except Exception as e:
-            logging.error(f"Google Sheets data extraction error: {str(e)}")
-            raise
+            error_msg = str(e)
+            if any(sensitive in error_msg.lower() for sensitive in ['token', 'key', 'auth', 'password', 'secret']):
+                error_msg = "Authentication error occurred while accessing the file"
+            raise ValueError(error_msg)

@@ -52,7 +52,7 @@ async def process_query_endpoint(
             preprocessed_data, num_images_processed = preprocess_files(
                 files=files,
                 files_metadata=request.files_metadata,
-                web_urls=request.web_urls,
+                input_urls=request.input_urls,
                 query=request.query,
                 session_dir=session_dir,
                 supabase=supabase,
@@ -120,7 +120,6 @@ async def process_query_endpoint(
                 result.return_value,
                 request,
                 preprocessed_data,
-                msft_sheet_name,
                 supabase,
                 user_id
             )

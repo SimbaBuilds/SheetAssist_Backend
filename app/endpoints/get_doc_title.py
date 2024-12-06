@@ -376,7 +376,7 @@ async def get_document_titles(
                     titles.append(DocumentTitleResponse(
                         url=url,
                         doc_name=doc_name,
-                        provider=provider,
+                        provider="google",
                         sheet_names=sheet_names,
                         success=True
                     ))
@@ -406,7 +406,7 @@ async def get_document_titles(
                 titles.append(DocumentTitleResponse(
                     url=url,
                     doc_name=doc_name,
-                    provider=provider,
+                    provider="Microsoft",
                     sheet_names=sheet_names,
                     success=True
                 ))

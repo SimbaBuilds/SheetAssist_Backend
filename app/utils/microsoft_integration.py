@@ -1,5 +1,5 @@
 from app.schemas import FileDataInfo
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from app.utils.llm import file_namer
 import logging
 from fastapi import HTTPException
@@ -319,15 +319,28 @@ class MicrosoftIntegration:
             logging.error(f"New Office Excel worksheet creation error: {str(e)}")
             raise
 
-    async def extract_office_sheets_data(self, sheet_url: str) -> pd.DataFrame:
-        """Extract data from Office Excel workbook"""
+    async def extract_msft_excel_data(self, sheet_url: str, sheet_name: Optional[str] = None) -> pd.DataFrame:
+        """
+        Extract data from Microsoft Excel URL. If sheet_name is provided, it will try to match it with available sheets.
+        
+        Args:
+            sheet_url (str): URL of the Microsoft Excel file
+            sheet_name (Optional[str]): Name of the sheet to extract data from. If not provided, uses the first sheet.
+            
+        Returns:
+            pd.DataFrame: DataFrame containing the sheet data
+            
+        Raises:
+            ValueError: If URL is invalid or file cannot be accessed
+            HTTPException: If API requests fail
+        """
         try:
             # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
             headers = await self._get_microsoft_headers()
             async with aiohttp.ClientSession() as session:
-                # Get all data from the sheet
+                # Get all worksheets
                 async with session.get(
                     f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
                     headers=headers
@@ -339,11 +352,22 @@ class MicrosoftIntegration:
                             detail=f"Failed to get worksheets: {error_data.get('error', {}).get('message', 'Unknown error')}"
                         )
                     worksheets = await response.json()
-                    active_sheet = worksheets['value'][0]
+                    
+                    # Find the specified worksheet or use the first one
+                    active_sheet = None
+                    if sheet_name:
+                        for sheet in worksheets['value']:
+                            if sheet['name'].lower() == sheet_name.lower():
+                                active_sheet = sheet
+                                break
+                        if not active_sheet:
+                            raise ValueError(f"Worksheet '{sheet_name}' not found")
+                    else:
+                        active_sheet = worksheets['value'][0]
                 
-                # Get all data from the sheet
+                # Get all data from the sheet using usedRange
                 async with session.get(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/range(address="A1")',
+                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
                     headers=headers
                 ) as response:
                     if response.status != 200:
@@ -352,10 +376,17 @@ class MicrosoftIntegration:
                             status_code=response.status,
                             detail=f"Failed to get sheet data: {error_data.get('error', {}).get('message', 'Unknown error')}"
                         )
-                    sheet_data = await response.json()
-                
-                return pd.DataFrame(sheet_data['values'])
+                    range_data = await response.json()
+                    
+                    # Convert to DataFrame
+                    values = range_data.get('values', [])
+                    if not values:
+                        return pd.DataFrame()
+                    
+                    headers = values[0]
+                    data = values[1:]
+                    return pd.DataFrame(data, columns=headers)
             
         except Exception as e:
-            logging.error(f"Office Excel data extraction error: {str(e)}")
+            logging.error(f"Microsoft Excel data extraction error: {str(e)}")
             raise
