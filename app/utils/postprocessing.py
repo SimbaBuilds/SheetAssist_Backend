@@ -225,7 +225,7 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
 
 
 
-async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], supabase: SupabaseClient, user_id: str) -> bool:
+async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], msft_sheet_name: str, supabase: SupabaseClient, user_id: str) -> bool:
     """Upload data to various destination types"""
     try:
         # Process tuple data if present
@@ -251,7 +251,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             if request.output_preferences.modify_existing:
-                return await msft_integration.append_to_current_office_sheet(data, request.output_preferences.destination_url)
+                return await msft_integration.append_to_current_office_sheet(data, request.output_preferences.destination_url, msft_sheet_name)
             else:
                 return await msft_integration.append_to_new_office_sheet(data, request.output_preferences.destination_url, old_data, request.query)
     

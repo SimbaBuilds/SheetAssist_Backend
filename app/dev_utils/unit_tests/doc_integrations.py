@@ -63,7 +63,7 @@ TEST_DATE_DICT = {
 old_data = [FileDataInfo(data_type="dataframe", snapshot="test_snapshot", original_file_name="test_df.csv")]
 
 # URLs for testing
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ3CG8mx1JhyWC-i0h9qurZNs/edit?gid=1430814442#gid=1430814442"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ3CG8mx1JhyWC-i0h9qurZNs/edit?gid=46301584#gid=46301584"
 OFFICE_SHEET_URL = "https://onedrive.live.com/edit?id=D4064FF6F2B7F76C!105"
 SHEET_NAME = "Sheet1"
 
@@ -133,30 +133,30 @@ def msft_integration():
 
 
 
-# @pytest.mark.asyncio
-# async def test_append_to_current_google_sheet_dataframe(g_integration):
-#     """Test appending DataFrame to existing Google Sheet"""
-#     logger.info("Testing DataFrame append to existing Google Sheet...")
-#     try:
-#         result = await g_integration.append_to_current_google_sheet(TEST_DF, GOOGLE_SHEET_URL)
-#         assert result is True
-#         logger.info("Successfully appended DataFrame to existing Google Sheet")
-#     except Exception as e:
-#         logger.error(f"Failed to append DataFrame to existing Google Sheet: {str(e)}")
-#         raise
-
-
 @pytest.mark.asyncio
-async def test_append_to_current_office_sheet_dataframe(msft_integration):
-    """Test appending DataFrame to existing Office Excel sheet"""
-    logger.info("Testing DataFrame append to existing Office Excel sheet...")
+async def test_append_to_current_google_sheet_dataframe(g_integration):
+    """Test appending DataFrame to existing Google Sheet"""
+    logger.info("Testing DataFrame append to existing Google Sheet...")
     try:
-        result = await msft_integration.append_to_current_office_sheet(TEST_DF, OFFICE_SHEET_URL, SHEET_NAME)
+        result = await g_integration.append_to_current_google_sheet(TEST_DF, GOOGLE_SHEET_URL)
         assert result is True
-        logger.info("Successfully appended DataFrame to existing Office Excel sheet")
+        logger.info("Successfully appended DataFrame to existing Google Sheet")
     except Exception as e:
-        logger.error(f"Failed to append DataFrame to existing Office Excel sheet: {str(e)}")
+        logger.error(f"Failed to append DataFrame to existing Google Sheet: {str(e)}")
         raise
+
+
+# @pytest.mark.asyncio
+# async def test_append_to_current_office_sheet_dataframe(msft_integration):
+#     """Test appending DataFrame to existing Office Excel sheet"""
+#     logger.info("Testing DataFrame append to existing Office Excel sheet...")
+#     try:
+#         result = await msft_integration.append_to_current_office_sheet(TEST_DF, OFFICE_SHEET_URL, SHEET_NAME)
+#         assert result is True
+#         logger.info("Successfully appended DataFrame to existing Office Excel sheet")
+#     except Exception as e:
+#         logger.error(f"Failed to append DataFrame to existing Office Excel sheet: {str(e)}")
+#         raise
 
 # @pytest.mark.asyncio
 # async def test_append_to_current_google_sheet_with_date(g_integration):

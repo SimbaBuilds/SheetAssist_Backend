@@ -120,6 +120,7 @@ async def process_query_endpoint(
                 result.return_value,
                 request,
                 preprocessed_data,
+                msft_sheet_name,
                 supabase,
                 user_id
             )

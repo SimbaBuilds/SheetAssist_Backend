@@ -36,7 +36,9 @@ class TokenInfo(BaseModel):
 
 class DocumentTitleResponse(BaseModel):
     url: str
-    title: Optional[str] = None
+    doc_name: Optional[str] = None
+    provider: Optional[str] = None
+    sheet_names: Optional[list] = None
     error: Optional[str] = None
     success: bool
 
@@ -172,7 +174,7 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
         logger.error(f"Error refreshing Microsoft token: {str(e)}")
         return None
 
-async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> str | None:
+async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> Union[str, str, list] | None:
     """Get document title using Google Drive API"""
     logger.info(f"Fetching Google doc title for URL: {url}")
     try:
@@ -231,7 +233,11 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
                 sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
                 sheet_name = sheet_metadata['sheets'][0]['properties']['title']
             doc_name = file.get('name')
-            return f"{doc_name} - {sheet_name}"
+            sheet_names = []
+            sheet_names.append(sheet_name)
+
+            return doc_name, 'google', sheet_names
+
         except Exception as api_error:
             # Handle specific Google API errors
             if 'invalid_grant' in str(api_error):
@@ -256,7 +262,7 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
         logger.error(f"Error fetching Google doc title: {str(e)}")
         return None  # Return None instead of the error string to maintain consistency
 
-async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> str | None:
+async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> Union[str, str, list] | None:
     """Get document title using Microsoft Graph API"""
     try:
         # Check if token is expired
@@ -318,16 +324,13 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
             workbook_response.raise_for_status()
             sheets_data = workbook_response.json()
             
-            sheet_name = ''
-            # Get the first sheet or the active sheet if available, CANNOT get sheet from URL
-            if sheets_data.get('value'):
-                active_sheet = next((sheet for sheet in sheets_data['value'] if sheet.get('visibility') == 'Visible'), sheets_data['value'][0])
-                sheet_name = active_sheet.get('name')
-
+        sheet_names = []
+        for sheet in sheets_data.get('value', []):
+            sheet_names.append(sheet['name'])
         if "." in file_name:
             file_name = file_name.split(".")[0]
         
-        return file_name
+        return file_name, "microsoft", sheet_names
 
     except Exception as e:
         logger.error(f"Error fetching Microsoft doc title: {str(e)}")
@@ -362,8 +365,8 @@ async def get_document_titles(
                 continue
 
             try:
-                title = await get_google_title(url, google_token, supabase)
-                if title is None:
+                doc_name, provider, sheet_names = await get_google_title(url, google_token, supabase)
+                if doc_name is None:
                     titles.append(DocumentTitleResponse(
                         url=url,
                         success=False,
@@ -372,7 +375,9 @@ async def get_document_titles(
                 else:
                     titles.append(DocumentTitleResponse(
                         url=url,
-                        title=title,
+                        doc_name=doc_name,
+                        provider=provider,
+                        sheet_names=sheet_names,
                         success=True
                     ))
             except Exception as e:
@@ -395,12 +400,14 @@ async def get_document_titles(
                 ))
                 continue
 
-            title = await get_microsoft_title(url, microsoft_token, supabase)
-            if title:
-                logger.info(f"Retrieved title: {title}")
+            doc_name, provider, sheet_names = await get_microsoft_title(url, microsoft_token, supabase)
+            if doc_name:
+                logger.info(f"Retrieved title: {doc_name}")
                 titles.append(DocumentTitleResponse(
                     url=url,
-                    title=title,
+                    doc_name=doc_name,
+                    provider=provider,
+                    sheet_names=sheet_names,
                     success=True
                 ))
             else:
