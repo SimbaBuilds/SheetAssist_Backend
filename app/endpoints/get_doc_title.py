@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -11,7 +11,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Annotated
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
-from app.schemas import InputUrl
 import logging
 
 # Add logging configuration
@@ -20,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
+class DocumentTitleRequest(BaseModel):
+    url: str
 
 class DocumentTitle(BaseModel):
     url: str
@@ -34,7 +34,7 @@ class TokenInfo(BaseModel):
     scope: str
     user_id: str
 
-class DocumentTitleResponse(BaseModel):
+class WorkbookResponse(BaseModel):
     url: str
     doc_name: Optional[str] = None
     provider: Optional[str] = None
@@ -343,92 +343,86 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
         logger.error(f"Error fetching Microsoft doc title: {str(e)}")
         return None
 
-@router.post("/get_document_titles", response_model=List[DocumentTitleResponse])
-async def get_document_titles(
-    request: List[InputUrl],
+@router.post("/get_document_title", response_model=WorkbookResponse)
+async def get_document_title(
+    url: DocumentTitleRequest,
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)]
 ):
-    logger.info(f"Processing document titles request for user {user_id}")
+    logger.info(f"Processing document title request for user {user_id}")
     if not user_id:
-        return [DocumentTitleResponse(
-            url=url,
+        return WorkbookResponse(
+            url=url.url,
             success=False,
             error="Authentication required"
-        ) for url in request.urls]
+        )
 
-    titles = []
-    
-    for url in request.urls:
-        # Handle Google URLs
-        if any(domain in url for domain in ['docs.google.com', 'sheets.google.com']):
-            google_token = await get_provider_token(user_id, 'google', supabase)
-            if not google_token:
-                titles.append(DocumentTitleResponse(
-                    url=url,
-                    success=False,
-                    error="Google authentication required. Please connect your Google account."
-                ))
-                continue
+    # Handle Google URLs
+    if any(domain in url.url for domain in ['docs.google.com', 'sheets.google.com']):
+        google_token = await get_provider_token(user_id, 'google', supabase)
+        if not google_token:
+            return WorkbookResponse(
+                url=url.url,
+                success=False,
+                error="Google authentication required. Please connect your Google account."
+            )
 
-            try:
-                doc_name, provider, sheet_names = await get_google_title(url, google_token, supabase)
-                if doc_name is None:
-                    titles.append(DocumentTitleResponse(
-                        url=url,
-                        success=False,
-                        error="Error accessing Google Sheets. Please reconnect your Google account."
-                    ))
-                else:
-                    titles.append(DocumentTitleResponse(
-                        url=url,
-                        doc_name=doc_name,
-                        provider="google",
-                        sheet_names=sheet_names,
-                        success=True
-                    ))
-            except Exception as e:
-                logger.error(f"Error processing Google URL: {str(e)}")
-                titles.append(DocumentTitleResponse(
-                    url=url,
+        try:
+            online_sheet = await get_google_title( url.url, google_token, supabase)
+            if online_sheet is None:
+                return WorkbookResponse(
+                    url=url.url,
                     success=False,
                     error="Error accessing Google Sheets. Please reconnect your Google account."
-                ))
-            
-        # Handle Microsoft URLs
-        elif any(domain in url for domain in ['office.com', 'live.com', 'onedrive.live.com']):
-            microsoft_token = await get_provider_token(user_id, 'microsoft', supabase)
-            logger.info(f"Retrieved Microsoft token: {microsoft_token}")
-            if not microsoft_token:
-                titles.append(DocumentTitleResponse(
-                    url=url,
-                    success=False,
-                    error="Microsoft authentication required. Please connect your Microsoft account."
-                ))
-                continue
+                )
+            logger.info(f"Retrieved title: {online_sheet.doc_name} sheets: {online_sheet.sheet_names}")
 
-            doc_name, provider, sheet_names = await get_microsoft_title(url, microsoft_token, supabase)
-            if doc_name:
-                logger.info(f"Retrieved title: {doc_name}")
-                titles.append(DocumentTitleResponse(
-                    url=url,
-                    doc_name=doc_name,
-                    provider="Microsoft",
-                    sheet_names=sheet_names,
-                    success=True
-                ))
-            else:
-                logger.error(f"Failed to retrieve title for Microsoft document: {url}")
-                titles.append(DocumentTitleResponse(
-                    url=url,
-                    success=False,
-                    error="Error accessing Excel Online. Please reconnect your Microsoft account."
-                ))
-        else:
-            titles.append(DocumentTitleResponse(
-                url=url,
+            return WorkbookResponse(
+                url=url.url,
+                doc_name=online_sheet.doc_name,
+                provider=online_sheet.provider,
+                sheet_names=online_sheet.sheet_names,
+                success=True
+            )
+        except Exception as e:
+            logger.error(f"Error processing Google URL: {str(e)}")
+            return WorkbookResponse(
+                url=url.url,
                 success=False,
-                error="Unsupported document type"
-            ))
-    logger.info(f"Successfully processed document titles request with {len(titles)} titles\n {titles[0].url} and title {titles[0].doc_name} and provider {titles[0].provider} and sheet_names {titles[0].sheet_names} and success {titles[0].success} and error {titles[0].error}")  
-    return titles
+                error="Error accessing Google Sheets. Please reconnect your Google account."
+            )
+        
+    # Handle Microsoft URLs
+    elif any(domain in url.url for domain in ['office.com', 'live.com', 'onedrive.live.com']):
+        microsoft_token = await get_provider_token(user_id, 'microsoft', supabase)
+        logger.info(f"Retrieved Microsoft token")
+        if not microsoft_token:
+            return WorkbookResponse(
+                url=url.url,
+                success=False,
+                error="Microsoft authentication required. Please connect your Microsoft account."
+            )
+
+        online_sheet = await get_microsoft_title(url.url, microsoft_token, supabase)
+        if online_sheet is not None:
+            logger.info(f"Retrieved title: {online_sheet.doc_name} sheets: {online_sheet.sheet_names}")
+            return WorkbookResponse(
+                url=url.url,
+                doc_name=online_sheet.doc_name,
+                provider=online_sheet.provider,
+                sheet_names=online_sheet.sheet_names,
+                success=True
+            )
+        else:
+            logger.error(f"Failed to retrieve title for Microsoft document: {url.url}")
+            return WorkbookResponse(
+                url=url.url,
+                success=False,
+                error="Error accessing Excel Online. Please reconnect your Microsoft account."
+            )
+    else:
+        return WorkbookResponse(
+            url=url.url,
+            success=False,
+            error="Unsupported document type"
+        )

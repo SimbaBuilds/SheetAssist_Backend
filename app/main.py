@@ -6,6 +6,7 @@ sys.path.append(project_root)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from app.endpoints import process_query, download, get_doc_title
 
 app = FastAPI()
 
@@ -25,7 +26,3 @@ app.include_router(get_doc_title.router)
 if __name__ == "__main__":    
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("app.main:app", host="localhost", port=port, reload=True)
-
-
-
-

@@ -10,10 +10,6 @@ class OutputPreferences(BaseModel):
     sheet_name: Optional[str] = None
 
 
-class InputUrl(BaseModel):
-    url: str
-    provider: str
-    sheet_name: Optional[str] = None
 
 
 class FileMetadata(BaseModel):
@@ -23,6 +19,11 @@ class FileMetadata(BaseModel):
     extension: str
     size: int
     index: int
+    
+
+class InputUrl(BaseModel):
+    url: str
+    sheet_name: Optional[str] = None
 
 
 class QueryRequest(BaseModel):
