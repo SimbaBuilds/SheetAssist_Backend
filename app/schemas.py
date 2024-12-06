@@ -9,10 +9,12 @@ class OutputPreferences(BaseModel):
     modify_existing: Optional[bool] = None
     sheet_name: Optional[str] = None
 
+
 class InputUrl(BaseModel):
     url: str
     provider: str
     sheet_name: Optional[str] = None
+
 
 class FileMetadata(BaseModel):
     """Metadata about an uploaded file from frontend"""
@@ -22,12 +24,12 @@ class FileMetadata(BaseModel):
     size: int
     index: int
 
+
 class QueryRequest(BaseModel):
     input_urls: Optional[List[InputUrl]] = []
     files_metadata: Optional[List[FileMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional
-
 
 
 class FileDataInfo(BaseModel):
@@ -40,8 +42,8 @@ class FileDataInfo(BaseModel):
     url: Optional[str] = None
     metadata: Optional[dict] = None
 
-
     class Config:
+        """docstring"""
         arbitrary_types_allowed = True  # Allow any Python type for content
 
 
@@ -58,12 +60,15 @@ class SandboxResult(BaseModel):
     class Config:
         arbitrary_types_allowed = True  # Allow any Python type for return_value
 
+
 class TruncatedSandboxResult(BaseModel):
+    """Pydantic model for storing a truncated version of SandboxResult"""
     original_query: str 
     print_output: Optional[str] = None
     error: Optional[str] = None
     timed_out: Optional[bool] = None
     return_value_snapshot: Optional[str] = None
+
 
 class FileInfo(BaseModel):
     """Information about a downloadable file"""
@@ -82,6 +87,7 @@ class QueryResponse(BaseModel):
     num_images_processed: int = 0
 
     class Config:
+        """docstring"""
         arbitrary_types_allowed = True
 
 

@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Annotated
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
+from app.schemas import InputUrl
 import logging
 
 # Add logging configuration
@@ -19,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-class URLRequest(BaseModel):
-    urls: List[str]
+
 
 class DocumentTitle(BaseModel):
     url: str
@@ -41,6 +41,11 @@ class DocumentTitleResponse(BaseModel):
     sheet_names: Optional[list] = None
     error: Optional[str] = None
     success: bool
+
+class OnlineSheet(BaseModel):
+    doc_name: str
+    provider: str
+    sheet_names: list
 
 async def get_provider_token(user_id: str, provider: str, supabase_client) -> Optional[TokenInfo]:
     """Fetch token for a specific provider from user_documents_access table"""
@@ -174,7 +179,7 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
         logger.error(f"Error refreshing Microsoft token: {str(e)}")
         return None
 
-async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> Union[str, str, list] | None:
+async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet | None:
     """Get document title using Google Drive API"""
     logger.info(f"Fetching Google doc title for URL: {url}")
     try:
@@ -235,8 +240,9 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
             doc_name = file.get('name')
             sheet_names = []
             sheet_names.append(sheet_name)
+            sheet_md = OnlineSheet(doc_name=doc_name, provider='google', sheet_names=sheet_names) 
 
-            return doc_name, 'google', sheet_names
+            return sheet_md
 
         except Exception as api_error:
             # Handle specific Google API errors
@@ -262,7 +268,7 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
         logger.error(f"Error fetching Google doc title: {str(e)}")
         return None  # Return None instead of the error string to maintain consistency
 
-async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> Union[str, str, list] | None:
+async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet| None:
     """Get document title using Microsoft Graph API"""
     try:
         # Check if token is expired
@@ -330,7 +336,8 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
         if "." in file_name:
             file_name = file_name.split(".")[0]
         
-        return file_name, "microsoft", sheet_names
+        sheet_md = OnlineSheet(doc_name=file_name, provider='microsoft', sheet_names=sheet_names) 
+        return sheet_md
 
     except Exception as e:
         logger.error(f"Error fetching Microsoft doc title: {str(e)}")
@@ -338,7 +345,7 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
 
 @router.post("/get_document_titles", response_model=List[DocumentTitleResponse])
 async def get_document_titles(
-    request: URLRequest,
+    request: List[InputUrl],
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)]
 ):
@@ -370,7 +377,7 @@ async def get_document_titles(
                     titles.append(DocumentTitleResponse(
                         url=url,
                         success=False,
-                        error="Error accessing Google document. Please reconnect your Google account."
+                        error="Error accessing Google Sheets. Please reconnect your Google account."
                     ))
                 else:
                     titles.append(DocumentTitleResponse(
@@ -385,7 +392,7 @@ async def get_document_titles(
                 titles.append(DocumentTitleResponse(
                     url=url,
                     success=False,
-                    error="Error accessing Google document. Please reconnect your Google account."
+                    error="Error accessing Google Sheets. Please reconnect your Google account."
                 ))
             
         # Handle Microsoft URLs
@@ -415,7 +422,7 @@ async def get_document_titles(
                 titles.append(DocumentTitleResponse(
                     url=url,
                     success=False,
-                    error="Error accessing Microsoft document. Please reconnect your Microsoft account."
+                    error="Error accessing Excel Online. Please reconnect your Microsoft account."
                 ))
         else:
             titles.append(DocumentTitleResponse(
@@ -423,5 +430,5 @@ async def get_document_titles(
                 success=False,
                 error="Unsupported document type"
             ))
-    logger.info(f"Successfully processed document titles request with {len(titles)} titles\n {titles[0].url} and title {titles[0].title} and success {titles[0].success} and error {titles[0].error}")  
+    logger.info(f"Successfully processed document titles request with {len(titles)} titles\n {titles[0].url} and title {titles[0].doc_name} and provider {titles[0].provider} and sheet_names {titles[0].sheet_names} and success {titles[0].success} and error {titles[0].error}")  
     return titles

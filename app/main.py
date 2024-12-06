@@ -5,7 +5,6 @@ sys.path.append(project_root)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.endpoints import get_doc_title, process_query, download
 import uvicorn
 
 app = FastAPI()

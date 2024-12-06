@@ -53,6 +53,7 @@ def gen_from_query(query: str, data: List[FileDataInfo]) -> str:
             
     return response.choices[0].message.content
 
+
 # generate new code from error -- result goes to sandbox
 def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDataInfo], past_errors: List[str]) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
@@ -91,6 +92,7 @@ def gen_from_error(result: SandboxResult, error_attempts: int, data: List[FileDa
           \ncode: \n{result.code} \nerror: \n{result.error}""")
     return response.choices[0].message.content
 
+
 # generate new code from analysis -- result goes to a_s_r
 def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[FileDataInfo], past_errors: List[str]) -> str:
     """Analyze the result of a sandboxed code execution and return a new script to try"""
@@ -125,6 +127,7 @@ def gen_from_analysis(result: SandboxResult, analysis_result: str, data: List[Fi
         ]
     )
     return response.choices[0].message.content
+
 
 # post-error result processing - processes random sample of result -- result goes to sentiment analysis function
 def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], new_data: FileDataInfo, analyzer_context: Dict[str, Any]) -> str:
@@ -168,7 +171,8 @@ def analyze_sandbox_result(result: SandboxResult, old_data: List[FileDataInfo], 
     result = response.choices[0].message.content
     return result
 
-# processes result of LLM analysis of post-error sandbox result -- result goes to generate new code or exit analysis
+
+# procsses result of LLM analysis of post-error sandbox result -- result goes to generate new code or exit analysis
 def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
     """Analyze the sentiment of the result of an analysis and return a boolean"""
     response = client.chat.completions.create(
@@ -205,6 +209,7 @@ def sentiment_analysis(analysis_result: str) -> Tuple[bool, str]:
     # Parse the JSON response and return the boolean
     result = json.loads(response.choices[0].message.content)
     return result["is_positive"], analysis_result
+
 
 def file_namer(query: str, data: List[FileDataInfo]) -> str:
     """Generate a suitable filename for the query result"""

@@ -67,8 +67,6 @@ GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ
 OFFICE_SHEET_URL = "https://onedrive.live.com/edit?id=D4064FF6F2B7F76C!105"
 SHEET_NAME = "Sheet1"
 
-
-
 g_response = supabase.table('user_documents_access') \
     .select('refresh_token') \
     .match({'user_id': user_id, 'provider': 'google'}) \
