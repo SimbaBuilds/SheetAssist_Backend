@@ -1,11 +1,29 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
-from app.utils.code_processing import extract_code
 from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, DatasetDiff, prepare_analyzer_context
 from typing import List
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 import logging
+
+# method to clean code -- removes language identifier and import statements
+def extract_code(suggested_code: str) -> str:
+    # Extract code enclosed in triple backticks
+    code_start = suggested_code.find('```') + 3
+    code_end = suggested_code.rfind('```')
+    extracted_code = suggested_code[code_start:code_end].strip()
+    # print("\nextracted_code:\n", extracted_code)
+    # Remove language identifier if present
+    if extracted_code.startswith('python'):
+        extracted_code = extracted_code[6:].strip()
+
+    # Remove import statements
+    cleaned_code = '\n'.join(
+        line for line in extracted_code.split('\n')
+        if not line.strip().startswith('import') and not line.strip().startswith('from')
+    )
+    return cleaned_code
+
 
 def process_query(
     query: str, 

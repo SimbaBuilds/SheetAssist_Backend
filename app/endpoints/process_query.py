@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 import pandas as pd
 from app.utils.postprocessing import handle_destination_upload, handle_download
 from app.utils.data_processing import get_data_snapshot
-from app.utils.file_preprocessing import preprocess_files
+from app.utils.preprocessing import preprocess_files
 from fastapi import BackgroundTasks
 
 from supabase.client import Client as SupabaseClient
