@@ -245,9 +245,9 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         
         if "docs.google.com" in url_lower:
             if request.output_preferences.modify_existing:
-                return await g_integration.append_to_current_google_sheet(data, request.output_preferences.destination_url)
+                return  g_integration.append_to_current_google_sheet(data, request.output_preferences.destination_url)
             else:
-                return await g_integration.append_to_new_google_sheet(data, request.output_preferences.destination_url, old_data, request.query)
+                return  g_integration.append_to_new_google_sheet(data, request.output_preferences.destination_url, old_data, request.query)
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             if request.output_preferences.modify_existing:

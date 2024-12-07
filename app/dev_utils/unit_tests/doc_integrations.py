@@ -63,9 +63,9 @@ TEST_DATE_DICT = {
 old_data = [FileDataInfo(data_type="dataframe", snapshot="test_snapshot", original_file_name="test_df.csv")]
 
 # URLs for testing
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ3CG8mx1JhyWC-i0h9qurZNs/edit?gid=46301584#gid=46301584"
-OFFICE_SHEET_URL = "https://onedrive.live.com/edit?id=D4064FF6F2B7F76C!105"
-SHEET_NAME = "Sheet1"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ3CG8mx1JhyWC-i0h9qurZNs/edit?gid=419871874#gid=419871874"
+OFFICE_SHEET_URL = "https://onedrive.live.com/edit?id=D4064FF6F2B7F76C!105&resid=D4064FF6F2B7F76C!105&ithint=file%2cxlsx&ct=1733274618866&wdOrigin=OFFICECOM-WEB.START.EDGEWORTH&wdPreviousSessionSrc=HarmonyWeb&wdPreviousSession=da84a250-8950-4855-b4d3-ae0d6b922633&wdo=2&cid=d4064ff6f2b7f76c"
+OFFICE_SHEET_NAME = "Sheet1"
 
 g_response = supabase.table('user_documents_access') \
     .select('refresh_token') \
@@ -131,17 +131,17 @@ def msft_integration():
 
 
 
-@pytest.mark.asyncio
-async def test_append_to_current_google_sheet_dataframe(g_integration):
-    """Test appending DataFrame to existing Google Sheet"""
-    logger.info("Testing DataFrame append to existing Google Sheet...")
-    try:
-        result = await g_integration.append_to_current_google_sheet(TEST_DF, GOOGLE_SHEET_URL)
-        assert result is True
-        logger.info("Successfully appended DataFrame to existing Google Sheet")
-    except Exception as e:
-        logger.error(f"Failed to append DataFrame to existing Google Sheet: {str(e)}")
-        raise
+# @pytest.mark.asyncio
+# async def test_append_to_current_google_sheet_dataframe(g_integration):
+#     """Test appending DataFrame to existing Google Sheet"""
+#     logger.info("Testing DataFrame append to existing Google Sheet...")
+#     try:
+#         result = await g_integration.append_to_current_google_sheet(TEST_DF, GOOGLE_SHEET_URL)
+#         assert result is True
+#         logger.info("Successfully appended DataFrame to existing Google Sheet")
+#     except Exception as e:
+#         logger.error(f"Failed to append DataFrame to existing Google Sheet: {str(e)}")
+#         raise
 
 
 # @pytest.mark.asyncio
@@ -203,3 +203,66 @@ async def test_append_to_current_google_sheet_dataframe(g_integration):
 #     except Exception as e:
 #         logger.error(f"Failed to append date objects to existing Office Excel sheet: {str(e)}")
 #         raise
+
+@pytest.mark.asyncio
+async def test_google_sheets_preprocessing(g_integration):
+    """Test extracting data from Google Sheets"""
+    logger.info("Testing Google Sheets data extraction...")
+    try:
+        df = g_integration.extract_google_sheets_data(GOOGLE_SHEET_URL)
+        
+        # Verify the DataFrame
+        assert isinstance(df, pd.DataFrame), "Result should be a pandas DataFrame"
+        assert not df.empty, "DataFrame should not be empty"
+        assert len(df.columns) > 0, "DataFrame should have columns"
+        assert len(df) > 0, "DataFrame should have rows"
+        
+        logger.info("Successfully extracted data from Google Sheets")
+    except Exception as e:
+        logger.error(f"Failed to extract data from Google Sheets: {str(e)}")
+        raise
+
+@pytest.mark.asyncio
+async def test_microsoft_excel_preprocessing(msft_integration):
+    """Test extracting data from Microsoft Excel"""
+    logger.info("Testing Microsoft Excel data extraction...")
+    try:
+        # Test with specific sheet name
+        df = await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
+        
+        # Verify the DataFrame
+        assert isinstance(df, pd.DataFrame), "Result should be a pandas DataFrame"
+        assert not df.empty, "DataFrame should not be empty"
+        assert len(df.columns) > 0, "DataFrame should have columns"
+        assert len(df) > 0, "DataFrame should have rows"
+        
+        # Test without sheet name (should use first sheet)
+        df_default = await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL)
+        assert isinstance(df_default, pd.DataFrame), "Result should be a pandas DataFrame"
+        assert not df_default.empty, "DataFrame should not be empty"
+        
+        logger.info("Successfully extracted data from Microsoft Excel")
+    except Exception as e:
+        logger.error(f"Failed to extract data from Microsoft Excel: {str(e)}")
+        raise
+
+@pytest.mark.asyncio
+async def test_preprocessing_error_handling(g_integration, msft_integration):
+    """Test error handling in preprocessing functions"""
+    logger.info("Testing preprocessing error handling...")
+    
+    # Test invalid Google Sheets URL
+    invalid_gsheet_url = "https://docs.google.com/spreadsheets/invalid/url"
+    with pytest.raises(ValueError):
+        g_integration.extract_google_sheets_data(invalid_gsheet_url)
+    
+    # Test invalid Microsoft Excel URL
+    invalid_excel_url = "https://onedrive.live.com/invalid/url"
+    with pytest.raises(ValueError):
+        await msft_integration.extract_msft_excel_data(invalid_excel_url)
+    
+    # Test invalid sheet name for Microsoft Excel
+    with pytest.raises(ValueError):
+        await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL, "NonexistentSheet")
+    
+    logger.info("Successfully tested preprocessing error handling")

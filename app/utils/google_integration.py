@@ -82,7 +82,7 @@ class GoogleIntegration:
         else:
             return [[format_value(data)]]
 
-    async def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
+    def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Google Sheet"""
         try:
             # Extract spreadsheet ID from URL
@@ -128,7 +128,7 @@ class GoogleIntegration:
             logging.error(f"Google Sheets append error: {str(e)}")
             raise
 
-    async def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
+    def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
         """Add data to a new sheet within an existing Google Sheets workbook"""
         try:
             # Create Google Sheets service
@@ -199,17 +199,17 @@ class GoogleIntegration:
         Raises:
             ValueError: If URL is invalid or file cannot be accessed
         """
-        if 'docs.google.com/spreadsheets' not in url:
+        if 'docs.google.com/spreadsheets' not in sheet_url:
             raise ValueError("Invalid Google Sheets URL format")
             
         try:
             # Extract file ID from URL
-            file_id = url.split('/d/')[1].split('/')[0]
+            file_id = sheet_url.split('/d/')[1].split('/')[0]
             
             # Get the sheet name/gid from URL if present
             sheet_range = 'A:ZZ'  # Default range
-            if '#gid=' in url:
-                gid = url.split('#gid=')[1].split('&')[0]
+            if '#gid=' in sheet_url:
+                gid = sheet_url.split('#gid=')[1].split('&')[0]
                 # Get sheet name from gid
                 service = build('sheets', 'v4', credentials=self.google_creds)
                 sheet_metadata = service.spreadsheets().get(spreadsheetId=file_id).execute()

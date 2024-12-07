@@ -1,7 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response, Depends
 from typing import List, Optional, Any, Union, Annotated
 from pydantic import BaseModel
-from app.utils.file_preprocessing import FilePreprocessor
 from app.utils.process_query import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
 from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult
@@ -49,7 +48,7 @@ async def process_query_endpoint(
         num_images_processed = 0
 
         try:
-            preprocessed_data, num_images_processed = preprocess_files(
+            preprocessed_data, num_images_processed = await preprocess_files(
                 files=files,
                 files_metadata=request.files_metadata,
                 input_urls=request.input_urls,
@@ -173,7 +172,7 @@ async def process_query_endpoint(
         return QueryResponse(
             result=truncated_result,
             status="error",
-            message="An error occurred while processing your request -- please try again or rephrase your request",
+            message="An error occurred -- please try rephrasing or adding more information to your request.",
             files=None,
             num_images_processed=num_images_processed
         )

@@ -1,10 +1,9 @@
 import json
 from typing import Any
 import pandas as pd
-import pandas as pd
-from typing import Dict, List, Tuple, Any
+from typing import Dict, Any
 from dataclasses import dataclass
-
+import logging
 
 def sanitize_error_message(e: Exception) -> str:
     """Sanitize error messages to remove binary data"""
@@ -76,9 +75,15 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     Compute comprehensive diff between old and new datasets with context.
     Handles dataframes with different shapes by comparing only common columns.
     """
+    logging.info("Computing dataset diff between dataframes")
+    logging.info(f"Old dataframe shape: {old_df.shape}, New dataframe shape: {new_df.shape}")
+
     # Ensure we only compare common columns
     common_columns = list(set(old_df.columns) & set(new_df.columns))
+    logging.info(f"Found {len(common_columns)} common columns")
+
     if not common_columns:
+        logging.warning("No common columns found between dataframes")
         # If no common columns, treat all rows as added/deleted
         return DatasetDiff(
             added_rows=new_df if len(new_df) > 0 else pd.DataFrame(),
@@ -108,24 +113,35 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
 
     # Find modified and new rows using index comparison on common columns
     common_indices = old_df.index.intersection(new_df.index)
+    logging.info(f"Found {len(common_indices)} common indices")
+
     if len(common_indices) > 0:
         modified_mask = (old_df.loc[common_indices, common_columns] != 
                         new_df.loc[common_indices, common_columns]).any(axis=1)
         modified_indices = common_indices[modified_mask]
+        logging.info(f"Found {len(modified_indices)} modified rows")
     else:
         modified_indices = pd.Index([])
+        logging.info("No modified rows found")
     
     # Identify added and deleted rows
     added_indices = new_df.index.difference(old_df.index)
     deleted_indices = old_df.index.difference(new_df.index)
+    logging.info(f"Found {len(added_indices)} added rows and {len(deleted_indices)} deleted rows")
     
     # Get context rows (surrounding rows for changes)
     all_affected_indices = set(modified_indices) | set(added_indices) | set(deleted_indices)
     context_indices = set()
     for idx in all_affected_indices:
         start = max(0, idx - context_radius)
-        end = min(len(new_df), idx + context_radius + 1)
-        context_indices.update(range(start, end))
+        end = min(max(old_df.index.max(), new_df.index.max()), idx + context_radius + 1)
+        # Only add indices that exist in new_df
+        valid_indices = [i for i in range(start, end) if i in new_df.index]
+        context_indices.update(valid_indices)
+    logging.info(f"Generated {len(context_indices)} context rows")
+    
+    # Convert context_indices to a list and ensure all indices exist in new_df
+    valid_context_indices = list(context_indices & set(new_df.index))
     
     # Compute relevant statistics
     statistics = {
@@ -148,6 +164,7 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
             for col in set(old_df.columns) | set(new_df.columns)
         }
     }
+    logging.info("Computed dataset statistics")
     
     # Prepare metadata about changes
     metadata = {
@@ -167,12 +184,13 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
             )) if len(modified_indices) > 0 else []
         }
     }
+    logging.info("Generated change metadata")
     
     return DatasetDiff(
         added_rows=new_df.loc[added_indices] if len(added_indices) > 0 else pd.DataFrame(),
         modified_rows=new_df.loc[modified_indices] if len(modified_indices) > 0 else pd.DataFrame(),
         deleted_rows=old_df.loc[deleted_indices] if len(deleted_indices) > 0 else pd.DataFrame(),
-        context_rows=new_df.loc[list(context_indices)] if context_indices else pd.DataFrame(),
+        context_rows=new_df.loc[valid_context_indices] if valid_context_indices else pd.DataFrame(),
         statistics=statistics,
         metadata=metadata
     )
@@ -181,9 +199,10 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     """
     Prepare comprehensive context for the analyzer LLM, handling dataframes with different shapes.
     """
+    logging.info("Preparing analyzer context")
     # Compute the diff
     diff = compute_dataset_diff(old_df, new_df)
-    
+    logging.info("Computed dataset diff")
     # Prepare the context with enhanced schema change information
     context = {
         'changes': {

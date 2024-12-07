@@ -227,8 +227,8 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    @staticmethod
-    async def process_msft_excel_url(input_url: InputUrl, supabase: SupabaseClient = None, user_id: str = None) -> pd.DataFrame:
+
+    async def process_msft_excel_url(self, url, sheet_name: str = None) -> pd.DataFrame:
         """
         Process Microsoft Excel URLs and convert to pandas DataFrame
         
@@ -243,6 +243,10 @@ class FilePreprocessor:
         Raises:
             ValueError: If URL is invalid or file cannot be accessed
         """
+        
+        supabase = self.supabase
+        user_id = self.user_id
+        
         try:
             if not supabase or not user_id:
                 raise ValueError("Authentication required to access Microsoft Excel")
@@ -251,20 +255,18 @@ class FilePreprocessor:
             msft_integration = MicrosoftIntegration(supabase, user_id)
             
             # Extract data using the sheet_name from input_url if provided
-            return await msft_integration.extract_msft_excel_data(input_url.url, input_url.sheet_name)
+            return await msft_integration.extract_msft_excel_data(url, sheet_name)
                 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    @staticmethod
-    def process_gsheet_url(input_url: InputUrl, supabase: SupabaseClient = None, user_id: str = None) -> pd.DataFrame:
+    async def process_gsheet_url(self, url, sheet_name: str = None) -> pd.DataFrame:
         """
         Process Google Sheets URLs and convert to pandas DataFrame
         
         Args:
             input_url (InputUrl): InputUrl object containing the Google Sheet URL and metadata
-            supabase (SupabaseClient): Supabase client for authentication
-            user_id (str): User ID for authentication
+        
             
         Returns:
             pd.DataFrame: DataFrame containing the sheet data
@@ -272,6 +274,9 @@ class FilePreprocessor:
         Raises:
             ValueError: If URL is invalid or file cannot be accessed
         """
+        supabase = self.supabase
+        user_id = self.user_id
+
         try:
             if not supabase or not user_id:
                 raise ValueError("Authentication required to access Google Sheets")
@@ -280,7 +285,7 @@ class FilePreprocessor:
             g_integration = GoogleIntegration(supabase, user_id)
             
             # Use the new extract_google_sheets method to handle URL parsing and data extraction
-            return g_integration.extract_google_sheets_data(input_url.url)
+            return await g_integration.extract_google_sheets_data(url)
                 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
@@ -352,7 +357,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, supabase: SupabaseClient = None, user_id: str = None) -> Union[str, pd.DataFrame]:
+    async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
         """
@@ -366,14 +371,15 @@ class FilePreprocessor:
             'jpg': self.process_image,
             'jpeg': self.process_image,
             'pdf': self.process_pdf,
-            'gsheet': lambda url: self.process_gsheet_url(url, self.supabase, self.user_id),
-            'office_sheet': lambda url: asyncio.run(self.process_msft_excel_url(url, self.supabase, self.user_id))
+            'gsheet': self.process_gsheet_url,
+            'office_sheet': self.process_msft_excel_url  
         }
-        
         processor = processors.get(file_type.lower())
         if not processor:
             raise ValueError(f"Unsupported file type: {file_type}")
         
+        if file_type.lower() in ['gsheet', 'office_sheet']:
+            return await processor(file, sheet_name)
         return processor(file)
 
     @staticmethod
@@ -389,7 +395,7 @@ class FilePreprocessor:
             return "Error processing file"
 
 
-def preprocess_files(
+async def preprocess_files(
     files: List[UploadFile],
     files_metadata: List[FileMetadata],
     input_urls: List[InputUrl],
@@ -408,9 +414,9 @@ def preprocess_files(
         try:
             logging.info(f"Processing URL: {input_url.url}")
             if 'docs.google' in input_url.url:
-                content = preprocessor.process_gsheet_url(input_url, 'gsheet', supabase, user_id) 
+                content = await preprocessor.preprocess_file(input_url.url, 'gsheet', input_url.sheet_name) 
             elif 'onedrive.live' in input_url.url:
-                content = preprocessor.process_msft_excel_url(input_url, 'office_sheet', supabase, user_id)
+                content = await preprocessor.preprocess_file(input_url.url, 'office_sheet', input_url.sheet_name)
             else:
                 logging.error(f"Unsupported URL format: {input_url.url}")
                 continue
@@ -464,7 +470,7 @@ def preprocess_files(
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
                     file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = preprocessor.preprocess_file(file_obj, file_type, **kwargs)
+                    content = preprocessor.preprocess_file(file_obj, file_type, supabase, user_id)
 
                 # Handle different return types
                 if file_type == 'pdf':
@@ -491,3 +497,4 @@ def preprocess_files(
                 raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
 
     return processed_data, preprocessor.num_images_processed
+

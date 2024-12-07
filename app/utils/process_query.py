@@ -5,7 +5,7 @@ from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, D
 from typing import List
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
-
+import logging
 
 def process_query(
     query: str, 
@@ -59,10 +59,11 @@ def process_query(
         # Analysis and improvement loop
         analysis_attempts = 1
         while analysis_attempts < 6:    
-            print("Post-error analysis:", analysis_attempts)
+            logging.info(f"Starting post-error analysis attempt {analysis_attempts}")
             old_data = data
             
             # Create new FileDataInfo based on return value type (get_data_snapshot handles tuples)
+            logging.info(f"Creating new FileDataInfo with return value of type {type(result.return_value).__name__}")
             new_data = FileDataInfo(
                 content=result.return_value, #likely a tuple containing a dataframe or string
                 snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__), 
@@ -74,14 +75,18 @@ def process_query(
             analyzer_context = {}
             for i in range(len(old_data)):
                 if isinstance(old_data[i].content, pd.DataFrame):
+                    logging.info(f"Processing DataFrame from old_data[{i}]")
                     for j, item in enumerate(new_data.content):
                         if isinstance(item, pd.DataFrame):
                             diff_key = f"diff{i+1}_{j+1}"
+                            logging.debug(f"Preparing analyzer context for {diff_key}")
                             analyzer_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
 
+            logging.info("Analyzing sandbox result")
             analysis_result = analyze_sandbox_result(result, old_data, new_data, analyzer_context) 
             success, analysis_result = sentiment_analysis(analysis_result)
-            print("Analysis result:", analysis_result)
+            logging.info(f"Analysis result: {analysis_result}")
+            logging.info(f"Analysis success: {success}")
             if success:
                 #SUCCESS
                 print("\nSuccess!\n")
