@@ -1,19 +1,15 @@
 from app.schemas import FileDataInfo
-from typing import List, Tuple
 from app.utils.llm import file_namer
 import logging
-from fastapi import HTTPException
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from msgraph import GraphServiceClient
 import pandas as pd
 import os
-from datetime import datetime, timedelta, timezone
-import aiohttp
-import requests
+from datetime import datetime
 from typing import Any
 from supabase.client import Client as SupabaseClient
 from datetime import date
+from typing import List
 
 
 class GoogleIntegration:
@@ -41,16 +37,13 @@ class GoogleIntegration:
         )
 
     def _format_data_for_sheets(self, data: Any) -> List[List[str]]:
-        """Helper function to format data for Google Sheets.
-        
-        Args:
-            data: Data to format (DataFrame, dict, list, or scalar value)
-            
-        Returns:
-            List of lists containing formatted string values
-        """
+        """Helper function to format data for Google Sheets."""
         def format_value(v: Any) -> str:
             """Helper function to format individual values"""
+            # Handle pandas Series
+            if isinstance(v, pd.Series):
+                return format_value(v.iloc[0] if len(v) > 0 else '')
+            # Handle other types
             if isinstance(v, pd.Timestamp):
                 return v.strftime('%Y-%m-%d %H:%M:%S')
             elif isinstance(v, (datetime, date)):
@@ -69,8 +62,7 @@ class GoogleIntegration:
             df_copy = df_copy.fillna('')
             # Convert any remaining date objects
             for col in df_copy.columns:
-                if df_copy[col].dtype == 'object':
-                    df_copy[col] = df_copy[col].apply(format_value)
+                df_copy.loc[:, col] = df_copy[col].apply(format_value)
             return df_copy.values.tolist()
         elif isinstance(data, dict):
             # Convert any Timestamp values to strings and handle NaN
@@ -82,7 +74,7 @@ class GoogleIntegration:
         else:
             return [[format_value(data)]]
 
-    def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
+    async def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
         """Append data to Google Sheet"""
         try:
             # Extract spreadsheet ID from URL
@@ -128,7 +120,7 @@ class GoogleIntegration:
             logging.error(f"Google Sheets append error: {str(e)}")
             raise
 
-    def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
+    async def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
         """Add data to a new sheet within an existing Google Sheets workbook"""
         try:
             # Create Google Sheets service

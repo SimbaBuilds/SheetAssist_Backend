@@ -90,6 +90,10 @@ class MicrosoftIntegration:
         """Helper method to format data for Excel"""
         def format_value(v: Any) -> str:
             """Helper function to format individual values"""
+            # Handle pandas Series
+            if isinstance(v, pd.Series):
+                return format_value(v.iloc[0] if len(v) > 0 else '')
+            # Handle other types
             if isinstance(v, pd.Timestamp):
                 return v.strftime('%Y-%m-%d %H:%M:%S')
             elif isinstance(v, (datetime, date)):
@@ -108,16 +112,17 @@ class MicrosoftIntegration:
             df_copy = df_copy.fillna('')
             # Convert any remaining date objects
             for col in df_copy.columns:
-                if df_copy[col].dtype == 'object':
-                    df_copy[col] = df_copy[col].apply(format_value)
+                df_copy.loc[:, col] = df_copy[col].apply(format_value)
             return [df_copy.columns.tolist()] + df_copy.values.tolist()
-        elif isinstance(data, (dict, list)):
-            if isinstance(data, dict):
-                processed_dict = {k: format_value(v) for k, v in data.items()}
-                return [[k, v] for k, v in processed_dict.items()]
-            else:
-                return [[format_value(v)] for v in data]
-        return [[format_value(data)]]
+        elif isinstance(data, dict):
+            # Convert any Timestamp values to strings and handle NaN
+            processed_dict = {k: format_value(v) for k, v in data.items()}
+            return [[k, v] for k, v in processed_dict.items()]
+        elif isinstance(data, list):
+            # Convert any Timestamp values in list to strings and handle NaN
+            return [[format_value(v)] for v in data]
+        else:
+            return [[format_value(data)]]
 
     async def _get_one_drive_id(self) -> str:
         """Get the drive ID using the Graph API for personal OneDrive"""
