@@ -9,7 +9,6 @@ def sanitize_error_message(e: Exception) -> str:
     """Sanitize error messages to remove binary data"""
     return str(e).encode('ascii', 'ignore').decode('ascii')
 
-
 def get_data_snapshot(content: Any, data_type: str) -> str:
     """Generate appropriate snapshot based on data type"""
     # Handle tuple type
@@ -22,7 +21,7 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
                 df_info += f"Shape: {item.shape}\n"
                 df_info += f"Columns: {list(item.columns)}\n"
                 df_info += f"Data Types:\n{item.dtypes}\n"
-                df_info += f"\nFirst 10 rows:\n{item.head(10).to_string()}"
+                df_info += f"\nFirst 5 rows:\n{item.head(5).to_string()}"
                 snapshots.append(df_info)
             elif isinstance(item, dict):
                 snapshot_dict = dict(list(item.items())[:5])
@@ -41,7 +40,7 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
 
     # Handle non-tuple types
     if data_type == "DataFrame":
-        return content.head(10).to_string()
+        return content.head(5).to_string()
     elif data_type == "json":
         # For JSON, return first few key-value pairs or array elements
         if isinstance(content, dict):
@@ -197,42 +196,53 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
 
 def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Prepare comprehensive context for the analyzer LLM, handling dataframes with different shapes.
+    Prepare optimized context for the analyzer LLM, focusing on essential differences.
     """
     logging.info("Preparing analyzer context")
-    # Compute the diff
     diff = compute_dataset_diff(old_df, new_df)
     logging.info("Computed dataset diff")
-    # Prepare the context with enhanced schema change information
+
+    # Get random sample of output dataframe with row numbers
+    sample_rows = new_df.sample(n=min(10, len(new_df))).copy()
+    sample_rows.index.name = 'row_number'
+    sample_output = sample_rows.reset_index().to_dict(orient='records')
+
+    # Only include non-empty changes
+    changes = {}
+    if not diff.added_rows.empty:
+        changes['added_rows'] = diff.added_rows.head(3).to_dict(orient='records')
+    
+    if not diff.modified_rows.empty:
+        changes['modified_rows'] = {
+            'before': old_df.loc[diff.modified_rows.index[:3]].to_dict(orient='records'),
+            'after': diff.modified_rows.head(3).to_dict(orient='records')
+        }
+    
+    if not diff.deleted_rows.empty:
+        changes['deleted_rows'] = diff.deleted_rows.head(3).to_dict(orient='records')
+
     context = {
+        'output_sample': sample_output,
         'changes': {
-            'added_rows': diff.added_rows.to_dict(orient='records'),
-            'modified_rows': {
-                'before': old_df.loc[diff.modified_rows.index].to_dict(orient='records') if not diff.modified_rows.empty else {},
-                'after': diff.modified_rows.to_dict(orient='records')
-            },
-            'deleted_rows': diff.deleted_rows.to_dict(orient='records'),
+            **changes,
             'schema_changes': {
-                'added_columns': diff.statistics.get('column_changes', {}).get('added_columns', []),
-                'deleted_columns': diff.statistics.get('column_changes', {}).get('deleted_columns', []),
-                'common_columns': diff.metadata['change_patterns'].get('common_columns', [])
+                'added_columns': diff.statistics['column_changes']['added_columns'],
+                'deleted_columns': diff.statistics['column_changes']['deleted_columns']
             }
         },
-        'context': {
-            'surrounding_rows': diff.context_rows.to_dict(orient='records'),
-            'statistics': {
-                **diff.statistics,
-                'has_schema_changes': diff.metadata['change_patterns'].get('is_schema_change', False),
-                'total_column_changes': len(diff.statistics.get('column_changes', {}).get('added_columns', [])) + 
-                                      len(diff.statistics.get('column_changes', {}).get('deleted_columns', []))
+        'summary': {
+            'total_changes': {
+                'added rows': len(diff.added_rows),
+                'modified rows': len(diff.modified_rows),
+                'deleted rows': len(diff.deleted_rows)
             },
-            'metadata': {
-                **diff.metadata,
-                'dataframe_shapes': {
-                    'old': {'rows': len(old_df), 'columns': len(old_df.columns)},
-                    'new': {'rows': len(new_df), 'columns': len(new_df.columns)}
-                }
-            }
+            'shapes': {
+                'old': {'rows': len(old_df), 'columns': len(old_df.columns)},
+                'new': {'rows': len(new_df), 'columns': len(new_df.columns)}
+            },
+            'is_schema_change': diff.metadata['change_patterns']['is_schema_change'],
+            'is_append_only': diff.metadata['change_patterns']['is_append_only'],
+            'is_modify_only': diff.metadata['change_patterns']['is_modify_only']
         }
     }
     
