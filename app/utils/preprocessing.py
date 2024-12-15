@@ -8,7 +8,7 @@ from PIL import Image
 import io
 from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
-from app.utils.vision_processing import VisionProcessor
+from app.utils.vision_processing import OpenaiVisionProcessor, AnthropicVisionProcessor
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
 from app.utils.data_processing import sanitize_error_message, get_data_snapshot
@@ -18,22 +18,23 @@ from typing import List
 import logging
 from app.utils.google_integration import GoogleIntegration
 from app.utils.microsoft_integration import MicrosoftIntegration
-from supabase import create_client, Client as SupabaseClient
-import asyncio
-import aiohttp
+from app.utils.llm_service import LLMService
+from app.utils.auth import SupabaseClient
+
+
 
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
     
-    def __init__(self, num_images_processed: int = 0, supabase: SupabaseClient = None, user_id: str = None):
+    def __init__(self, num_images_processed: int = 0, llm_service: LLMService = None, supabase: SupabaseClient = None, user_id: str = None):
         """Initialize the FilePreprocessor with optional authentication"""
         self.num_images_processed = num_images_processed
         self.supabase = supabase
         self.user_id = user_id
         self.google_integration = None
         self.microsoft_integration = None
-        
+        self.llm_service = llm_service
         if supabase and user_id:
             self.google_integration = GoogleIntegration(supabase, user_id)
             self.microsoft_integration = MicrosoftIntegration(supabase, user_id)
@@ -161,7 +162,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None) -> Tuple[str, str]:
+    async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None) -> Tuple[str, str]:
         """
         Process image files (.png, .jpg, .jpeg) and extract content using vision processing
         
@@ -169,6 +170,7 @@ class FilePreprocessor:
             file: File object or path to file
             output_path: Optional path to save converted image
             query: Optional query for vision processing
+            llm_service: LLM service instance for vision processing
             
         Returns:
             Tuple[str, str]: (vision_content, new_file_path)
@@ -209,20 +211,20 @@ class FilePreprocessor:
                         file.seek(0)
                         f.write(file.read())
 
-            # Process with vision
-            vision_processor = VisionProcessor()
-            vision_result = vision_processor.process_image_with_vision(
+            # Process with vision using LLM service
+            provider, vision_result = await llm_service.execute_with_fallback(
+                "process_image_with_vision",
                 image_path=image_path,
                 query=query
             )
 
-            if vision_result["status"] == "error":
+            if isinstance(vision_result, dict) and vision_result.get("status") == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
             # Increment the image counter
             self.num_images_processed += 1
 
-            return vision_result["content"]
+            return vision_result["content"] if isinstance(vision_result, dict) else vision_result
 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
@@ -284,19 +286,20 @@ class FilePreprocessor:
             # Initialize Google integration
             g_integration = GoogleIntegration(supabase, user_id)
             
-            # Use the new extract_google_sheets method to handle URL parsing and data extraction
-            return await g_integration.extract_google_sheets_data(url)
+            # Pass sheet_name to extract_google_sheets_data
+            return await g_integration.extract_google_sheets_data(url, sheet_name)
                 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    def process_pdf(self, file: Union[BinaryIO, str], query: str = None) -> Tuple[str, str, bool]:
+    async def process_pdf(self, file: Union[BinaryIO, str], query: str = None, llm_service = None) -> Tuple[str, str, bool]:
         """
         Process PDF files and convert to string if readable, otherwise handle with vision
         
         Args:
             file: File object or path to PDF file
             query: Optional query for vision processing
+            llm_service: LLM service instance for vision processing
             
         Returns:
             Tuple[str, str, bool]: (content, data_type, is_readable)
@@ -342,22 +345,25 @@ class FilePreprocessor:
                 raise ValueError("Unreadable PDF with more than 5 pages")
                 
             # For small unreadable PDFs, process with vision
-            vision_processor = VisionProcessor()
-            vision_result = vision_processor.process_pdf_with_vision(pdf_path, query)
-            
-            if vision_result["status"] == "error":
+            provider, vision_result = await llm_service.execute_with_fallback(
+                "process_pdf_with_vision",
+                pdf_path=pdf_path,
+                query=query
+            )
+
+            if isinstance(vision_result, dict) and vision_result.get("status") == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
             # Increment the image counter for each page in unreadable PDF
             self.num_images_processed += doc.page_count
 
                 
-            return vision_result["content"], "vision_extracted", False
+            return vision_result["content"] if isinstance(vision_result, dict) else vision_result, "vision_extracted", False
 
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None) -> Union[str, pd.DataFrame]:
+    async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None, llm_service = None) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
         """
@@ -377,7 +383,10 @@ class FilePreprocessor:
         processor = processors.get(file_type.lower())
         if not processor:
             raise ValueError(f"Unsupported file type: {file_type}")
-        
+            
+        # Handle async processors
+        if file_type.lower() in ['png', 'jpg', 'jpeg', 'pdf']:
+            return await processor(file, output_path=None, query=None, llm_service=llm_service)
         if file_type.lower() in ['gsheet', 'office_sheet']:
             return await processor(file, sheet_name)
         return processor(file)
@@ -403,10 +412,16 @@ async def preprocess_files(
     session_dir,
     supabase: SupabaseClient,
     user_id: str,
+    llm_service: LLMService,
     num_images_processed: int = 0
 ) -> Tuple[List[FileDataInfo], int]:
     """Helper function to preprocess files and web URLs"""
-    preprocessor = FilePreprocessor(num_images_processed, supabase, user_id)
+    preprocessor = FilePreprocessor(
+        num_images_processed=num_images_processed,
+        llm_service=llm_service,
+        supabase=supabase,
+        user_id=user_id
+    )
     processed_data = []
     
     # Process web URLs if provided
@@ -414,9 +429,9 @@ async def preprocess_files(
         try:
             logging.info(f"Processing URL: {input_url.url}")
             if 'docs.google' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, 'gsheet', input_url.sheet_name) 
+                content = await preprocessor.preprocess_file(input_url.url, 'gsheet', input_url.sheet_name, llm_service) 
             elif 'onedrive.live' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, 'office_sheet', input_url.sheet_name)
+                content = await preprocessor.preprocess_file(input_url.url, 'office_sheet', input_url.sheet_name, llm_service)
             else:
                 logging.error(f"Unsupported URL format: {input_url.url}")
                 continue
@@ -470,7 +485,7 @@ async def preprocess_files(
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
                     file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = preprocessor.preprocess_file(file_obj, file_type, supabase, user_id)
+                    content = preprocessor.preprocess_file(file_obj, file_type, supabase, user_id, llm_service)
 
                 # Handle different return types
                 if file_type == 'pdf':

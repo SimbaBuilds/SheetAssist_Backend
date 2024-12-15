@@ -206,45 +206,45 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
         file_id = None
         if '/document/d/' in url:
             file_id = url.split('/document/d/')[1].split('/')[0]
+            logger.info(f"Extracted document ID: {file_id}")
         elif '/spreadsheets/d/' in url:
             file_id = url.split('/spreadsheets/d/')[1].split('/')[0]
+            logger.info(f"Extracted spreadsheet ID: {file_id}")
         
         if not file_id:
+            logger.error(f"Could not extract file ID from URL: {url}")
             return None
 
+        logger.info(f"Attempting to access file with ID: {file_id}")
+        
         # Build the service
         drive_service = build('drive', 'v3', credentials=creds)
         sheet_id = url.split('/d/')[1].split('/')[0]
+        logger.info(f"Building sheets service with sheet_id: {sheet_id}")
         sheet_service = build('sheets', 'v4', credentials=creds)
 
-
-        
         try:
             # Get file metadata
+            logger.info(f"Requesting file metadata for ID: {file_id}")
             file = drive_service.files().get(fileId=file_id, fields='name').execute()
-            # Get sheet name from URL or fetch first sheet if not specified
-            sheet_name = None
-            if '#gid=' in url:
-                gid = url.split('#gid=')[1]
-                # Get spreadsheet metadata to find sheet name
-                sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-                for sheet in sheet_metadata.get('sheets', ''):
-                    if sheet.get('properties', {}).get('sheetId') == int(gid):
-                        sheet_name = sheet['properties']['title']
-                        break
+            logger.info(f"Successfully retrieved file metadata: {file}")
             
-            if not sheet_name:
-                # If no specific sheet found, get the first sheet name
-                sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-                sheet_name = sheet_metadata['sheets'][0]['properties']['title']
-            doc_name = file.get('name')
+            # Get all sheet names
             sheet_names = []
-            sheet_names.append(sheet_name)
-            sheet_md = OnlineSheet(doc_name=doc_name, provider='google', sheet_names=sheet_names) 
+            sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+            for sheet in sheet_metadata.get('sheets', []):
+                sheet_name = sheet['properties']['title']
+                sheet_names.append(sheet_name)
+                logger.info(f"Found sheet: {sheet_name}")
+
+            doc_name = file.get('name')
+            logger.info(f"Created OnlineSheet object with doc_name: {doc_name}, sheet_names: {sheet_names}")
+            sheet_md = OnlineSheet(doc_name=doc_name, provider='google', sheet_names=sheet_names)
 
             return sheet_md
 
         except Exception as api_error:
+            logger.error(f"API error while accessing file: {str(api_error)}")
             # Handle specific Google API errors
             if 'invalid_grant' in str(api_error):
                 logger.warning("Invalid grant error, attempting token refresh")

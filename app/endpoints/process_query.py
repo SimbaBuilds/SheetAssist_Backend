@@ -15,9 +15,10 @@ from app.utils.postprocessing import handle_destination_upload, handle_download
 from app.utils.data_processing import get_data_snapshot
 from app.utils.preprocessing import preprocess_files
 from fastapi import BackgroundTasks
-
+from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
+from app.utils.llm_service import get_llm_service, LLMService
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,7 @@ router = APIRouter()
 async def process_query_endpoint(
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)],
+    llm_service: LLMService = Depends(get_llm_service),
     json_data: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     background_tasks: BackgroundTasks = BackgroundTasks()
@@ -43,6 +45,8 @@ async def process_query_endpoint(
         request = QueryRequest(**json.loads(json_data))
         logger.info(f"Processing query for user {user_id} with {len(request.files_metadata or [])} files")
         
+        load_dotenv(override=True)
+
         session_dir = temp_file_manager.get_temp_dir()
         logger.info("Calling preprocess_files")
         num_images_processed = 0
@@ -56,6 +60,7 @@ async def process_query_endpoint(
                 session_dir=session_dir,
                 supabase=supabase,
                 user_id=user_id,
+                llm_service=llm_service,
                 num_images_processed=num_images_processed
             )
 
@@ -65,10 +70,11 @@ async def process_query_endpoint(
 
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
-        result = process_query(
+        result = await process_query(
             query=request.query,
             sandbox=sandbox,
-            data=preprocessed_data
+            data=preprocessed_data,
+            llm_service=llm_service
         )
         
         result.return_value_snapshot = get_data_snapshot(result.return_value, type(result.return_value).__name__)
@@ -81,7 +87,7 @@ async def process_query_endpoint(
         
         # Handle output based on type
         if request.output_preferences.type == "download":
-            tmp_path, media_type = handle_download(result, request, preprocessed_data)
+            tmp_path, media_type = handle_download(result, request, preprocessed_data, llm_service)
             # Add cleanup task but DON'T execute immediately
             background_tasks.add_task(temp_file_manager.cleanup_marked)
             
@@ -120,7 +126,8 @@ async def process_query_endpoint(
                 request,
                 preprocessed_data,
                 supabase,
-                user_id
+                user_id,
+                llm_service
             )
 
             # Create truncated result before returning

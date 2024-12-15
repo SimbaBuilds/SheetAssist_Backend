@@ -1,10 +1,11 @@
 from app.schemas import SandboxResult, FileDataInfo
-from app.utils.llm import gen_from_query, gen_from_error, gen_from_analysis, analyze_sandbox_result, sentiment_analysis
+from app.utils.llm_service import get_llm_service, LLMService
 from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, DatasetDiff, prepare_analyzer_context
-from typing import List
+from typing import List, Tuple, Any
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 import logging
+import os
 
 # method to clean code -- removes language identifier and import statements
 def extract_code(suggested_code: str) -> str:
@@ -12,7 +13,7 @@ def extract_code(suggested_code: str) -> str:
     code_start = suggested_code.find('```') + 3
     code_end = suggested_code.rfind('```')
     extracted_code = suggested_code[code_start:code_end].strip()
-    # print("\nextracted_code:\n", extracted_code)
+    
     # Remove language identifier if present
     if extracted_code.startswith('python'):
         extracted_code = extracted_code[6:].strip()
@@ -24,32 +25,32 @@ def extract_code(suggested_code: str) -> str:
     )
     return cleaned_code
 
-
-def process_query(
+async def process_query(
     query: str, 
     sandbox: EnhancedPythonInterpreter,
-    data: List[FileDataInfo] = None 
+    data: List[FileDataInfo] = None,
+    llm_service: LLMService = None
 ) -> SandboxResult:
     
-    # Create execution namespace by extending base namespace
-    namespace = dict(sandbox.base_namespace)  # Create a copy of base namespace
     
+    # Create execution namespace by extending base namespace
+    namespace = dict(sandbox.base_namespace)
+
     # Handle different data types in namespace
     if data and len(data) > 0:
         for idx, file_data in enumerate(data):
             var_name = f'data_{idx}' if idx > 0 else 'data'
-            # Preprocess DataFrame before adding to namespace
             namespace[var_name] = file_data.content
             
-            # Print information about the data
             if isinstance(file_data.content, pd.DataFrame):
                 print(f"{var_name} shape:", file_data.content.shape)
             elif hasattr(file_data.content, '__len__'):
                 print(f"{var_name} length:", len(file_data.content))
         print(f"Namespace created for data {var_name}")
+
     try:
         # Initial code generation and execution
-        suggested_code = gen_from_query(query, data)
+        provider, suggested_code = await llm_service.execute_with_fallback("gen_from_query", query, data)
         unprocessed_llm_output = suggested_code 
         cleaned_code = extract_code(suggested_code)
         result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
@@ -58,19 +59,25 @@ def process_query(
         # Error handling for initial execution
         error_attempts = 0
         past_errors = []
-        while result.error and error_attempts < 6: #TODO: CHANGE TO 6 LATER
+        while result.error and error_attempts < 6:
             print(f"\n\nError analysis {error_attempts}:")
-            print(f"Error: {result.error}") #WHY ALWAYS EXECUTING THIS LOOP?
+            print(f"Error: {result.error}")
             past_errors.append(result.error)
-            suggested_code = gen_from_error(result, error_attempts, data, past_errors)
+            
+            provider, suggested_code = await llm_service.execute_with_fallback(
+                "gen_from_error", 
+                result, 
+                error_attempts, 
+                data, 
+                past_errors
+            )
+            
             unprocessed_llm_output = suggested_code 
             cleaned_code = extract_code(suggested_code)
             print("New LLM output\n:", unprocessed_llm_output)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
-            print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
-            print("Error:", result.error)
             error_attempts += 1
-            if error_attempts == 6:  #TODO: CHANGE TO 6 LATER
+            if error_attempts == 6:
                 result.error = "Failed to interpret query. Please try rephrasing your request."
                 return result
             
@@ -89,7 +96,7 @@ def process_query(
                 original_file_name=data[0].original_file_name if data else None
             )
             
-            #dataset diff logic here
+            # Prepare analyzer context
             analyzer_context = {}
             for i in range(len(old_data)):
                 if isinstance(old_data[i].content, pd.DataFrame):
@@ -97,14 +104,24 @@ def process_query(
                     for j, item in enumerate(new_data.content):
                         if isinstance(item, pd.DataFrame):
                             diff_key = f"diff{i+1}_{j+1}"
-                            logging.debug(f"Preparing analyzer context for {diff_key}")
                             analyzer_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
 
-            logging.info("Analyzing sandbox result")
-            analysis_result = analyze_sandbox_result(result, old_data, new_data, analyzer_context) 
-            success, analysis_result = sentiment_analysis(analysis_result)
+            # Analyze results
+            provider, analysis_result = await llm_service.execute_with_fallback(
+                "analyze_sandbox_result",
+                result,
+                old_data,
+                new_data,
+                analyzer_context
+            )
+            
+            provider, (success, analysis_result) = await llm_service.execute_with_fallback(
+                "sentiment_analysis",
+                analysis_result
+            )
             logging.info(f"Analysis result: {analysis_result}")
-            logging.info(f"Analysis success: {success}")
+
+
             if success:
                 #SUCCESS
                 print("\nSuccess!\n")
@@ -119,8 +136,15 @@ def process_query(
                 )
                 return result 
             
-            # Gen new code from analysis
-            new_code = gen_from_analysis(result, analysis_result, data, past_errors)
+            # Generate new code from analysis
+            provider, new_code = await llm_service.execute_with_fallback(
+                "gen_from_analysis",
+                result,
+                analysis_result,
+                data,
+                past_errors
+            )
+            
             unprocessed_llm_output = new_code 
             print("New LLM output\n:", unprocessed_llm_output)
             cleaned_code = extract_code(new_code)
@@ -132,7 +156,14 @@ def process_query(
                 print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
                 past_errors.append(result.error)
-                suggested_code = gen_from_error(result, error_attempts, data, past_errors)
+                provider, suggested_code = await llm_service.execute_with_fallback(
+                    "gen_from_error",
+                    result,
+                    error_attempts,
+                    data,
+                    past_errors
+                )
+                
                 unprocessed_llm_output = suggested_code 
                 print("New LLM output\n:", unprocessed_llm_output)
                 cleaned_code = extract_code(suggested_code)
@@ -165,7 +196,7 @@ def process_query(
             original_query=query,
             print_output="",
             code="",
-            error=f'GPT interpretation failed: {str(e)}\nType: {type(e).__name__}',
+            error=f'LLM interpretation failed: {str(e)}\nType: {type(e).__name__}',
             return_value=None,
             timed_out=False
         )

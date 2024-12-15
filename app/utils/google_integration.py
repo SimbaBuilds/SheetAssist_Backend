@@ -1,5 +1,4 @@
 from app.schemas import FileDataInfo
-from app.utils.llm import file_namer
 import logging
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -33,7 +32,11 @@ class GoogleIntegration:
             client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
             refresh_token=google_refresh_token,
             token_uri='https://oauth2.googleapis.com/token',
-            scopes=['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+            scopes =  [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive.readonly',
+]
         )
 
     def _format_data_for_sheets(self, data: Any) -> List[List[str]]:
@@ -74,7 +77,7 @@ class GoogleIntegration:
         else:
             return [[format_value(data)]]
 
-    async def append_to_current_google_sheet(self, data: Any, sheet_url: str) -> bool:
+    async def append_to_current_google_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Append data to Google Sheet"""
         try:
             # Extract spreadsheet ID from URL
@@ -83,19 +86,9 @@ class GoogleIntegration:
             # Create Google Sheets service with proper scopes
             service = build('sheets', 'v4', credentials=self.google_creds)
             
-            # Get sheet name from URL or fetch first sheet if not specified
-            sheet_name = None
-            if '#gid=' in sheet_url:
-                gid = sheet_url.split('#gid=')[1]
-                # Get spreadsheet metadata to find sheet name
-                sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-                for sheet in sheet_metadata.get('sheets', ''):
-                    if sheet.get('properties', {}).get('sheetId') == int(gid):
-                        sheet_name = sheet['properties']['title']
-                        break
-            
+            # Use the provided sheet_name directly
             if not sheet_name:
-                # If no specific sheet found, get the first sheet name
+                # Fallback to first sheet if no sheet name provided
                 sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
                 sheet_name = sheet_metadata['sheets'][0]['properties']['title']
             
@@ -108,7 +101,7 @@ class GoogleIntegration:
             }
             service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
-                range=f"{sheet_name}",  # Use the detected sheet name
+                range=f"{sheet_name}",
                 valueInputOption='RAW',
                 insertDataOption='INSERT_ROWS',
                 body=body
@@ -120,23 +113,24 @@ class GoogleIntegration:
             logging.error(f"Google Sheets append error: {str(e)}")
             raise
 
-    async def append_to_new_google_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
+    async def append_to_new_google_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Add data to a new sheet within an existing Google Sheets workbook"""
         try:
-            # Create Google Sheets service
-            service = build('sheets', 'v4', credentials=self.google_creds)
-            
             # Extract spreadsheet ID from URL
             sheet_id = sheet_url.split('/d/')[1].split('/')[0]
             
-            # Generate a unique sheet name (e.g. "Query Results 1", "Query Results 2", etc.)
+            # Create Google Sheets service
+            service = build('sheets', 'v4', credentials=self.google_creds)
+            
+            # Get existing sheets
             sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
             existing_sheets = [sheet['properties']['title'] for sheet in sheet_metadata['sheets']]
-            base_name = file_namer(query, old_data)
-            sheet_name = base_name
+            
+            # Ensure unique sheet name
+            final_name = sheet_name
             counter = 1
-            while sheet_name in existing_sheets:
-                sheet_name = f"{base_name} {counter}"
+            while final_name in existing_sheets:
+                final_name = f"{sheet_name} {counter}"
                 counter += 1
             
             # Add new sheet
@@ -144,7 +138,7 @@ class GoogleIntegration:
                 'requests': [{
                     'addSheet': {
                         'properties': {
-                            'title': sheet_name
+                            'title': final_name
                         }
                     }
                 }]
@@ -166,7 +160,7 @@ class GoogleIntegration:
             }
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
-                range=f"{sheet_name}!A1",
+                range=f"{final_name}!A1",
                 valueInputOption='RAW',
                 body=body
             ).execute()
@@ -178,12 +172,13 @@ class GoogleIntegration:
             raise
 
 #preprocessing
-    async def extract_google_sheets_data(self, sheet_url: str) -> pd.DataFrame:
+    async def extract_google_sheets_data(self, sheet_url: str, sheet_name: str) -> pd.DataFrame:
         """
-        Extract data from a Google Sheets URL. The sheet name/id can be parsed from the URL if present.
+        Extract data from a Google Sheets URL using the provided sheet name.
         
         Args:
             sheet_url (str): URL of the Google Sheet
+            sheet_name (str): Name of the sheet to extract data from
             
         Returns:
             pd.DataFrame: DataFrame containing the sheet data
@@ -198,18 +193,8 @@ class GoogleIntegration:
             # Extract file ID from URL
             file_id = sheet_url.split('/d/')[1].split('/')[0]
             
-            # Get the sheet name/gid from URL if present
-            sheet_range = 'A:ZZ'  # Default range
-            if '#gid=' in sheet_url:
-                gid = sheet_url.split('#gid=')[1].split('&')[0]
-                # Get sheet name from gid
-                service = build('sheets', 'v4', credentials=self.google_creds)
-                sheet_metadata = service.spreadsheets().get(spreadsheetId=file_id).execute()
-                for sheet in sheet_metadata.get('sheets', []):
-                    if sheet.get('properties', {}).get('sheetId') == int(gid):
-                        sheet_name = sheet['properties']['title']
-                        sheet_range = f"'{sheet_name}'!A:ZZ"
-                        break
+            # Create range with sheet name
+            sheet_range = f"'{sheet_name}'!A:ZZ"
             
             # Use Google integration to get authenticated service
             service = build('sheets', 'v4', credentials=self.google_creds)

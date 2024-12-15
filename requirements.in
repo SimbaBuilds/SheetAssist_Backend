@@ -27,3 +27,5 @@ supabase
 google_auth_oauthlib
 msal
 aiofiles>=23.1.0
+anthropic
+pytest

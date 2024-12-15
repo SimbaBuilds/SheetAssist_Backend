@@ -9,7 +9,7 @@ import json
 from docx import Document
 from app.schemas import FileDataInfo, SandboxResult, QueryRequest
 from typing import List, Tuple
-from app.utils.llm import file_namer
+from app.utils.llm_service import LLMService
 import csv
 import logging
 from fastapi import HTTPException
@@ -121,9 +121,9 @@ def prepare_text(data: Any) -> str:
         
     return extracted_text
 
-def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+async def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create CSV file from prepared DataFrame"""
-    filename = file_namer(query, old_data)
+    provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.csv')
     
     # Prepare the DataFrame
@@ -148,19 +148,19 @@ def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     
     return tmp_path
 
-def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+async def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create Excel file from various data types"""
     
-    filename = file_namer(query, old_data)
+    provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.xlsx')
     df = prepare_dataframe(new_data)
     df.to_excel(tmp_path, index=False)
 
     return tmp_path
 
-def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+async def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create PDF file from various data types"""
-    filename = file_namer(query, old_data)
+    provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.pdf')
     doc = SimpleDocTemplate(tmp_path, pagesize=letter)
     styles = getSampleStyleSheet()
@@ -202,9 +202,9 @@ def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     doc.build(elements)
     return tmp_path
 
-def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+async def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create Word document from various data types"""
-    filename = file_namer(query, old_data)
+    provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.docx')
     doc = Document()
     
@@ -213,9 +213,9 @@ def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
     doc.save(tmp_path)
     return tmp_path
 
-def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
+async def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create text file from various data types"""
-    filename = file_namer(query, old_data)
+    provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
     tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.txt')
     extracted_text = prepare_text(new_data)
     with open(tmp_path, 'w', encoding='utf-8') as f:
@@ -225,7 +225,7 @@ def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo]) -> str:
 
 
 
-async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], supabase: SupabaseClient, user_id: str) -> bool:
+async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], supabase: SupabaseClient, user_id: str, llm_service: LLMService) -> bool:
     """Upload data to various destination types"""
     try:
         # Process tuple data if present
@@ -245,15 +245,41 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         
         if "docs.google.com" in url_lower:
             if request.output_preferences.modify_existing:
-                return  await g_integration.append_to_current_google_sheet(data, request.output_preferences.destination_url)
+                return await g_integration.append_to_current_google_sheet(
+                    data, 
+                    request.output_preferences.destination_url,
+                    request.output_preferences.sheet_name
+                )
             else:
-                return await g_integration.append_to_new_google_sheet(data, request.output_preferences.destination_url, old_data, request.query)
+                provider, suggested_name = await llm_service.execute_with_fallback(
+                    "file_namer",
+                    request.query,
+                    old_data
+                )
+                return await g_integration.append_to_new_google_sheet(
+                    data, 
+                    request.output_preferences.destination_url, 
+                    suggested_name
+                )
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             if request.output_preferences.modify_existing:
-                return await msft_integration.append_to_current_office_sheet(data, request.output_preferences.destination_url, request.output_preferences.sheet_name)
+                return await msft_integration.append_to_current_office_sheet(
+                    data, 
+                    request.output_preferences.destination_url, 
+                    request.output_preferences.sheet_name
+                )
             else:
-                return await msft_integration.append_to_new_office_sheet(data, request.output_preferences.destination_url, old_data, request.query)
+                provider, suggested_name = await llm_service.execute_with_fallback(
+                    "file_namer",
+                    request.query,
+                    old_data
+                )
+                return await msft_integration.append_to_new_office_sheet(
+                    data, 
+                    request.output_preferences.destination_url, 
+                    suggested_name
+                )
     
         raise ValueError(f"Unsupported destination URL type: {request.output_preferences.destination_url}")
     
@@ -261,7 +287,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         logging.error(f"Failed to upload to destination: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-def handle_download(result: SandboxResult, request: QueryRequest, preprocessed_data: List[FileDataInfo]) -> Tuple[str, str]:
+async def handle_download(result: SandboxResult, request: QueryRequest, preprocessed_data: List[FileDataInfo], llm_service: LLMService) -> Tuple[str, str]:
     # Get the desired output format, defaulting based on data type
     output_format = request.output_preferences.format
     if not output_format:
@@ -274,19 +300,19 @@ def handle_download(result: SandboxResult, request: QueryRequest, preprocessed_d
 
     # Create temporary file in requested format
     if output_format == 'pdf':
-        tmp_path = create_pdf(result.return_value, request.query, preprocessed_data)
+        tmp_path = await create_pdf(result.return_value, request.query, preprocessed_data, llm_service)
         media_type = 'application/pdf'
     elif output_format == 'xlsx':
-        tmp_path = create_xlsx(result.return_value, request.query, preprocessed_data)
+        tmp_path = await create_xlsx(result.return_value, request.query, preprocessed_data, llm_service)
         media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     elif output_format == 'docx':
-        tmp_path = create_docx(result.return_value, request.query, preprocessed_data)
+        tmp_path = await create_docx(result.return_value, request.query, preprocessed_data, llm_service)
         media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     elif output_format == 'txt':
-        tmp_path = create_txt(result.return_value, request.query, preprocessed_data)
+        tmp_path = await create_txt(result.return_value, request.query, preprocessed_data, llm_service)
         media_type = 'text/plain'
     else:  # csv
-        tmp_path = create_csv(result.return_value, request.query, preprocessed_data)
+        tmp_path = await create_csv(result.return_value, request.query, preprocessed_data, llm_service)
         media_type = 'text/csv'
 
     return tmp_path, media_type

@@ -1,6 +1,5 @@
 from app.schemas import FileDataInfo
 from typing import List, Tuple, Optional
-from app.utils.llm import file_namer
 import logging
 from fastapi import HTTPException
 from google.oauth2.credentials import Credentials
@@ -254,7 +253,7 @@ class MicrosoftIntegration:
             logging.error(f"Office Excel append error: {str(e)}")
             raise
 
-    async def append_to_new_office_sheet(self, data: Any, sheet_url: str, old_data: List[FileDataInfo], query: str) -> bool:
+    async def append_to_new_office_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Add data to a new sheet within an existing Office Excel workbook"""
         try:
             # Get drive ID and workbook ID
@@ -278,19 +277,18 @@ class MicrosoftIntegration:
                     worksheets = await response.json()
                     existing_sheets = [ws['name'] for ws in worksheets['value']]
                 
-                # Generate unique sheet name
-                base_name = file_namer(query, old_data)
-                sheet_name = base_name
+                # Ensure unique sheet name
+                final_name = sheet_name
                 counter = 1
-                while sheet_name in existing_sheets:
-                    sheet_name = f"{base_name} {counter}"
+                while final_name in existing_sheets:
+                    final_name = f"{sheet_name} {counter}"
                     counter += 1
                 
                 # Create new worksheet
                 async with session.post(
                     f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/add',
                     headers=headers,
-                    json={'name': sheet_name}
+                    json={'name': final_name}
                 ) as response:
                     if response.status != 201:
                         error_data = await response.json()
