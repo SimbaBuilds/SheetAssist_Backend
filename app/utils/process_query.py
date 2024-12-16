@@ -6,7 +6,7 @@ from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 import logging
 import os
-
+import json
 # method to clean code -- removes language identifier and import statements
 def extract_code(suggested_code: str) -> str:
     # Extract code enclosed in triple backticks
@@ -97,14 +97,16 @@ async def process_query(
             )
             
             # Prepare analyzer context
-            analyzer_context = {}
+            full_diff_context = ""
             for i in range(len(old_data)):
                 if isinstance(old_data[i].content, pd.DataFrame):
                     logging.info(f"Processing DataFrame from old_data[{i}]")
                     for j, item in enumerate(new_data.content):
                         if isinstance(item, pd.DataFrame):
+                            this_context = {}
                             diff_key = f"diff{i+1}_{j+1}"
-                            analyzer_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
+                            this_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
+                            full_diff_context += json.dumps(this_context)
 
             # Analyze results
             provider, analysis_result = await llm_service.execute_with_fallback(
@@ -112,7 +114,7 @@ async def process_query(
                 result,
                 old_data,
                 new_data,
-                analyzer_context
+                full_diff_context
             )
             
             provider, (success, analysis_result) = await llm_service.execute_with_fallback(

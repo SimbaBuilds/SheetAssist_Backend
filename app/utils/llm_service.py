@@ -235,7 +235,7 @@ class LLMService:
         )
 
     async def _openai_analyze_sandbox_result(self, result: SandboxResult, old_data: List[FileDataInfo],
-                                           new_data: FileDataInfo, analyzer_context: Dict[str, Any]) -> str:
+                                           new_data: FileDataInfo, analyzer_context: str) -> str:
         old_data_snapshot = self._build_old_data_snapshot(old_data)
         user_content = f""" 
                 Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
@@ -260,7 +260,7 @@ class LLMService:
         return response
 
     async def _anthropic_analyze_sandbox_result(self, result: SandboxResult, old_data: List[FileDataInfo],
-                                              new_data: FileDataInfo, analyzer_context: Dict[str, Any]) -> str:
+                                              new_data: FileDataInfo, analyzer_context: str) -> str:
         old_data_snapshot = self._build_old_data_snapshot(old_data)
         user_content = f""" 
                 Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:

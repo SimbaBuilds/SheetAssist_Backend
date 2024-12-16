@@ -48,8 +48,8 @@ analyze_sandbox_prompt = """Analyze the result of a successful sandboxed code ex
                 dataset diff information that is relevant for most spreadsheet/dataframe related queries.
                 Diff1_1 corresponds to the diff between the first dataframe in the old data and the first dataframe in the new data.
                 Diff1_2 corresponds to the diff between the first dataframe in the old data and the second dataframe in the new data etc...
-                Respond with either "yes, the result seems to satisfy the user's query" 
-                or "no, the result does not satisfy the user's original query [one sentence explanation of how the result does or does not satisfy the user's original query]"
+                Respond with either "yes, the result seems to satisfy the user's query [one sentence explanation of why]" 
+                or "no, the result does not satisfy the user's original query [one sentence explanation of why not]"
              """ 
 
 sentiment_analysis_prompt = """

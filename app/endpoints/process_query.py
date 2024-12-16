@@ -38,10 +38,11 @@ async def process_query_endpoint(
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
         
+    truncated_result = None
+    num_images_processed = 0
+
+    
     try:
-        # Initialize truncated_result as None at the start
-        truncated_result = None
-        
         request = QueryRequest(**json.loads(json_data))
         logger.info(f"Processing query for user {user_id} with {len(request.files_metadata or [])} files")
         
@@ -84,7 +85,15 @@ async def process_query_endpoint(
             raise HTTPException(status_code=400, detail=result.error + " -- please try rephrasing your request")
         
 
-        
+        truncated_result = TruncatedSandboxResult(
+                original_query=result.original_query,
+                print_output=result.print_output,
+                error=result.error,
+                timed_out=result.timed_out,
+                return_value_snapshot=result.return_value_snapshot
+            )
+
+
         # Handle output based on type
         if request.output_preferences.type == "download":
             tmp_path, media_type = handle_download(result, request, preprocessed_data, llm_service)
@@ -94,13 +103,7 @@ async def process_query_endpoint(
             # Update download URL to match client expectations
             download_url = f"/download?file_path={tmp_path}"
             
-            truncated_result = TruncatedSandboxResult(
-                original_query=result.original_query,
-                print_output=result.print_output,
-                error=result.error,
-                timed_out=result.timed_out,
-                return_value_snapshot=result.return_value_snapshot
-            )
+
             logger.info(f"num_images_processed: {num_images_processed}")
 
             return QueryResponse(
@@ -130,15 +133,6 @@ async def process_query_endpoint(
                 llm_service
             )
 
-            # Create truncated result before returning
-            truncated_result = TruncatedSandboxResult(
-                original_query=result.original_query,
-                print_output=result.print_output,
-                error=result.error,
-                timed_out=result.timed_out,
-                return_value_snapshot=result.return_value_snapshot
-            )
-
             # Only cleanup immediately for online type
             temp_file_manager.cleanup_marked()
 
@@ -154,28 +148,9 @@ async def process_query_endpoint(
             raise ValueError(f"Invalid output type: {request.output_preferences.type}")
 
     except Exception as e:
-        # Enhanced error handling for binary content
-        try:
-            error_msg = str(e)
-            if not error_msg.isascii() or len(error_msg) > 200:
-                error_msg = f"Error processing request: {e.__class__.__name__}"
-            else:
-                error_msg = error_msg.encode('ascii', 'ignore').decode('ascii')
-        except:
-            error_msg = "An unexpected error occurred"
-            
+        error_msg = str(e)[:200] if str(e).isascii() else f"Error processing request: {e.__class__.__name__}"
         logger.error(f"Process query error for user {user_id}: {error_msg}")
-        
-        # Create an error truncated_result if it wasn't created in the try block
-        if truncated_result is None:
-            truncated_result = TruncatedSandboxResult(
-                original_query=request.query,
-                print_output="",
-                error=error_msg,
-                timed_out=False,
-                return_value_snapshot=""
-            )
-            
+
         return QueryResponse(
             result=truncated_result,
             status="error",
