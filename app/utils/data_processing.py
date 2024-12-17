@@ -8,7 +8,7 @@ import logging
 def sanitize_error_message(e: Exception) -> str:
     """Sanitize error messages to remove binary data"""
     return str(e).encode('ascii', 'ignore').decode('ascii')
-def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool | None = None) -> str:
+def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = False) -> str:
     """Generate appropriate snapshot based on data type"""
     
 

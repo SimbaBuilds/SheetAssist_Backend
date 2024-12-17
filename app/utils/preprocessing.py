@@ -20,7 +20,8 @@ from app.utils.google_integration import GoogleIntegration
 from app.utils.microsoft_integration import MicrosoftIntegration
 from app.utils.llm_service import LLMService
 from app.utils.auth import SupabaseClient
-
+from fastapi import Request
+from app.utils.check_connection import check_client_connection
 
 
 
@@ -427,6 +428,7 @@ class FilePreprocessor:
 
 
 async def preprocess_files(
+    request: Request,
     files: List[UploadFile],
     files_metadata: List[FileMetadata],
     input_urls: List[InputUrl],
@@ -477,6 +479,7 @@ async def preprocess_files(
     if files and files_metadata:
         for metadata in files_metadata:
             try:
+                await check_client_connection(request)
                 file = files[metadata.index]
                 logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
                 
@@ -496,7 +499,7 @@ async def preprocess_files(
                 file_type = mime_to_processor.get(metadata.type)
                 if not file_type:
                     raise ValueError(f"Unsupported MIME type: {metadata.type}")
-                is_image_like = False
+                is_image_like_pdf = False
 
                 # Handle special cases for images and PDFs that need additional parameters
                 kwargs = {}

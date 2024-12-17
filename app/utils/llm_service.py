@@ -343,7 +343,11 @@ class LLMService:
     def _build_old_data_snapshot(self, old_data: List[FileDataInfo]) -> str:
         old_data_snapshot = ""
         for data in old_data:
-            old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data.snapshot}\n\n"
+            if isinstance(data.snapshot, str):
+                data_snapshot = data.snapshot[:500] + "...cont'd"
+            else:
+                data_snapshot = data.snapshot
+            old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"
         return old_data_snapshot
 
     def _clean_filename(self, filename: str) -> str:

@@ -7,6 +7,8 @@ import pandas as pd
 import logging
 import os
 import json
+from fastapi import Request
+from app.utils.check_connection import check_client_connection
 # method to clean code -- removes language identifier and import statements
 def extract_code(suggested_code: str) -> str:
     # Extract code enclosed in triple backticks
@@ -26,6 +28,7 @@ def extract_code(suggested_code: str) -> str:
     return cleaned_code
 
 async def process_query(
+    request: Request,
     query: str, 
     sandbox: EnhancedPythonInterpreter,
     data: List[FileDataInfo] = None,
@@ -60,6 +63,7 @@ async def process_query(
         error_attempts = 0
         past_errors = []
         while result.error and error_attempts < 6:
+            await check_client_connection(request)
             print(f"\n\nError analysis {error_attempts}:")
             print(f"Error: {result.error}")
             past_errors.append(result.error)
@@ -84,6 +88,7 @@ async def process_query(
         # Analysis and improvement loop
         analysis_attempts = 1
         while analysis_attempts < 6:    
+            await check_client_connection(request)
             logging.info(f"Starting post-error analysis attempt {analysis_attempts}")
             old_data = data
             
@@ -155,6 +160,7 @@ async def process_query(
             # Restart error handling for new attempt 
             error_attempts = 0
             while result.error and error_attempts < 6:
+                await check_client_connection(request)
                 print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
                 past_errors.append(result.error)
