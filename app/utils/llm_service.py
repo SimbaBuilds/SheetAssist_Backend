@@ -127,22 +127,22 @@ class LLMService:
     async def _openai_process_image_with_vision(self, image_path: str, query: str) -> Dict[str, str]:
         """Process image using OpenAI's vision API"""
         processor = OpenaiVisionProcessor()
-        return await processor.process_image_with_vision(image_path, query)
+        return processor.process_image_with_vision(image_path, query)
 
     async def _anthropic_process_image_with_vision(self, image_path: str, query: str) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor()
-        return await processor.process_image_with_vision(image_path, query)
+        return processor.process_image_with_vision(image_path, query)
 
     async def _openai_process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
         """Process image using OpenAI's vision API"""
         processor = OpenaiVisionProcessor()
-        return await processor.process_pdf_with_vision(pdf_path, query)
+        return processor.process_pdf_with_vision(pdf_path, query)
 
     async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor()
-        return await processor.process_pdf_with_vision(pdf_path, query)
+        return processor.process_pdf_with_vision(pdf_path, query)
 
     
     

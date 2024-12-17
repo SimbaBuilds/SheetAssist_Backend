@@ -1,4 +1,3 @@
-import requests
 import base64
 import re
 from pathlib import Path
@@ -6,15 +5,16 @@ import os
 import fitz
 from PIL import Image
 import io
-from typing import Dict, List
+from typing import Dict, List, Union, Tuple
 import anthropic
 import httpx
-
+from openai import OpenAI
 class OpenaiVisionProcessor  :
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not found")
+        self.client = OpenAI(api_key=self.api_key)
 
     def image_to_base64(self, image_path: str) -> str:
         """Convert image file to base64 string"""
@@ -61,14 +61,9 @@ class OpenaiVisionProcessor  :
                 
             b64_image = self.image_to_base64(image_path)
             
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-
-            payload = {
-                "model": "gpt-4o",
-                "messages": [
+            completion = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
                     {
                         "role": "user",
                         "content": [
@@ -90,22 +85,12 @@ class OpenaiVisionProcessor  :
                         ]
                     }
                 ],
-                "max_tokens": 300
-            }
-
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions", 
-                headers=headers, 
-                json=payload
+                max_tokens=2000
             )
-            response.raise_for_status()
-            
-            response_json = response.json()
-            content = response_json['choices'][0]['message']['content']
             
             return {
                 "status": "success",
-                "content": content
+                "content": completion.choices[0].message.content
             }
 
         except Exception as e:
@@ -116,7 +101,7 @@ class OpenaiVisionProcessor  :
 
     def process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
 
-        """Process PDF with GPT-4 Vision API by converting pages to images
+        """Process PDF with GPT-4o Vision API by converting pages to images
         
         Args:
             pdf_path: Path to the PDF file
@@ -131,27 +116,22 @@ class OpenaiVisionProcessor  :
                 raise ValueError(f"PDF file not found at path: {pdf_path}")
                 
             doc = fitz.open(pdf_path)
-            all_page_content = []
+            all_page_content = ""
             
             # Process each page
             for page_num in range(len(doc)):
                 # Convert page to base64
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
                 
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}"
-                }
-
-                payload = {
-                    "model": "gpt-4-vision-preview",
-                    "messages": [
+                completion = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
                         {
                             "role": "user",
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"""Extract and organize the relevant informatio from page {page_num + 1} of 
+                                    "text": f"""Extract and organize the relevant information from page {page_num + 1} of 
                                     this PDF based on this user query: {query}.
                                     If formatting in the image provides information, indicate as much in your response 
                                     (e.g. large text at the top of the image: title: [large text], 
@@ -167,34 +147,24 @@ class OpenaiVisionProcessor  :
                             ]
                         }
                     ],
-                    "max_tokens": 300
-                }
-
-                response = requests.post(
-                    "https://api.openai.com/v1/chat/completions", 
-                    headers=headers, 
-                    json=payload
+                    max_tokens=2000
                 )
-                response.raise_for_status()
                 
-                page_content = response.json()['choices'][0]['message']['content']
-                all_page_content.append(f"[Page {page_num + 1}]\n{page_content}")
+                page_content = completion.choices[0].message.content
+                all_page_content += f"Page {page_num + 1}:\n{page_content}\n\n"
 
             doc.close()
             
-            # Combine content from all pages
-            combined_content = "\n\n".join(all_page_content)
-            
             return {
                 "status": "success",
-                "content": combined_content
+                "content": all_page_content
             }
 
         except Exception as e:
             return {
                 "status": "error",
                 "error": str(e)
-            } 
+            }
         
 
 class AnthropicVisionProcessor  :

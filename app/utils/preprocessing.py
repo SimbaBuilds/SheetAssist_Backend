@@ -292,7 +292,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    async def process_pdf(self, file: Union[BinaryIO, str], query: str = None, llm_service = None) -> Tuple[str, str, bool]:
+    async def process_pdf(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None) -> Tuple[str, str, bool]:
         """
         Process PDF files and convert to string if readable, otherwise handle with vision
         
@@ -302,47 +302,55 @@ class FilePreprocessor:
             llm_service: LLM service instance for vision processing
             
         Returns:
-            Tuple[str, str, bool]: (content, data_type, is_readable)
+            Tuple[str, str, bool]: (content, data_type, is_image-like)
             - content: Extracted text or vision API result
             - data_type: "text" or "vision_extracted"
-            - is_readable: Whether the PDF was machine-readable
+            - is_image-like: Whether the PDF was machine-readable
         """
+        doc = None
+        temp_path = None
         try:
             # Create a temporary file if we received a file object
             if not isinstance(file, str):
-                temp_path = temp_file_manager.save_temp_file(file.read(), "temp.pdf")
-                pdf_path = str(temp_path)
+                try:
+                    content = file.read()
+                    if not content:
+                        raise ValueError("Empty PDF file")
+                    temp_path = temp_file_manager.save_temp_file(content, "temp.pdf")
+                    pdf_path = str(temp_path)
+                except Exception as e:
+                    logging.error(f"Error reading PDF file: {str(e)}")
+                    raise ValueError(f"Failed to read PDF file: {str(e)}")
             else:
                 pdf_path = file
 
             # Open PDF with PyMuPDF
-            doc = fitz.open(pdf_path)
+            try:
+                doc = fitz.open(pdf_path)
+            except Exception as e:
+                logging.error(f"Error opening PDF with PyMuPDF: {str(e)}")
+                raise ValueError(f"Failed to open PDF: {str(e)}")
             
             # Try to extract text
             text_content = ""
             total_text_length = 0
+            page_count = len(doc)
             
-            for page_num in range(len(doc)):
+            for page_num in range(page_count):
                 page = doc[page_num]
                 page_text = page.get_text()
                 total_text_length += len(page_text.strip())
                 text_content += f"\n[Page {page_num + 1}]\n{page_text}"
 
-            doc.close()
-
-            # If not a file path, clean up the temporary file
-            if not isinstance(file, str):
-                temp_path.unlink()
-
             # Check if PDF is readable (has meaningful text content)
-            is_readable = total_text_length > 100  # Arbitrary threshold
+            is_image_like = total_text_length < 10  # Arbitrary threshold
 
-            if is_readable:
-                return text_content, "text", True
+            if not is_image_like:
+                return text_content, "text", False
             
-            # Handle unreadable PDFs
-            if doc.page_count > 5:
-                raise ValueError("Unreadable PDF with more than 5 pages")
+            # # Handle unreadable PDFs
+            # if page_count > 5:
+            #     raise ValueError("Unreadable PDF with more than 5 pages")
                 
             # For small unreadable PDFs, process with vision
             provider, vision_result = await llm_service.execute_with_fallback(
@@ -355,13 +363,27 @@ class FilePreprocessor:
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
             # Increment the image counter for each page in unreadable PDF
-            self.num_images_processed += doc.page_count
+            self.num_images_processed += page_count
 
-                
-            return vision_result["content"] if isinstance(vision_result, dict) else vision_result, "vision_extracted", False
+            content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
+            return content, "vision_extracted", True
 
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            logging.error(f"PDF processing error: {str(e)}", exc_info=True)
+            raise ValueError(f"Error processing PDF: {str(e)}")
+        
+        finally:
+            # Ensure we always close the document and clean up temp files
+            if doc:
+                try:
+                    doc.close()
+                except:
+                    pass
+            if temp_path and not isinstance(file, str):
+                try:
+                    temp_path.unlink()
+                except:
+                    pass
 
     async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None, llm_service = None) -> Union[str, pd.DataFrame]:
         """
@@ -474,23 +496,27 @@ async def preprocess_files(
                 file_type = mime_to_processor.get(metadata.type)
                 if not file_type:
                     raise ValueError(f"Unsupported MIME type: {metadata.type}")
+                is_image_like = False
 
                 # Handle special cases for images and PDFs that need additional parameters
                 kwargs = {}
                 if file_type in ['png', 'jpg', 'jpeg']:
                     kwargs['output_path'] = str(session_dir / f"{metadata.name}.jpeg")
+                    is_image_like = True
                 elif file_type == 'pdf':
                     kwargs['query'] = query
 
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
                     file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = preprocessor.preprocess_file(file_obj, file_type, supabase, user_id, llm_service)
+                    content = await preprocessor.preprocess_file(file_obj, file_type, sheet_name=None, llm_service=llm_service)
 
+                
                 # Handle different return types
                 if file_type == 'pdf':
-                    content, data_type, is_readable = content  # Unpack PDF processor return values
-                    metadata_info = {"is_readable": is_readable}
+                    content, data_type, is_image_like_pdf = content  # Unpack PDF processor return values
+                    metadata_info = {"is_image_like": is_image_like}
+                    
                 else:
                     data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
                     metadata_info = {}
@@ -498,7 +524,7 @@ async def preprocess_files(
                 processed_data.append(
                     FileDataInfo(
                         content=content,
-                        snapshot=get_data_snapshot(content, data_type),
+                        snapshot=get_data_snapshot(content, data_type, is_image_like_pdf),
                         data_type=data_type,
                         original_file_name=metadata.name,
                         metadata=metadata_info,

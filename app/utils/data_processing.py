@@ -8,10 +8,12 @@ import logging
 def sanitize_error_message(e: Exception) -> str:
     """Sanitize error messages to remove binary data"""
     return str(e).encode('ascii', 'ignore').decode('ascii')
-
-def get_data_snapshot(content: Any, data_type: str) -> str:
+def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool | None = None) -> str:
     """Generate appropriate snapshot based on data type"""
-    # Handle tuple type
+    
+
+    
+    # Handle tuple type -- (from sandbox return values)
     if isinstance(content, tuple):
         # Process each item in tuple and join with newlines
         snapshots = []
@@ -38,9 +40,18 @@ def get_data_snapshot(content: Any, data_type: str) -> str:
                 snapshots.append(str(item)[:500])
         return "\n---\n".join(snapshots)
 
+
+    if is_image_like_pdf:
+        return content
+    
     # Handle non-tuple types
     if data_type == "DataFrame":
-        return content.head(5).to_string()
+        df_info = f"DataFrame Info:\n"
+        df_info += f"Shape: {content.shape}\n"
+        df_info += f"Columns: {list(content.columns)}\n"
+        df_info += f"Data Types:\n{content.dtypes}\n"
+        df_info += f"\nFirst 5 rows:\n{content.head(5).to_string()}"
+        return df_info
     elif data_type == "json":
         # For JSON, return first few key-value pairs or array elements
         if isinstance(content, dict):

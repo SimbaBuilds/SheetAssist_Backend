@@ -70,7 +70,6 @@ async def get_provider_token(user_id: str, provider: str, supabase_client) -> Op
 async def refresh_google_token(token_info: TokenInfo, supabase_client) -> Optional[TokenInfo]:
     """Refresh Google OAuth token and update in database"""
     try:
-        logger.info("Attempting to refresh Google token")
         creds = Credentials(
             token=token_info.access_token,
             refresh_token=token_info.refresh_token,
@@ -181,7 +180,6 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
 
 async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet | None:
     """Get document title using Google Drive API"""
-    logger.info(f"Fetching Google doc title for URL: {url}")
     try:
         # Check if token is expired
         expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
@@ -206,16 +204,13 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
         file_id = None
         if '/document/d/' in url:
             file_id = url.split('/document/d/')[1].split('/')[0]
-            logger.info(f"Extracted document ID: {file_id}")
         elif '/spreadsheets/d/' in url:
             file_id = url.split('/spreadsheets/d/')[1].split('/')[0]
-            logger.info(f"Extracted spreadsheet ID: {file_id}")
         
         if not file_id:
             logger.error(f"Could not extract file ID from URL: {url}")
             return None
 
-        logger.info(f"Attempting to access file with ID: {file_id}")
         
         # Build the service
         drive_service = build('drive', 'v3', credentials=creds)
@@ -225,7 +220,6 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
 
         try:
             # Get file metadata
-            logger.info(f"Requesting file metadata for ID: {file_id}")
             file = drive_service.files().get(fileId=file_id, fields='name').execute()
             logger.info(f"Successfully retrieved file metadata: {file}")
             
@@ -235,10 +229,8 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
             for sheet in sheet_metadata.get('sheets', []):
                 sheet_name = sheet['properties']['title']
                 sheet_names.append(sheet_name)
-                logger.info(f"Found sheet: {sheet_name}")
 
             doc_name = file.get('name')
-            logger.info(f"Created OnlineSheet object with doc_name: {doc_name}, sheet_names: {sheet_names}")
             sheet_md = OnlineSheet(doc_name=doc_name, provider='google', sheet_names=sheet_names)
 
             return sheet_md
@@ -293,7 +285,6 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
                     item_id = path_parts[i-1]
                     break
 
-        logger.info(f"Extracted item ID: {item_id}")
         if not item_id:
             logger.error(f"Could not extract item ID from URL: {url}")
             return None
@@ -349,7 +340,6 @@ async def get_document_title(
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)]
 ):
-    logger.info(f"Processing document title request for user {user_id}")
     if not user_id:
         return WorkbookResponse(
             url=url.url,
@@ -375,7 +365,6 @@ async def get_document_title(
                     success=False,
                     error="Error accessing Google Sheets. Please reconnect your Google account."
                 )
-            logger.info(f"Retrieved title: {online_sheet.doc_name} sheets: {online_sheet.sheet_names}")
 
             return WorkbookResponse(
                 url=url.url,
