@@ -26,10 +26,7 @@ import fitz
 def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
     input_data_snapshot = ""
     for data in input_data:
-        if isinstance(data.snapshot, str):
-            data_snapshot = data.snapshot[:1000] + "...cont'd"
-        else:
-            data_snapshot = data.snapshot
+        data_snapshot = data.snapshot
         input_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"
     return input_data_snapshot
 
