@@ -344,9 +344,9 @@ class FilePreprocessor:
                 text_content += f"\n[Page {page_num + 1}]\n{page_text}"
 
             # Check if PDF is readable (has meaningful text content)
-            is_image_like = total_text_length < 10  # Arbitrary threshold
+            is_image_like_pdf = total_text_length < 10  # Arbitrary threshold
 
-            if not is_image_like:
+            if not is_image_like_pdf:
                 return text_content, "text", False
             
             # # Handle unreadable PDFs
@@ -387,7 +387,7 @@ class FilePreprocessor:
                 except:
                     pass
 
-    async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None, llm_service = None, processed_data: List[FileDataInfo] = None) -> Union[str, pd.DataFrame]:
+    async def preprocess_file(self, file: Union[BinaryIO, str], query: str, file_type: str, sheet_name: str = None, llm_service = None, processed_data: List[FileDataInfo] = None) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
         """
@@ -410,7 +410,7 @@ class FilePreprocessor:
         input_data = processed_data
         # Handle async processors
         if file_type.lower() in ['png', 'jpg', 'jpeg', 'pdf']:
-            return await processor(file, output_path=None, query=None, llm_service=llm_service, input_data=input_data)
+            return await processor(file, output_path=None, query=query, llm_service=llm_service, input_data=input_data)
         if file_type.lower() in ['gsheet', 'office_sheet']:
             return await processor(file, sheet_name)
         return processor(file)
@@ -457,9 +457,9 @@ async def preprocess_files(
         try:
             logging.info(f"Processing URL: {input_url.url}")
             if 'docs.google' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, 'gsheet', input_url.sheet_name, llm_service) 
+                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name, llm_service) 
             elif 'onedrive.live' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, 'office_sheet', input_url.sheet_name, llm_service)
+                content = await preprocessor.preprocess_file(input_url.url, query, 'office_sheet', input_url.sheet_name, llm_service)
             else:
                 logging.error(f"Unsupported URL format: {input_url.url}")
                 continue
@@ -524,20 +524,20 @@ async def preprocess_files(
                 kwargs = {}
                 if file_type in ['png', 'jpg', 'jpeg']:
                     kwargs['output_path'] = str(session_dir / f"{metadata.name}.jpeg")
-                    is_image_like = True
+                    is_image_like_pdf = True
                 elif file_type == 'pdf':
                     kwargs['query'] = query
 
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
                     file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = await preprocessor.preprocess_file(file_obj, file_type, sheet_name=None, llm_service=llm_service, processed_data=processed_data)
+                    content = await preprocessor.preprocess_file(file_obj, query, file_type, sheet_name=None, llm_service=llm_service, processed_data=processed_data)
 
                 
                 # Handle different return types
                 if file_type == 'pdf':
                     content, data_type, is_image_like_pdf = content  # Unpack PDF processor return values
-                    metadata_info = {"is_image_like": is_image_like}
+                    metadata_info = {"is_image_like_pdf": is_image_like_pdf}
                     
                 else:
                     data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"

@@ -132,7 +132,7 @@ async def process_query(
             if success:
                 #SUCCESS
                 print("\nSuccess!\n")
-                print("Successful LLM output:\n", unprocessed_llm_output) 
+                print("\n-------Successful LLM output:\n", unprocessed_llm_output, "\n-------") 
                 result = SandboxResult(
                     original_query=query, 
                     print_output="", 
