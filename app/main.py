@@ -6,7 +6,7 @@ sys.path.append(project_root)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.endpoints import process_query, download, get_doc_title
+from app.endpoints import process_query, download, get_doc_title, data_visualization
 
 app = FastAPI()
 
@@ -21,6 +21,7 @@ app.add_middleware(
 app.include_router(process_query.router)
 app.include_router(download.router)
 app.include_router(get_doc_title.router)
+app.include_router(data_visualization.router)
 
 
 if __name__ == "__main__":    

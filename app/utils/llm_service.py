@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from typing import Tuple, Any, Dict, List
+from typing import Tuple, Any, Dict, List, Optional
 from functools import lru_cache
 from openai import OpenAI
 from anthropic import Anthropic
@@ -402,8 +402,8 @@ class AnthropicVisionProcessor  :
 
 class LLMService:
     def __init__(self):
-        self.openai_client = OpenAI()
-        self.anthropic_client = Anthropic()
+        self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.anthropic_client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         self._operation_map = {
             "generate_text": {
                 "openai": self._openai_generate_text,
@@ -440,6 +440,10 @@ class LLMService:
             "file_namer": {
                 "openai": self._openai_file_namer,
                 "anthropic": self._anthropic_file_namer
+            },
+            "gen_visualization": {
+                "openai": self._openai_gen_visualization,
+                "anthropic": self._anthropic_gen_visualization
             }
         }
 
@@ -739,6 +743,73 @@ class LLMService:
         )
         return self._clean_filename(response)
 
+    async def _openai_gen_visualization(
+        self,
+        data_snapshot: str,
+        color_palette: str,
+        custom_instructions: Optional[str]
+    ) -> str:
+        """Generate visualization code using OpenAI."""
+        system_prompt = """You are a data visualization expert. Generate Python code using matplotlib/seaborn 
+        to create effective visualizations. Follow these requirements:
+        1. You can create one plot or two subplots depending on the data
+        2. Always remove grid lines using axes[].grid(False)
+        3. Use axes[].tick_params(axis='x', rotation=45) for legible x-axis labels
+        4. If creating subplots, use plt.tight_layout()
+        5. Use the provided color palette
+        6. Consider the user's custom instructions if provided
+        7. Return only the Python code within triple backticks
+        8. Do not include import statements
+        9. Assume data is in the 'data' variable
+        10. Use descriptive titles and labels"""
+
+        user_content = f"""Data Snapshot:
+        {data_snapshot}
+        
+        Color Palette: {color_palette}
+        
+        Custom Instructions: {custom_instructions if custom_instructions else 'None provided'}
+        
+        Generate visualization code following the requirements."""
+
+        return await self._openai_generate_text(
+            system_prompt=system_prompt,
+            user_content=user_content
+        )
+
+    async def _anthropic_gen_visualization(
+        self,
+        data_snapshot: str,
+        color_palette: str,
+        custom_instructions: Optional[str]
+    ) -> str:
+        """Generate visualization code using Anthropic."""
+        system_prompt = """You are a data visualization expert. Generate Python code using matplotlib/seaborn 
+        to create effective visualizations. Follow these requirements:
+        1. You can create one plot or two subplots depending on the data
+        2. Always remove grid lines using axes[].grid(False)
+        3. Use axes[].tick_params(axis='x', rotation=45) for legible x-axis labels
+        4. If creating subplots, use plt.tight_layout()
+        5. Use the provided color palette
+        6. Consider the user's custom instructions if provided
+        7. Return only the Python code within triple backticks
+        8. Do not include import statements
+        9. Assume data is in the 'data' variable
+        10. Use descriptive titles and labels"""
+
+        user_content = f"""Data Snapshot:
+        {data_snapshot}
+        
+        Color Palette: {color_palette}
+        
+        Custom Instructions: {custom_instructions if custom_instructions else 'None provided'}
+        
+        Generate visualization code following the requirements."""
+
+        return await self._anthropic_generate_text(
+            system_prompt=system_prompt,
+            user_content=user_content
+        )
 
     def _build_data_description(self, data: List[FileDataInfo]) -> str:
         if not data:

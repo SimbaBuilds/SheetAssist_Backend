@@ -6,13 +6,13 @@ sys.path.insert(0, project_root)
 
 import pytest
 import os
-from app.utils.vision_processing import AnthropicVisionProcessor
+from app.utils.llm_service import LLMService
 from pathlib import Path
 
 @pytest.fixture
 def vision_processor():
     """Create an instance of AnthropicVisionProcessor using environment API key"""
-    return AnthropicVisionProcessor()
+    return LLMService().anthropic_client
 
 @pytest.fixture
 def test_image(tmp_path):

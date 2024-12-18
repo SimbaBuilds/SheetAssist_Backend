@@ -44,7 +44,10 @@ async def download_file(
             'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'txt': 'text/plain',
-            'csv': 'text/csv'
+            'csv': 'text/csv',
+            'png': 'image/png',
+            'jpeg': 'image/jpeg',
+            'jpg': 'image/jpeg'
         }
         
         media_type = media_types.get(extension, 'application/octet-stream')

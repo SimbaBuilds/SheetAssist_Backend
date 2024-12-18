@@ -61,6 +61,9 @@ class EnhancedPythonInterpreter:
             're': __import__('re'),      # For regular expressions
             'chardet': __import__('chardet'),  # For character encoding detection
             'tabula': __import__('tabula'),  # For extracting tables from PDFs
+            'plt': __import__('matplotlib.pyplot'),
+            'matplotlib': __import__('matplotlib'),
+            'seaborn': __import__('seaborn'),  # For enhanced plotting
         }
     
     # method to define dangerous builtins
@@ -110,7 +113,9 @@ class EnhancedPythonInterpreter:
                     'datetime', 'json', 'csv', 'PyPDF2', 'pd', 'np', 'math', 'statistics',
                     'openai', 'anyio', 'anyio._backends', 'httpx', 'typing_extensions',
                     'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
-                    'fitz', 'io', 'StringIO', 're', 'chardet', 'tabula'
+                    'fitz', 'io', 'StringIO', 're', 'chardet', 'tabula',
+                    'matplotlib', 'matplotlib.pyplot', 'seaborn',
+                    'matplotlib.figure', 'matplotlib.axes', 'matplotlib.colors'
                 }
 
             def find_spec(self, fullname, path, target=None):
