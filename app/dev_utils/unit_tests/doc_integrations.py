@@ -41,31 +41,20 @@ TEST_DF = pd.DataFrame({
     'Date': [datetime.now(), datetime.now()]
 })
 
-TEST_DICT = {
-    'name': 'Test Receipt',
-    'age': 30,
-    'date': datetime.now()
-}
 
 TEST_LIST = ['Test Receipt', 'Test Receipt 2']
 
-# Test data with date objects
-TEST_DATE = date(2023, 12, 25)
-TEST_DATE_DF = pd.DataFrame({
-    'date_col': [date(2023, 12, 25), date(2023, 12, 26)],
-    'text_col': ['Test 1', 'Test 2']
-})
-TEST_DATE_DICT = {
-    'date_field': date(2023, 12, 25),
-    'text_field': 'Test Append'
-}
+
+
 
 old_data = [FileDataInfo(data_type="dataframe", snapshot="test_snapshot", original_file_name="test_df.csv")]
 
 # URLs for testing
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ3CG8mx1JhyWC-i0h9qurZNs/edit?gid=0#gid=0"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1EZ8dMacJAPpVyKJrSOTQ3CG8mx1JhyWC-i0h9qurZNs/edit?gid=2053550161#gid=2053550161"
+GOOGLE_SHEET_NAME = "DuplicateTest"
 OFFICE_SHEET_URL = "https://onedrive.live.com/edit?id=D4064FF6F2B7F76C!105&resid=D4064FF6F2B7F76C!105&ithint=file%2cxlsx&ct=1733274618866&wdOrigin=OFFICECOM-WEB.START.EDGEWORTH&wdPreviousSessionSrc=HarmonyWeb&wdPreviousSession=da84a250-8950-4855-b4d3-ae0d6b922633&wdo=2&cid=d4064ff6f2b7f76c"
-OFFICE_SHEET_NAME = "Sheet2"
+OFFICE_SHEET_NAME = "Sheet1"
+
 
 g_response = supabase.table('user_documents_access') \
     .select('refresh_token') \
@@ -129,50 +118,153 @@ def msft_integration():
     return MicrosoftIntegration(supabase, user_id)
 
 
-# Add these test cases after the existing fixtures
+# @pytest.mark.asyncio
+# async def test_google_sheets_append_existing_data(g_integration):
+#     current_df = await g_integration.extract_google_sheets_data(GOOGLE_SHEET_URL, GOOGLE_SHEET_NAME)
+#     assert not current_df.empty, "Initial sheet should not be empty"
+#     initial_row_count = len(current_df)
+#     initial_values = current_df.iloc[0].to_dict()
 
-# async def test_google_integration_initialization(g_integration):
-#     """Test that GoogleIntegration initializes correctly"""
-#     assert g_integration is not None
-#     assert g_integration.google_creds is not None
+#     # Attempt to append the same data
+#     result = await g_integration.append_to_current_google_sheet(current_df.copy(), GOOGLE_SHEET_URL, GOOGLE_SHEET_NAME)
+#     final_df = await g_integration.extract_google_sheets_data(GOOGLE_SHEET_URL, GOOGLE_SHEET_NAME)
 
-# async def test_append_to_current_google_sheet(g_integration):
-#     """Test appending data to existing sheet"""
-#     # Test with DataFrame
-#     result = await g_integration.append_to_current_google_sheet(
-#         TEST_DF,
-#         GOOGLE_SHEET_URL,
-#         "Receipts"  # Replace with your actual sheet name
-#     )
-#     assert result is True
+#     assert not final_df.empty, "Final sheet should not be empty"
+#     assert len(final_df.columns) == len(current_df.columns), "Column count mismatch"
+#     assert set(final_df.columns) == set(current_df.columns), "Column names mismatch"
+#     assert len(final_df) == initial_row_count, "Row count mismatch"
+#     assert final_df.iloc[0].to_dict() == initial_values, "First row changed unexpectedly"
+#     assert result is True, "Append did not report success"
 
+# @pytest.mark.asyncio
+# async def test_google_sheets_append_mixed_data(g_integration):
+#     logger.info("Starting test_google_sheets_append_mixed_data")
+#     print("Starting test_google_sheets_append_mixed_data")
+#     logger.info("Extracting current sheet data")
+#     current_df = await g_integration.extract_google_sheets_data(GOOGLE_SHEET_URL, GOOGLE_SHEET_NAME)
+#     initial_row_count = len(current_df)
+#     logger.info(f"Initial row count: {initial_row_count}")
+#     print(f"Initial row count: {initial_row_count}")
+    
+#     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+#     logger.info(f"Using timestamp: {timestamp}")
 
+#     logger.info("Creating test data")
+#     print("Existing part created")
+#     new_part = pd.DataFrame({
+#         'Client First Name': [f'Test New 1_{timestamp}', f'Test New 2_{timestamp}'],
+#         'Client Last Name': ['Smith', 'Jones'],
+#         'Prescription Details': ['N/A', 'N/A'],
+#         'Payment Type': ['Visa', 'Mastercard'],
+#         'Payment Amount': ['100.00', '200.00'],
+#         'Date ': ['03-13-2024', '03-13-2024'],
+#         'Expiry Date': ['3-13-2025', '3-13-2025'],
+#         'Other Notes': ['Test note 1', 'Test note 2']
+#     })
+#     print("New part created")
+#     logger.info("Concatenating existing and new data")
+#     mixed_data = pd.concat([current_df, new_part], ignore_index=True)
+#     print("Mixed data created")
+#     logger.info("Appending mixed data to sheet")
+#     result = await g_integration.append_to_current_google_sheet(mixed_data, GOOGLE_SHEET_URL, GOOGLE_SHEET_NAME)
+    
+#     logger.info("Extracting final sheet data")
+#     final_df = await g_integration.extract_google_sheets_data(GOOGLE_SHEET_URL, GOOGLE_SHEET_NAME)
 
+#     expected_count = initial_row_count + 2
+#     logger.info(f"Expected final row count: {expected_count}, Actual: {len(final_df)}")
+#     print(f"Expected final row count: {expected_count}, Actual: {len(final_df)}")
 
-# async def test_append_to_new_google_sheet(g_integration):
-#     """Test creating and appending data to new sheet"""
-#     # Test with DataFrame
-#     result = await g_integration.append_to_new_google_sheet(
-#         TEST_DF,
-#         GOOGLE_SHEET_URL,
-#         "TestNewSheet1"
-#     )
-#     assert result is True
+#     assert not final_df.empty, "Final sheet should not be empty"
+#     assert len(final_df) == expected_count, "Row count mismatch after append"
+    
+#     appended_rows = final_df[final_df['Client First Name'].str.contains(timestamp, na=False)]
+#     logger.info(f"Found {len(appended_rows)} newly appended rows")
+#     print(f"Found {len(appended_rows)} newly appended rows")
+#     assert len(appended_rows) == 2, "Expected 2 new rows not found"
+#     assert result is True, "Append did not report success"
+    
+#     logger.info("test_google_sheets_append_mixed_data completed successfully")
+#     print("test_google_sheets_append_mixed_data completed successfully")
 
+@pytest.mark.asyncio
+async def test_office_excel_append_existing_data(msft_integration):
+    logger.info("Starting test_office_excel_append_existing_data")
+    current_df = await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
+    assert not current_df.empty, "Initial sheet should not be empty"
+    initial_row_count = len(current_df)
+    initial_values = current_df.iloc[0].to_dict()
 
+    # Attempt to append the same data
+    result = await msft_integration.append_to_current_office_sheet(current_df.copy(), OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
+    final_df = await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
 
+    assert not final_df.empty, "Final sheet should not be empty"
+    assert len(final_df.columns) == len(current_df.columns), "Column count mismatch"
+    assert set(final_df.columns) == set(current_df.columns), "Column names mismatch"
+    assert len(final_df) == initial_row_count, "Row count mismatch"
+    assert final_df.iloc[0].to_dict() == initial_values, "First row changed unexpectedly"
+    assert result is True, "Append did not report success"
 
+@pytest.mark.asyncio
+async def test_office_excel_append_mixed_data(msft_integration):
+    logger.info("Starting test_office_excel_append_mixed_data")
+    
+    # Step 1: Get current data and clean it up
+    current_df = await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
+    
+    # Debug: Print initial state
+    print("\nCurrent DataFrame columns:")
+    print(current_df.columns.tolist())
+    
+    # Get only the meaningful columns (non-empty column names)
+    meaningful_columns = [col for col in current_df.columns if col.strip() != '']
+    current_df = current_df[meaningful_columns]
+    
+    print("\nCleaned DataFrame columns:")
+    print(current_df.columns.tolist())
+    
+    current_df = current_df.reset_index(drop=True)
+    initial_row_count = len(current_df)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Step 2: Create new test data with matching columns
+    new_part = pd.DataFrame({
+        'Client First Name': [f'Test New 1_{timestamp}', f'Test New 2_{timestamp}'],
+        'Client Last Name': ['Smith', 'Jones'],
+        'Prescription Details': ['N/A', 'N/A'],
+        'Payment Type': ['Visa', 'Mastercard'],
+        'Payment Amount': ['100.00', '200.00'],
+        'Date': ['03-13-2024', '03-13-2024'],
+        'Expiry Date': ['3-13-2025', '3-13-2025'],
+        'Other Notes': ['Test note 1', 'Test note 2']
+    })
+    
+    # Ensure columns match exactly
+    new_part = new_part[current_df.columns]
+    
+    # Step 3: Concatenate
+    mixed_data = pd.concat([current_df, new_part], ignore_index=True)
+    
+    # Rest of the test
+    result = await msft_integration.append_to_current_office_sheet(mixed_data, OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
+    final_df = await msft_integration.extract_msft_excel_data(OFFICE_SHEET_URL, OFFICE_SHEET_NAME)
+    
+    # Get only meaningful columns for final DataFrame too
+    final_df = final_df[meaningful_columns]
 
-async def test_extract_google_sheets_data(g_integration):
-    """Test extracting data from Google Sheets"""
-    df = await g_integration.extract_google_sheets_data(
-        GOOGLE_SHEET_URL,
-        "sd_grades"  # Replace with your actual sheet name
-    )
-    print("Extracted data:")
-    print(df)
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty
+    expected_count = initial_row_count + 2
+    logger.info(f"Expected final row count: {expected_count}, Actual: {len(final_df)}")
+    print(f"Expected final row count: {expected_count}, Actual: {len(final_df)}")
 
-
-
+    assert not final_df.empty, "Final sheet should not be empty"
+    assert len(final_df) == expected_count, "Row count mismatch after append"
+    
+    appended_rows = final_df[final_df['Client First Name'].str.contains(timestamp, na=False)]
+    logger.info(f"Found {len(appended_rows)} newly appended rows")
+    print(f"Found {len(appended_rows)} newly appended rows")
+    assert len(appended_rows) == 2, "Expected 2 new rows not found"
+    assert result is True, "Append did not report success"
+    
+    logger.info("test_office_excel_append_mixed_data completed successfully")

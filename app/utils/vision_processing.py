@@ -9,6 +9,19 @@ from typing import Dict, List, Union, Tuple
 import anthropic
 import httpx
 from openai import OpenAI
+from app.schemas import FileDataInfo
+
+def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
+    input_data_snapshot = ""
+    for data in input_data:
+        if isinstance(data.snapshot, str):
+            data_snapshot = data.snapshot[:500] + "...cont'd"
+        else:
+            data_snapshot = data.snapshot
+        input_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"
+    return input_data_snapshot
+
+
 class OpenaiVisionProcessor  :
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -52,7 +65,7 @@ class OpenaiVisionProcessor  :
         except Exception as e:
             raise ValueError(f"Error converting PDF page to base64: {str(e)}")
 
-    def process_image_with_vision(self, image_path: str, query: str) -> dict:
+    def process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> dict:
         """Process image with GPT-4o Vision API"""
         try:
             # Check if image_path exists
@@ -60,6 +73,8 @@ class OpenaiVisionProcessor  :
                 raise ValueError(f"Image file not found at path: {image_path}")
                 
             b64_image = self.image_to_base64(image_path)
+            
+            input_data_snapshot = build_input_data_snapshot(input_data)
             
             completion = self.client.chat.completions.create(
                 model="gpt-4o",
@@ -70,7 +85,9 @@ class OpenaiVisionProcessor  :
                             {
                                 "type": "text",
                                 "text": f"""
-                                Extract and organize all relevant information from this image based on this user query: {query}. 
+                                Your job is to extract relevant information from an image based on a user query and input data.
+                                Here is the user query: {query} and a snapshot of the input data from the user: {input_data_snapshot}.
+                                Extract only the relevant information from the image based on the query and data.
                                 If formatting in the image provides information, indicate as much in your response 
                                 (e.g. large text at the top of the image: title: [large text], 
                                 tabular data: table: [tabular data], etc...).
@@ -93,13 +110,19 @@ class OpenaiVisionProcessor  :
                 "content": completion.choices[0].message.content
             }
 
+        except httpx.ConnectError as e:
+            return {
+                "status": "error",
+                "error": "Connection error to OpenAI service",
+                "detail": str(e)
+            }
         except Exception as e:
             return {
                 "status": "error",
                 "error": str(e)
             }
 
-    def process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
+    def process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
 
         """Process PDF with GPT-4o Vision API by converting pages to images
         
@@ -118,6 +141,8 @@ class OpenaiVisionProcessor  :
             doc = fitz.open(pdf_path)
             all_page_content = ""
             
+            input_data_snapshot = build_input_data_snapshot(input_data)
+            
             # Process each page
             for page_num in range(len(doc)):
                 # Convert page to base64
@@ -131,8 +156,9 @@ class OpenaiVisionProcessor  :
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"""Extract and organize the relevant information from page {page_num + 1} of 
-                                    this PDF based on this user query: {query}.
+                                    "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
+                                    Here is the user query: {query} and a snapshot of the input data from the user: {input_data_snapshot}.
+                                    Extract only the relevant information from the image based on the query and data.
                                     If formatting in the image provides information, indicate as much in your response 
                                     (e.g. large text at the top of the image: title: [large text], 
                                     tabular data: table: [tabular data], etc...).
@@ -210,7 +236,7 @@ class AnthropicVisionProcessor  :
         except Exception as e:
             raise ValueError(f"Error converting PDF page to base64: {str(e)}")
 
-    def process_image_with_vision(self, image_path: str, query: str) -> dict:
+    def process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> dict:
         """Process image with Claude 3 Vision API"""
         try:
             # Check if image_path exists
@@ -225,6 +251,8 @@ class AnthropicVisionProcessor  :
             if media_type == "image/jpg":
                 media_type = "image/jpeg"
 
+            input_data_snapshot = build_input_data_snapshot(input_data)
+            
             message = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=1024,
@@ -242,7 +270,9 @@ class AnthropicVisionProcessor  :
                             },
                             {
                                 "type": "text",
-                                "text": f"""Extract and organize all relevant information from this image based on this user query: {query}. 
+                                "text": f"""Your job is to extract relevant information from an image based on a user query and input data.
+                                Here is the user query: {query} and a snapshot of the input data from the user: {input_data_snapshot}.
+                                Extract only the relevant information from the image based on the query and data.
                                 If formatting in the image provides information, indicate as much in your response 
                                 (e.g. large text at the top of the image: title: [large text], 
                                 tabular data: table: [tabular data], etc...)."""
@@ -257,13 +287,19 @@ class AnthropicVisionProcessor  :
                 "content": message.content[0].text
             }
 
+        except httpx.ConnectError as e:
+            return {
+                "status": "error",
+                "error": "Connection error to Anthropic service",
+                "detail": str(e)
+            }
         except Exception as e:
             return {
                 "status": "error",
                 "error": str(e)
             }
 
-    def process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
+    def process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
         """Process PDF with Claude 3 Vision API by converting pages to images
         
         Args:
@@ -281,13 +317,15 @@ class AnthropicVisionProcessor  :
             doc = fitz.open(pdf_path)
             all_page_content = []
             
+            input_data_snapshot = build_input_data_snapshot(input_data)
+            
             # Process each page
             for page_num in range(len(doc)):
                 # Convert page to base64
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
                 
                 message = self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
+                    model="claude-3-5-sonnet-20241022",
                     max_tokens=1024,
                     messages=[
                         {
@@ -303,8 +341,9 @@ class AnthropicVisionProcessor  :
                                 },
                                 {
                                     "type": "text",
-                                    "text": f"""Extract and organize the relevant information from page {page_num + 1} of 
-                                    this PDF based on this user query: {query}.
+                                    "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
+                                    Here is the user query: {query} and a snapshot of the input data from the user: {input_data_snapshot}.
+                                    Extract only the relevant information from the image based on the query and data.
                                     If formatting in the image provides information, indicate as much in your response 
                                     (e.g. large text at the top of the image: title: [large text], 
                                     tabular data: table: [tabular data], etc...)."""

@@ -78,40 +78,80 @@ class GoogleIntegration:
             return [[format_value(data)]]
 
     async def append_to_current_google_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
-        """Append data to Google Sheet"""
+        """Append data to Google Sheet, avoiding duplicates"""
+        logging.info(f"Starting append to Google Sheet: {sheet_name}")
         try:
             # Extract spreadsheet ID from URL
             sheet_id = sheet_url.split('/d/')[1].split('/')[0]
+            logging.info(f"Extracted sheet ID: {sheet_id}")
             
             # Create Google Sheets service with proper scopes
             service = build('sheets', 'v4', credentials=self.google_creds)
+            logging.info("Created Google Sheets service")
             
-            # Use the provided sheet_name directly
-            if not sheet_name:
-                # Fallback to first sheet if no sheet name provided
-                sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-                sheet_name = sheet_metadata['sheets'][0]['properties']['title']
+            # First get existing data to determine row count
+            logging.info(f"Fetching existing data from sheet: {sheet_name}")
+            result = service.spreadsheets().values().get(
+                spreadsheetId=sheet_id,
+                range=f"{sheet_name}"
+            ).execute()
             
-            # Format data for sheets using helper function
-            values = self._format_data_for_sheets(data)
+            existing_values = result.get('values', [])
+            existing_row_count = len(existing_values)
+            logging.info(f"Existing row count: {existing_row_count}")
             
-            # Append data to sheet using values.append
+            # Convert input data to DataFrame if it isn't already
+            logging.info("Converting input data to DataFrame")
+            if not isinstance(data, pd.DataFrame):
+                if isinstance(data, dict):
+                    logging.debug("Converting dict to DataFrame")
+                    data = pd.DataFrame([data])
+                elif isinstance(data, list):
+                    logging.debug("Converting list to DataFrame") 
+                    data = pd.DataFrame(data)
+                else:
+                    logging.debug("Converting single value to DataFrame")
+                    data = pd.DataFrame([data])
+            
+            # Get only the new rows (rows beyond existing count)
+            new_rows = data.iloc[existing_row_count-1:]
+            logging.info(f"New rows to append: {len(new_rows)}")
+            print(f"New rows to append: {len(new_rows)}")
+            
+            if len(new_rows) == 0:
+                logging.info("No new rows to append, returning")
+                return True
+            
+            # Format the new data for sheets
+            logging.info("Formatting data for Google Sheets")
+            values = self._format_data_for_sheets(new_rows)
+            logging.info(f"Formatted {len(values)} rows")
+            logging.info(f"Formatted values: {values}")
+            
+            # Append the data
             body = {
                 'values': values
             }
-            service.spreadsheets().values().append(
+            
+            logging.info("Appending data to sheet")
+            append_result = service.spreadsheets().values().append(
                 spreadsheetId=sheet_id,
-                range=f"{sheet_name}",
+                range=f"{sheet_name}!A1",  # Specify starting cell
                 valueInputOption='RAW',
                 insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
             
+            updated_rows = append_result.get('updates', {}).get('updatedRows', 0)
+            logging.info(f"Successfully appended {updated_rows} rows")
+            logging.info(f"Full append result: {append_result}")
+            
             return True
             
         except Exception as e:
-            logging.error(f"Google Sheets append error: {str(e)}")
+            logging.error(f"Failed to append to Google Sheet: {str(e)}", exc_info=True)
             raise
+
 
     async def append_to_new_google_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Add data to a new sheet within an existing Google Sheets workbook"""

@@ -8,7 +8,6 @@ from PIL import Image
 import io
 from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
-from app.utils.vision_processing import OpenaiVisionProcessor, AnthropicVisionProcessor
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
 from app.utils.data_processing import sanitize_error_message, get_data_snapshot
@@ -163,7 +162,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None) -> Tuple[str, str]:
+    async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
         """
         Process image files (.png, .jpg, .jpeg) and extract content using vision processing
         
@@ -216,7 +215,8 @@ class FilePreprocessor:
             provider, vision_result = await llm_service.execute_with_fallback(
                 "process_image_with_vision",
                 image_path=image_path,
-                query=query
+                query=query,
+                input_data=input_data
             )
 
             if isinstance(vision_result, dict) and vision_result.get("status") == "error":
@@ -293,7 +293,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    async def process_pdf(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None) -> Tuple[str, str, bool]:
+    async def process_pdf(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str, bool]:
         """
         Process PDF files and convert to string if readable, otherwise handle with vision
         
@@ -357,7 +357,8 @@ class FilePreprocessor:
             provider, vision_result = await llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
                 pdf_path=pdf_path,
-                query=query
+                query=query,
+                input_data=input_data
             )
 
             if isinstance(vision_result, dict) and vision_result.get("status") == "error":
@@ -386,7 +387,7 @@ class FilePreprocessor:
                 except:
                     pass
 
-    async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None, llm_service = None) -> Union[str, pd.DataFrame]:
+    async def preprocess_file(self, file: Union[BinaryIO, str], file_type: str, sheet_name: str = None, llm_service = None, processed_data: List[FileDataInfo] = None) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
         """
@@ -406,10 +407,10 @@ class FilePreprocessor:
         processor = processors.get(file_type.lower())
         if not processor:
             raise ValueError(f"Unsupported file type: {file_type}")
-            
+        input_data = processed_data
         # Handle async processors
         if file_type.lower() in ['png', 'jpg', 'jpeg', 'pdf']:
-            return await processor(file, output_path=None, query=None, llm_service=llm_service)
+            return await processor(file, output_path=None, query=None, llm_service=llm_service, input_data=input_data)
         if file_type.lower() in ['gsheet', 'office_sheet']:
             return await processor(file, sheet_name)
         return processor(file)
@@ -440,12 +441,15 @@ async def preprocess_files(
     num_images_processed: int = 0
 ) -> Tuple[List[FileDataInfo], int]:
     """Helper function to preprocess files and web URLs"""
+    
+    
     preprocessor = FilePreprocessor(
         num_images_processed=num_images_processed,
         llm_service=llm_service,
         supabase=supabase,
         user_id=user_id
     )
+    
     processed_data = []
     
     # Process web URLs if provided
@@ -475,9 +479,24 @@ async def preprocess_files(
             logging.error(f"Error processing URL {input_url.url}: {error_msg}")
             raise Exception(f"Error processing URL {input_url.url}: {error_msg}")
     
+    
+    # Sort files_metadata to process CSV and XLSX files first
+    if files and files_metadata:
+        priority_types = {
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'text/csv'
+        }
+        
+        # Sort metadata while preserving original indices
+        sorted_metadata = sorted(
+            files_metadata,
+            key=lambda x: (x.type not in priority_types, x.index)
+        )
+    
+    
     # Process uploaded files using metadata
     if files and files_metadata:
-        for metadata in files_metadata:
+        for metadata in sorted_metadata:
             try:
                 await check_client_connection(request)
                 file = files[metadata.index]
@@ -512,7 +531,7 @@ async def preprocess_files(
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
                     file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = await preprocessor.preprocess_file(file_obj, file_type, sheet_name=None, llm_service=llm_service)
+                    content = await preprocessor.preprocess_file(file_obj, file_type, sheet_name=None, llm_service=llm_service, processed_data=processed_data)
 
                 
                 # Handle different return types

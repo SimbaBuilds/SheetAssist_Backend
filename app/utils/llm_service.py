@@ -8,6 +8,7 @@ from app.schemas import SandboxResult, FileDataInfo
 import json
 from app.utils.vision_processing import OpenaiVisionProcessor, AnthropicVisionProcessor
 from app.utils.system_prompts import gen_from_query_prompt, gen_from_error_prompt, gen_from_analysis_prompt, analyze_sandbox_prompt, sentiment_analysis_prompt, file_namer_prompt
+import httpx
 
 class LLMService:
     def __init__(self):
@@ -66,7 +67,27 @@ class LLMService:
             # Try OpenAI first
             result = await self._execute_openai(operation, *args, **kwargs)
             return "openai", result
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            # Specifically handle connection errors
+            logging.error(f"OpenAI connection error: {str(e)}")
+            try:
+                # Fallback to Anthropic
+                result = await self._execute_anthropic(operation, *args, **kwargs)
+                return "anthropic", result
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e2:
+                # Both providers failed with connection errors
+                raise HTTPException(
+                    status_code=503,  # Service Unavailable
+                    detail="Unable to connect to AI providers"
+                )
+            except Exception as e2:
+                # Other Anthropic errors
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Both providers failed. OpenAI: Connection Error, Anthropic: {str(e2)}"
+                )
         except Exception as e:
+            # Handle other OpenAI errors
             logging.warning(f"OpenAI failed: {str(e)}. Falling back to Anthropic.")
             try:
                 # Fallback to Anthropic
@@ -124,25 +145,25 @@ class LLMService:
             raise ValueError("Empty response from API")
         return response.content[0].text
 
-    async def _openai_process_image_with_vision(self, image_path: str, query: str) -> Dict[str, str]:
+    async def _openai_process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
         """Process image using OpenAI's vision API"""
         processor = OpenaiVisionProcessor()
-        return processor.process_image_with_vision(image_path, query)
+        return processor.process_image_with_vision(image_path, query, input_data)
 
-    async def _anthropic_process_image_with_vision(self, image_path: str, query: str) -> Dict[str, str]:
+    async def _anthropic_process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor()
-        return processor.process_image_with_vision(image_path, query)
+        return processor.process_image_with_vision(image_path, query, input_data)
 
-    async def _openai_process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
+    async def _openai_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
         """Process image using OpenAI's vision API"""
         processor = OpenaiVisionProcessor()
-        return processor.process_pdf_with_vision(pdf_path, query)
+        return processor.process_pdf_with_vision(pdf_path, query, input_data)
 
-    async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str) -> Dict[str, str]:
+    async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor()
-        return processor.process_pdf_with_vision(pdf_path, query)
+        return processor.process_pdf_with_vision(pdf_path, query, input_data)
 
     
     

@@ -181,15 +181,27 @@ class MicrosoftIntegration:
 
     async def append_to_current_office_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Append data to Office Excel Online workbook on the specified sheet"""
+        logging.info(f"Starting append to Office Excel sheet: {sheet_name}")
         try:
             # Get drive ID and workbook ID
             drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
-            
             headers = await self._get_microsoft_headers()
-            values = self._format_data_for_excel(data)
             
-            # Get all worksheets
+            # Convert input data to DataFrame if it isn't already
+            logging.info("Converting input data to DataFrame")
+            if not isinstance(data, pd.DataFrame):
+                if isinstance(data, dict):
+                    logging.debug("Converting dict to DataFrame")
+                    data = pd.DataFrame([data])
+                elif isinstance(data, list):
+                    logging.debug("Converting list to DataFrame")
+                    data = pd.DataFrame(data)
+                else:
+                    logging.debug("Converting single value to DataFrame")
+                    data = pd.DataFrame([data])
+            
             async with aiohttp.ClientSession() as session:
+                # Get the specified worksheet
                 async with session.get(
                     f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
                     headers=headers
@@ -215,7 +227,7 @@ class MicrosoftIntegration:
                             detail=f"Worksheet '{sheet_name}' not found"
                         )
                 
-                # Get the used range to find next empty row
+                # Get the used range to find existing row count
                 async with session.get(
                     f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
                     headers=headers
@@ -227,9 +239,36 @@ class MicrosoftIntegration:
                             detail=f"Failed to get used range: {error_data.get('error', {}).get('message', 'Unknown error')}"
                         )
                     used_range = await response.json()
-                    next_row = used_range['rowCount'] + 1
+                    raw_values = used_range.get('values', [])
+                    existing_row_count = len(raw_values)
+                    logging.info(f"Existing row count: {existing_row_count}")
+                    print(f"\nExisting row count: {existing_row_count}")
+                    print(f"Total rows in data: {len(data)}")
                 
-                # Write data to worksheet
+                    # Reset the index before slicing to avoid duplicate index issues
+                    data = data.reset_index(drop=True)
+                    
+                    # Get only the new rows (rows beyond existing count)
+                    print(f"Slicing data from index {existing_row_count-1} onwards")
+                    new_rows = data.iloc[existing_row_count-1:]
+                    logging.info(f"New rows to append: {len(new_rows)}")
+                    print(f"New rows to append: {len(new_rows)}")
+                    print(f"First row of new data: {new_rows.iloc[0].to_dict() if len(new_rows) > 0 else 'No new rows'}\n")
+                
+                if len(new_rows) == 0:
+                    logging.info("No new rows to append, returning")
+                    return True
+                
+                # Format the new data for Excel - but skip the header row
+                formatted_data = self._format_data_for_excel(new_rows)
+                values = formatted_data[1:]  # Skip the header row
+                
+                if len(values) == 0:
+                    logging.info("No new rows to append, returning")
+                    return True
+                
+                # Write new data to worksheet
+                next_row = existing_row_count + 1
                 range_address = f"A{next_row}:${chr(65 + len(values[0]) - 1)}${next_row + len(values) - 1}"
                 request_body = {
                     'values': values
