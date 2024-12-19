@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 class OutputPreferences(BaseModel):
     type: str  # 'download' or 'online' - no longer Optional
-    destination_url: Optional[str] = None
+    destination_sheet: Optional[str] = None
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
     modify_existing: Optional[bool] = None
     sheet_name: Optional[str] = None

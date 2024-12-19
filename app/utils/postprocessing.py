@@ -241,13 +241,13 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         g_integration = GoogleIntegration(supabase, user_id)
         msft_integration = MicrosoftIntegration(supabase, user_id)
 
-        url_lower = request.output_preferences.destination_url.lower()
+        url_lower = request.output_preferences.destination_sheet.lower()
         
         if "docs.google.com" in url_lower:
             if request.output_preferences.modify_existing:
                 return await g_integration.append_to_current_google_sheet(
                     data, 
-                    request.output_preferences.destination_url,
+                    request.output_preferences.destination_sheet,
                     request.output_preferences.sheet_name
                 )
             else:
@@ -258,7 +258,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
                 )
                 return await g_integration.append_to_new_google_sheet(
                     data, 
-                    request.output_preferences.destination_url, 
+                    request.output_preferences.destination_sheet, 
                     suggested_name
                 )
         
@@ -266,7 +266,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
             if request.output_preferences.modify_existing:
                 return await msft_integration.append_to_current_office_sheet(
                     data, 
-                    request.output_preferences.destination_url, 
+                    request.output_preferences.destination_sheet, 
                     request.output_preferences.sheet_name
                 )
             else:
@@ -277,11 +277,11 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
                 )
                 return await msft_integration.append_to_new_office_sheet(
                     data, 
-                    request.output_preferences.destination_url, 
+                    request.output_preferences.destination_sheet, 
                     suggested_name
                 )
     
-        raise ValueError(f"Unsupported destination URL type: {request.output_preferences.destination_url}")
+        raise ValueError(f"Unsupported destination sheet type: {request.output_preferences.destination_sheet}")
     
     except Exception as e:
         logging.error(f"Failed to upload to destination: {str(e)}")

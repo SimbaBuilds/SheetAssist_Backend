@@ -135,10 +135,10 @@ async def process_query_endpoint(
             )
 
         elif request_data.output_preferences.type == "online":
-            if not request_data.output_preferences.destination_url:
-                raise ValueError("destination_url is required for online type")
+            if not request_data.output_preferences.destination_sheet:
+                raise ValueError("destination_sheet is required for online type")
                 
-            # Handle destination URL upload
+            # Handle destination sheet upload
             await handle_destination_upload(
                 result.return_value,
                 request_data,
