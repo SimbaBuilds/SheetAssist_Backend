@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')  # Set backend globally
+
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
 from app.utils.data_processing import get_data_snapshot
@@ -8,7 +11,8 @@ import logging
 import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple, Any, Union
 from io import BytesIO
-
+from fastapi import Request
+from app.utils.check_connection import check_client_connection
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,8 @@ async def generate_visualization(
     color_palette: str,
     custom_instructions: Optional[str],
     sandbox: EnhancedPythonInterpreter,
-    llm_service: LLMService
+    llm_service: LLMService,
+    request: Request
 ) -> BytesIO:
     """Generate visualization using the sandbox environment."""
     
@@ -38,15 +43,18 @@ async def generate_visualization(
         # Get data snapshot for LLM context
         data_snapshot = get_data_snapshot(data[0].content, "DataFrame")
         
-        # Set matplotlib backend to Agg for non-interactive plotting
-        namespace['plt'].switch_backend('Agg')
+        # Add debug logging to check plt object
+        logger.debug("Matplotlib backend: %s", matplotlib.get_backend())
+        logger.debug("PLT type in namespace: %s", type(namespace['plt']))
         
+        past_errors = ['None']
         # Generate visualization code
         provider, suggested_code = await llm_service.execute_with_fallback(
             "gen_visualization",
             data_snapshot=data_snapshot,
             color_palette=color_palette,
-            custom_instructions=custom_instructions
+            custom_instructions=custom_instructions,
+            past_errors=past_errors
         )
         
         # Clean and prepare the code
@@ -59,10 +67,33 @@ async def generate_visualization(
             code=cleaned_code,
             namespace=namespace
         )
-        
-        if result.error:
-            logger.error("Error executing visualization code: %s", result.error)
-            raise ValueError(f"Failed to create visualization: {result.error}")
+        error_attempts = 0
+        while result.error:
+            await check_client_connection(request)
+            error_attempts += 1
+            print(f"Error analysis {error_attempts}:")
+            print(f"Error: {result.error}")
+            past_errors.append(result.error)
+            if error_attempts > 6:
+                raise ValueError("Failed to generate visualization after 6 attempts")
+            provider, suggested_code = await llm_service.execute_with_fallback(
+                "gen_visualization",
+                data_snapshot=data_snapshot,
+                color_palette=color_palette,
+                custom_instructions=custom_instructions,
+                past_errors=past_errors
+            )
+            cleaned_code = extract_code(suggested_code)
+            logger.info("Generated visualization code:\n%s", cleaned_code)
+            
+            # Execute the visualization code
+            result = sandbox.execute_code(
+                original_query="Generate visualization",
+                code=cleaned_code,
+                namespace=namespace
+            )
+
+            
         
         # Verify that a plot exists
         if not namespace['plt'].get_fignums():

@@ -6,7 +6,7 @@ from anthropic import Anthropic
 import logging
 from app.schemas import SandboxResult, FileDataInfo
 import json
-from app.utils.system_prompts import gen_from_query_prompt, gen_from_error_prompt, gen_from_analysis_prompt, analyze_sandbox_prompt, sentiment_analysis_prompt, file_namer_prompt
+from app.utils.system_prompts import gen_from_query_prompt, gen_from_error_prompt, gen_from_analysis_prompt, analyze_sandbox_prompt, sentiment_analysis_prompt, file_namer_prompt, gen_visualization_prompt
 import httpx
 from PIL import Image
 import io
@@ -454,6 +454,7 @@ class LLMService:
         self._analyze_sandbox_prompt = analyze_sandbox_prompt
         self._sentiment_analysis_prompt = sentiment_analysis_prompt
         self._file_namer_prompt = file_namer_prompt
+        self._gen_visualization_prompt = gen_visualization_prompt
 
 
     async def execute_with_fallback(self, operation: str, *args, **kwargs) -> Tuple[str, Any]:
@@ -747,70 +748,33 @@ class LLMService:
         self,
         data_snapshot: str,
         color_palette: str,
-        custom_instructions: Optional[str]
+        custom_instructions: Optional[str],
+        past_errors: List[str]
     ) -> str:
         """Generate visualization code using OpenAI."""
-        system_prompt = """You are a data visualization expert. Generate Python code using matplotlib/seaborn 
-        to create effective visualizations. Follow these requirements:
-        1. You can create one plot or two subplots depending on the data
-        2. Always remove grid lines using axes[].grid(False)
-        3. Use axes[].tick_params(axis='x', rotation=45) for legible x-axis labels
-        4. If creating subplots, use plt.tight_layout()
-        5. Use the provided color palette
-        6. Consider the user's custom instructions if provided
-        7. Return only the Python code within triple backticks
-        8. Do not include import statements
-        9. Assume data is in the 'data' variable
-        10. Use descriptive titles and labels"""
-
-        user_content = f"""Data Snapshot:
-        {data_snapshot}
-        
-        Color Palette: {color_palette}
-        
-        Custom Instructions: {custom_instructions if custom_instructions else 'None provided'}
-        
-        Generate visualization code following the requirements."""
-
+        print(f"Openai called with past errors: {past_errors}")
         return await self._openai_generate_text(
-            system_prompt=system_prompt,
-            user_content=user_content
+            system_prompt=self._gen_visualization_prompt,
+            user_content=self._build_gen_vis_user_content(data_snapshot, color_palette, custom_instructions, past_errors)
         )
 
     async def _anthropic_gen_visualization(
         self,
         data_snapshot: str,
         color_palette: str,
-        custom_instructions: Optional[str]
+        custom_instructions: Optional[str],
+        past_errors: List[str]
     ) -> str:
         """Generate visualization code using Anthropic."""
-        system_prompt = """You are a data visualization expert. Generate Python code using matplotlib/seaborn 
-        to create effective visualizations. Follow these requirements:
-        1. You can create one plot or two subplots depending on the data
-        2. Always remove grid lines using axes[].grid(False)
-        3. Use axes[].tick_params(axis='x', rotation=45) for legible x-axis labels
-        4. If creating subplots, use plt.tight_layout()
-        5. Use the provided color palette
-        6. Consider the user's custom instructions if provided
-        7. Return only the Python code within triple backticks
-        8. Do not include import statements
-        9. Assume data is in the 'data' variable
-        10. Use descriptive titles and labels"""
 
-        user_content = f"""Data Snapshot:
-        {data_snapshot}
-        
-        Color Palette: {color_palette}
-        
-        Custom Instructions: {custom_instructions if custom_instructions else 'None provided'}
-        
-        Generate visualization code following the requirements."""
 
         return await self._anthropic_generate_text(
-            system_prompt=system_prompt,
-            user_content=user_content
+            system_prompt=self._gen_visualization_prompt,
+            user_content=self._build_gen_vis_user_content(data_snapshot, color_palette, custom_instructions, past_errors)
         )
 
+    
+    
     def _build_data_description(self, data: List[FileDataInfo]) -> str:
         if not data:
             return ""
@@ -832,10 +796,30 @@ class LLMService:
             old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"
         return old_data_snapshot
 
+   
+    def _build_gen_vis_user_content(self, data_snapshot: str, color_palette: str, custom_instructions: Optional[str], past_errors: List[str]) -> str:
+        return f"""Data Snapshot:
+        {data_snapshot}
+        
+        Incorporate these colors into your visualization: {color_palette}
+        
+        Custom Instructions: {custom_instructions if custom_instructions else 'None provided'}
+        
+        Generate visualization code following the requirements.
+        
+        Past Errors(please don't repeat any of these errors in your code): {past_errors}
+        """
+
+   
+   
     def _clean_filename(self, filename: str) -> str:
         """Clean and standardize filename"""
         filename = filename.strip().lower()
         return "".join(c for c in filename if c.isalnum() or c in ['_', '-'])
+
+
+
+
 
 @lru_cache()
 def get_llm_service() -> LLMService:

@@ -3,7 +3,6 @@ from typing import List, Optional, Annotated
 from pydantic import BaseModel
 from app.utils.sandbox import EnhancedPythonInterpreter
 import json
-import io
 import logging
 from fastapi.responses import Response
 from app.utils.preprocessing import preprocess_files
@@ -14,7 +13,9 @@ from app.utils.check_connection import check_client_connection
 from app.utils.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
 from app.utils.file_management import temp_file_manager
-import matplotlib.pyplot as plt
+from app.schemas import FileMetadata, InputUrl
+import os
+import base64
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -22,13 +23,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-class DataVisualizationRequest(BaseModel):
-    files_metadata: Optional[List[dict]] = None
-    input_urls: Optional[List[str]] = None
+class VisualizationOptions(BaseModel):
     color_palette: str
     custom_instructions: Optional[str] = None
 
-@router.post("/visualize_data")
+class DataVisualizationRequest(BaseModel):
+    files_metadata: Optional[List[FileMetadata]] = None
+    input_urls: Optional[List[InputUrl]] = None
+    options: VisualizationOptions
+
+class VisualizationResponse(BaseModel):
+    status: str = "success"
+    image_file_path: str = None
+    image_data: str = None # base64 encoded image
+    error: Optional[str] = None
+    message: str = "Visualization generated successfully"
+
+@router.post("/visualize_data", response_model=VisualizationResponse)
 async def create_visualization(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user)],
@@ -58,41 +69,61 @@ async def create_visualization(
             files=files,
             files_metadata=request_data.files_metadata,
             input_urls=request_data.input_urls,
-            query=request_data.custom_instructions,
+            query=request_data.options.custom_instructions,
             session_dir=session_dir,
             supabase=supabase,
             user_id=user_id,
             llm_service=llm_service,
             num_images_processed=0
         )
+        await check_client_connection(request)
 
         # Initialize sandbox with increased timeout for visualization
-        sandbox = EnhancedPythonInterpreter(timeout_seconds=120)  # Increased timeout for complex plots
+        sandbox = EnhancedPythonInterpreter(timeout_seconds=120)
 
         # Generate visualization
         buf = await generate_visualization(
             data=preprocessed_data,
-            color_palette=request_data.color_palette,
-            custom_instructions=request_data.custom_instructions,
+            color_palette=request_data.options.color_palette,
+            custom_instructions=request_data.options.custom_instructions,
             sandbox=sandbox,
-            llm_service=llm_service
+            llm_service=llm_service,
+            request=request
         )
+        await check_client_connection(request)
 
-        return Response(
-            content=buf.getvalue(),
-            media_type="image/png",
-            headers={
-                "Content-Disposition": "inline; filename=visualization.png"
-            }
+        # Get the buffer contents and encode as base64
+        image_data = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+        # Save the image to a temporary file and get its URL
+        temp_image_path = os.path.join(session_dir, "visualization.png")
+        with open(temp_image_path, "wb") as f:
+            f.write(buf.getvalue())
+
+        # Generate a download URL for the image
+        image_file_path = f"/download?file_path={temp_image_path}"
+
+        return VisualizationResponse(
+            status="success",
+            image_file_path=image_file_path,
+            image_data=image_data,
+            message="Visualization generated successfully"
         )
 
     except ValueError as e:
         logger.error(f"Visualization error for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return VisualizationResponse(
+            status="error",
+            error=str(e),
+            message="Error generating visualization",
+            image_data=None
+        )
     except Exception as e:
         error_msg = str(e)[:200] if str(e).isascii() else f"Error processing request: {e.__class__.__name__}"
         logger.error(f"Visualization error for user {user_id}: {error_msg}")
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred while creating the visualization."
+        return VisualizationResponse(
+            status="error",
+            error=error_msg,
+            message="An unexpected error occurred while creating the visualization",
+            image_data=None
         )

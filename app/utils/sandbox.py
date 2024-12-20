@@ -45,6 +45,8 @@ class EnhancedPythonInterpreter:
     
     def setup_allowed_packages(self):
         """Initialize allowed packages for the sandbox environment"""
+        import matplotlib.pyplot as plt  # Import pyplot properly
+        
         self.allowed_packages = {
             'pd': __import__('pandas'),
             'np': __import__('numpy'),
@@ -61,9 +63,24 @@ class EnhancedPythonInterpreter:
             're': __import__('re'),      # For regular expressions
             'chardet': __import__('chardet'),  # For character encoding detection
             'tabula': __import__('tabula'),  # For extracting tables from PDFs
-            'plt': __import__('matplotlib.pyplot'),
+            
+            # Core visualization packages
             'matplotlib': __import__('matplotlib'),
-            'seaborn': __import__('seaborn'),  # For enhanced plotting
+            'plt': plt,  # Use the properly imported pyplot
+            'sns': __import__('seaborn'),  # Common alias for seaborn
+            'Figure': __import__('matplotlib.figure'),
+            'Axes': __import__('matplotlib.axes'),
+            'seaborn': __import__('seaborn'),
+            
+            # Matplotlib components
+            'colors': __import__('matplotlib.colors'),  # For color manipulation
+            'cm': __import__('matplotlib.cm'),  # Color maps
+            
+            # Additional plotting utilities
+            'mpl_toolkits': __import__('mpl_toolkits'),  # For 3D plotting
+            'ticker': __import__('matplotlib.ticker'),  # For tick formatting
+            'patches': __import__('matplotlib.patches'),  # For shapes and annotations
+            'dates': __import__('matplotlib.dates'),  # For date formatting
         }
     
     # method to define dangerous builtins
@@ -115,7 +132,11 @@ class EnhancedPythonInterpreter:
                     'ssl', 'certifi', 'urllib3', 'http.client', 'socket',
                     'fitz', 'io', 'StringIO', 're', 'chardet', 'tabula',
                     'matplotlib', 'matplotlib.pyplot', 'seaborn',
-                    'matplotlib.figure', 'matplotlib.axes', 'matplotlib.colors'
+                    'matplotlib.figure', 'matplotlib.axes', 'matplotlib.colors',
+                    'matplotlib.figure.Figure', 'matplotlib.axes.Axes',
+                    'matplotlib.pyplot.subplots', 'matplotlib.gridspec',
+                    'matplotlib.cm', 'mpl_toolkits', 'matplotlib.ticker',
+                    'matplotlib.patches', 'matplotlib.dates'
                 }
 
             def find_spec(self, fullname, path, target=None):
