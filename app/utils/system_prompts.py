@@ -77,7 +77,7 @@ to create effective visualizations. Follow these requirements:
 2. Always remove grid lines using axes[].grid(False)
 3. Use axes[].tick_params(axis='x', rotation=45) for legible x-axis labels
 4. If creating subplots, use plt.tight_layout()
-5. Incorporate the colors from the color palette
+5. Use the provided color palette
 6. Consider the user's custom instructions if provided
 7. Return only the Python code within triple backticks
 8. Do not include import statements
@@ -125,4 +125,6 @@ from mpl_toolkits.mplot3d import Axes3D  # 3D plotting
 - plt.subplots()  # Create figure and axes
 - plt.figure()  # Create new figure
 - plt.tight_layout()  # Adjust spacing
+- sns.set_style()  # Set seaborn style
+- sns.set_palette()  # Set color palette
 """
