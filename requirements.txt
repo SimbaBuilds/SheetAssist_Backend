@@ -180,7 +180,9 @@ markdown-it-py==3.0.0
 markupsafe==3.0.2
     # via jinja2
 matplotlib==3.10.0
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   seaborn
 mdurl==0.1.2
     # via markdown-it-py
 microsoft-kiota-abstractions==1.6.0
@@ -232,6 +234,7 @@ numpy==2.1.2
     #   contourpy
     #   matplotlib
     #   pandas
+    #   seaborn
     #   tabula-py
 oauthlib==3.2.2
     # via requests-oauthlib
@@ -263,6 +266,7 @@ packaging==24.2
 pandas==2.2.3
     # via
     #   -r requirements.in
+    #   seaborn
     #   tabula-py
 pendulum==3.0.0
     # via
@@ -316,7 +320,9 @@ pydantic-settings==2.6.1
 pygments==2.18.0
     # via rich
 pyjwt[crypto]==2.9.0
-    # via msal
+    # via
+    #   msal
+    #   pyjwt
 pymupdf==1.24.13
     # via -r requirements.in
 pyparsing==3.2.0
@@ -369,6 +375,8 @@ rich==13.9.4
     # via typer
 rsa==4.9
     # via google-auth
+seaborn==0.13.2
+    # via -r requirements.in
 shellingham==1.5.4
     # via typer
 six==1.16.0

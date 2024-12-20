@@ -30,3 +30,4 @@ aiofiles>=23.1.0
 anthropic
 pytest
 matplotlib
+seaborn

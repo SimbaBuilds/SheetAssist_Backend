@@ -48,11 +48,14 @@ async def process_query_endpoint(
     truncated_result = None
     num_images_processed = 0
 
-    
+
+
     try:
         request_data = QueryRequest(**json.loads(json_data))
+        logger.info( f"sheet: {request_data.output_preferences.destination_url}")
+        logger.info( f"sheet: {request_data.output_preferences.sheet_name}")
+
         logger.info(f"Processing query for user {user_id} with {len(request_data.files_metadata or [])} files")
-        
         # Initial connection check
         await check_client_connection(request)
 
@@ -135,8 +138,8 @@ async def process_query_endpoint(
             )
 
         elif request_data.output_preferences.type == "online":
-            if not request_data.output_preferences.destination_sheet:
-                raise ValueError("destination_sheet is required for online type")
+            if not request_data.output_preferences.destination_url:
+                raise ValueError("destination_url is required for online type")
                 
             # Handle destination sheet upload
             await handle_destination_upload(

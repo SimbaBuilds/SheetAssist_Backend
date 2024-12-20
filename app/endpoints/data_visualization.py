@@ -43,6 +43,7 @@ async def create_visualization(
     try:
         # Parse request data
         request_data = DataVisualizationRequest(**json.loads(json_data))
+        logger.info(f"Request data: {request_data}")
         logger.info(f"Processing visualization for user {user_id}")
         
         # Initial connection check
