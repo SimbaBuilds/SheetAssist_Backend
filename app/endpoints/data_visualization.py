@@ -34,8 +34,8 @@ class DataVisualizationRequest(BaseModel):
 
 class VisualizationResponse(BaseModel):
     status: str = "success"
-    image_file_path: str = None
     image_data: str = None # base64 encoded image
+    generated_image_name: str = None
     error: Optional[str] = None
     message: str = "Visualization generated successfully"
 
@@ -95,18 +95,23 @@ async def create_visualization(
         # Get the buffer contents and encode as base64
         image_data = base64.b64encode(buf.getvalue()).decode('utf-8')
 
-        # Save the image to a temporary file and get its URL
-        temp_image_path = os.path.join(session_dir, "visualization.png")
+        # Generate a relevant filename using the LLM service
+        generated_image_name = await llm_service.execute_with_fallback(
+            "file_namer",
+            request_data.options.custom_instructions or "visualization",
+            preprocessed_data
+        )
+        generated_image_name = f"{generated_image_name[1]}.png"  # Add .png extension to the generated name
+
+        # Save the image to a temporary file
+        temp_image_path = os.path.join(session_dir, generated_image_name)
         with open(temp_image_path, "wb") as f:
             f.write(buf.getvalue())
 
-        # Generate a download URL for the image
-        image_file_path = f"/download?file_path={temp_image_path}"
-
         return VisualizationResponse(
             status="success",
-            image_file_path=image_file_path,
             image_data=image_data,
+            generated_image_name=generated_image_name,
             message="Visualization generated successfully"
         )
 

@@ -32,6 +32,12 @@ async def generate_visualization(
         # Create execution namespace
         namespace = dict(sandbox.base_namespace)
         
+        # # Configure matplotlib in the namespace
+        # namespace['plt'].use('Agg')  # Ensure Agg backend in namespace
+        
+        # # Disable interactive mode
+        # namespace['plt'].ioff()
+        
         # Add data to namespace
         for idx, file_data in enumerate(data):
             var_name = f'data_{idx}' if idx > 0 else 'data'

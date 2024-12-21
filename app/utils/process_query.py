@@ -19,11 +19,13 @@ def extract_code(suggested_code: str) -> str:
     # Remove language identifier if present
     if extracted_code.startswith('python'):
         extracted_code = extracted_code[6:].strip()
-
-    # Remove import statements
+    
+    # Remove import statements and plt.show()
     cleaned_code = '\n'.join(
         line for line in extracted_code.split('\n')
-        if not line.strip().startswith('import') and not line.strip().startswith('from')
+        if not line.strip().startswith('import') and 
+        not line.strip().startswith('from') and
+        not line.strip() == 'plt.show()'
     )
     return cleaned_code
 

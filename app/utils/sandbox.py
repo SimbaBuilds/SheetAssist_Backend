@@ -6,6 +6,7 @@ import contextlib
 from typing import Optional
 from app.schemas import SandboxResult
 import ast
+import matplotlib
 
 
 
@@ -45,7 +46,9 @@ class EnhancedPythonInterpreter:
     
     def setup_allowed_packages(self):
         """Initialize allowed packages for the sandbox environment"""
-        import matplotlib.pyplot as plt  # Import pyplot properly
+        matplotlib.use('Agg')  # Set non-interactive backend
+        import matplotlib.pyplot as plt
+        plt.ioff()  # Disable interactive mode
         
         self.allowed_packages = {
             'pd': __import__('pandas'),
@@ -65,7 +68,7 @@ class EnhancedPythonInterpreter:
             'tabula': __import__('tabula'),  # For extracting tables from PDFs
             
             # Core visualization packages
-            'matplotlib': __import__('matplotlib'),
+            'matplotlib': matplotlib,
             'plt': plt,  # Use the properly imported pyplot
             'sns': __import__('seaborn'),  # Common alias for seaborn
             'Figure': __import__('matplotlib.figure'),

@@ -76,13 +76,12 @@ to create effective visualizations. Follow these requirements:
 1. You can create one plot or two subplots depending on the data
 2. Always remove grid lines using axes[].grid(False)
 3. Use axes[].tick_params(axis='x', rotation=45) for legible x-axis labels
-4. If creating subplots, use plt.tight_layout()
-5. Use the provided color palette
-6. Consider the user's custom instructions if provided
-7. Return only the Python code within triple backticks
-8. Do not include import statements
-9. Assume data is in the 'data' variable
-10. Use descriptive titles and labels
+4. Use the provided color palette.  Make sure to define a hue.  Passing a palette without a hue is deprecated.
+5. Consider the user's custom instructions if provided
+6. Return only the Python code within triple backticks
+7. Do not include import statements
+8. Assume data is in the 'data' variable
+9. Use descriptive titles and labels
 
 Below are your available imports, types, and tools:
 # Core Data & Visualization
@@ -124,7 +123,11 @@ from mpl_toolkits.mplot3d import Axes3D  # 3D plotting
 # Layout and Styling:
 - plt.subplots()  # Create figure and axes
 - plt.figure()  # Create new figure
-- plt.tight_layout()  # Adjust spacing
 - sns.set_style()  # Set seaborn style
 - sns.set_palette()  # Set color palette
+
+#Deprecated functions:
+- passing a palette without a hue is deprecated -- always pass a hue (e.g. sns.lineplot(ax=axes[1], data=data, x='date', y='amount', hue='status', errorbar=None, marker='o'))
+- the ci parameter in seaborn is deprecated.  Do not pass ci = None.  Instead, use errorbar=None if necessary.
+
 """
