@@ -9,7 +9,8 @@ import os
 import json
 from fastapi import Request
 from app.utils.check_connection import check_client_connection
-# method to clean code -- removes language identifier and import statements
+
+
 def extract_code(suggested_code: str) -> str:
     # Extract code enclosed in triple backticks
     code_start = suggested_code.find('```') + 3
