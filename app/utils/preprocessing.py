@@ -387,6 +387,7 @@ class FilePreprocessor:
                 except:
                     pass
 
+    #Class method to FilePreprocessor -- adds UNNECCESARY step between main processor method below and FilePreprocessor class -- refactor and remove if too confusing
     async def preprocess_file(self, file: Union[BinaryIO, str], query: str, file_type: str, sheet_name: str = None, llm_service = None, processed_data: List[FileDataInfo] = None) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
