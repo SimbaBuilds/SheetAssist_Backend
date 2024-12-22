@@ -724,10 +724,15 @@ class LLMService:
                     Query: {query}
                     Available Data: {data_description}"""
         
-        response = await self._openai_generate_text(
-            system_prompt=self._file_namer_prompt,
-            user_content=user_content
-        )
+        # Updated to use gpt-4o-mini-2024-07-18
+        response = self.openai_client.chat.completions.create(
+            model="gpt-4o-mini-2024-07-18",
+            messages=[
+                {"role": "system", "content": self._file_namer_prompt},
+                {"role": "user", "content": user_content}
+            ]
+        ).choices[0].message.content
+        
         return self._clean_filename(response)
 
     async def _anthropic_file_namer(self, query: str, data: List[FileDataInfo]) -> str:
@@ -738,10 +743,25 @@ class LLMService:
                     Query: {query}
                     Available Data: {data_description}"""
         
-        response = await self._anthropic_generate_text(
-            system_prompt=self._file_namer_prompt,
-            user_content=user_content
-        )
+        # Updated to use claude-3-5-haiku-20241022
+        response = self.anthropic_client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=5000,
+            temperature=0,
+            system=self._file_namer_prompt,
+            messages=[
+                {
+                    "role": "user", 
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_content
+                        }
+                    ]
+                }
+            ]
+        ).content[0].text
+        
         return self._clean_filename(response)
 
     async def _openai_gen_visualization(
