@@ -15,7 +15,7 @@ user_content = "What is the capital of France?"
 def openai_generate_text(system_prompt: str, user_content: str) -> str:
     """Generate text using OpenAI with system and user prompts"""
     response = openai_client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt4o-2024-08-06",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}

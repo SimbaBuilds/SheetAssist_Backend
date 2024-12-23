@@ -316,3 +316,60 @@ async def handle_download(result: SandboxResult, request: QueryRequest, preproce
         media_type = 'text/csv'
 
     return tmp_path, media_type
+
+async def handle_batch_destination_upload(
+    data: Any,
+    request: QueryRequest,
+    old_data: List[FileDataInfo],
+    supabase: SupabaseClient,
+    user_id: str,
+    llm_service: LLMService,
+    is_first_chunk: bool
+) -> bool:
+    """Handle destination upload for batch processing"""
+    try:
+        g_integration = GoogleIntegration(supabase, user_id)
+        msft_integration = MicrosoftIntegration(supabase, user_id)
+        
+        url_lower = request.output_preferences.destination_url.lower()
+        
+        # For first chunk, we might need to create new sheet or clear existing
+        if is_first_chunk and not request.output_preferences.modify_existing:
+            provider, suggested_name = await llm_service.execute_with_fallback(
+                "file_namer",
+                request.query,
+                old_data
+            )
+            
+            if "docs.google.com" in url_lower:
+                return await g_integration.append_to_new_google_sheet(
+                    data,
+                    request.output_preferences.destination_url,
+                    suggested_name
+                )
+            elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+                return await msft_integration.append_to_new_office_sheet(
+                    data,
+                    request.output_preferences.destination_url,
+                    suggested_name
+                )
+        
+        # For subsequent chunks or when modifying existing, always append
+        if "docs.google.com" in url_lower:
+            return await g_integration.append_to_current_google_sheet(
+                data,
+                request.output_preferences.destination_url,
+                request.output_preferences.sheet_name
+            )
+        elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+            return await msft_integration.append_to_current_office_sheet(
+                data,
+                request.output_preferences.destination_url,
+                request.output_preferences.sheet_name
+            )
+            
+        raise ValueError(f"Unsupported destination sheet type: {request.output_preferences.destination_url}")
+        
+    except Exception as e:
+        logging.error(f"Failed to upload batch to destination: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")

@@ -1,6 +1,6 @@
 import pandas as pd
 import json
-from typing import Union, BinaryIO, Tuple
+from typing import Union, BinaryIO, Tuple, Optional
 from pathlib import Path
 import docx
 import requests
@@ -293,20 +293,28 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    async def process_pdf(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str, bool]:
+    async def process_pdf(
+        self, 
+        file: Union[BinaryIO, str], 
+        output_path: str = None, 
+        query: str = None, 
+        llm_service = None, 
+        input_data: List[FileDataInfo] = None,
+        page_range: Optional[tuple[int, int]] = None  # Add page_range parameter
+    ) -> Tuple[str, str, bool]:
         """
         Process PDF files and convert to string if readable, otherwise handle with vision
         
         Args:
             file: File object or path to PDF file
+            output_path: Optional path to save processed file
             query: Optional query for vision processing
             llm_service: LLM service instance for vision processing
+            input_data: Optional list of previously processed data
+            page_range: Optional tuple of (start_page, end_page) for batch processing
             
         Returns:
             Tuple[str, str, bool]: (content, data_type, is_image-like)
-            - content: Extracted text or vision API result
-            - data_type: "text" or "vision_extracted"
-            - is_image-like: Whether the PDF was machine-readable
         """
         doc = None
         temp_path = None
@@ -337,7 +345,11 @@ class FilePreprocessor:
             total_text_length = 0
             page_count = len(doc)
             
-            for page_num in range(page_count):
+            # Determine which pages to process
+            start_page = page_range[0] if page_range else 0
+            end_page = min(page_range[1], page_count) if page_range else page_count
+            
+            for page_num in range(start_page, end_page):
                 page = doc[page_num]
                 page_text = page.get_text()
                 total_text_length += len(page_text.strip())
@@ -349,23 +361,21 @@ class FilePreprocessor:
             if not is_image_like_pdf:
                 return text_content, "text", False
             
-            # # Handle unreadable PDFs
-            # if page_count > 5:
-            #     raise ValueError("Unreadable PDF with more than 5 pages")
-                
-            # For small unreadable PDFs, process with vision
+            # For unreadable PDFs, process with vision
+            # Note: Vision processing should also respect page_range
             provider, vision_result = await llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
                 pdf_path=pdf_path,
                 query=query,
-                input_data=input_data
+                input_data=input_data,
+                page_range=page_range  # Pass page_range to vision processing
             )
 
             if isinstance(vision_result, dict) and vision_result.get("status") == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
-            # Increment the image counter for each page in unreadable PDF
-            self.num_images_processed += page_count
+            # Increment the image counter only for processed pages
+            self.num_images_processed += (end_page - start_page)
 
             content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
             return content, "vision_extracted", True
@@ -388,7 +398,16 @@ class FilePreprocessor:
                     pass
 
     #Class method to FilePreprocessor -- adds UNNECCESARY step between main processor method below and FilePreprocessor class -- refactor and remove if too confusing
-    async def preprocess_file(self, file: Union[BinaryIO, str], query: str, file_type: str, sheet_name: str = None, llm_service = None, processed_data: List[FileDataInfo] = None) -> Union[str, pd.DataFrame]:
+    async def preprocess_file(
+        self, 
+        file: Union[BinaryIO, str], 
+        query: str, 
+        file_type: str, 
+        sheet_name: str = None, 
+        llm_service = None, 
+        processed_data: List[FileDataInfo] = None,
+        page_range: Optional[tuple[int, int]] = None  # Add page_range parameter
+    ) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
         """
@@ -408,9 +427,19 @@ class FilePreprocessor:
         processor = processors.get(file_type.lower())
         if not processor:
             raise ValueError(f"Unsupported file type: {file_type}")
+        
         input_data = processed_data
         # Handle async processors
-        if file_type.lower() in ['png', 'jpg', 'jpeg', 'pdf']:
+        if file_type.lower() == 'pdf':
+            return await processor(
+                file, 
+                output_path=None, 
+                query=query, 
+                llm_service=llm_service, 
+                input_data=input_data,
+                page_range=page_range
+            )
+        if file_type.lower() in ['png', 'jpg', 'jpeg']:
             return await processor(file, output_path=None, query=query, llm_service=llm_service, input_data=input_data)
         if file_type.lower() in ['gsheet', 'office_sheet']:
             return await processor(file, sheet_name)
@@ -439,9 +468,13 @@ async def preprocess_files(
     supabase: SupabaseClient,
     user_id: str,
     llm_service: LLMService,
-    num_images_processed: int = 0
+    num_images_processed: int = 0,
+    page_range: Optional[tuple[int, int]] = None
 ) -> Tuple[List[FileDataInfo], int]:
-    """Helper function to preprocess files and web URLs"""
+    """
+    Preprocesses files and URLs, extracting their content for query processing.
+    For batch processing, page_range specifies which pages to process.
+    """
     
     
     preprocessor = FilePreprocessor(
@@ -531,8 +564,16 @@ async def preprocess_files(
 
                 # Process the file
                 with io.BytesIO(file.file.read()) as file_obj:
-                    file_obj.seek(0)  # Reset the file pointer to the beginning
-                    content = await preprocessor.preprocess_file(file_obj, query, file_type, sheet_name=None, llm_service=llm_service, processed_data=processed_data)
+                    file_obj.seek(0)
+                    content = await preprocessor.preprocess_file(
+                        file_obj, 
+                        query, 
+                        file_type, 
+                        sheet_name=None, 
+                        llm_service=llm_service, 
+                        processed_data=processed_data,
+                        page_range=page_range  # Pass page_range to preprocess_file
+                    )
 
                 
                 # Handle different return types

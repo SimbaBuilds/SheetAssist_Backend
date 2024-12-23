@@ -1,5 +1,6 @@
 from typing import Any, List, Optional
 from pydantic import BaseModel
+from datetime import datetime
 
 
 class OutputPreferences(BaseModel):
@@ -19,7 +20,19 @@ class FileMetadata(BaseModel):
     extension: str
     size: int
     index: int
+    file_id: Optional[str] = None  # Needed for batch processing file identification
+    page_count: Optional[int] = None  # Number of pages in document
+
+
+class BatchProcessingFileInfo(BaseModel):
+    """Information about a file during processing"""
+    file_id: str
+    page_range: tuple[int, int]
+    metadata: FileMetadata
     
+    class Config:
+        arbitrary_types_allowed = True  # For tuple type
+
 
 class InputUrl(BaseModel):
     url: str
@@ -81,14 +94,34 @@ class FileInfo(BaseModel):
 
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
-    result: TruncatedSandboxResult
-    status: str  # "success" or "error"
+    result: Optional[TruncatedSandboxResult]
+    status: str  # "success", "error", or "processing"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files
     num_images_processed: int = 0
+    job_id: Optional[str] = None  # Added for batch processing
 
     class Config:
         """docstring"""
         arbitrary_types_allowed = True
+
+# batch_jobs table
+class BatchJob(BaseModel):
+    job_id: str
+    user_id: str
+    status: str  # "created", "processing", "completed", "error"
+    total_pages: int
+    processed_pages: int
+    output_preferences: OutputPreferences
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    result_snapshot: Optional[dict] = None
+    result_file_path: Optional[str] = None
+    result_media_type: Optional[str] = None
+    page_chunks: Optional[List[dict]] = None  # Added for chunk tracking
+    current_chunk: Optional[int] = None       # Added for chunk tracking
+    query: Optional[str] = None               # Added to store original query
 
 

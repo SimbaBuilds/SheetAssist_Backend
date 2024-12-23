@@ -84,7 +84,7 @@ class OpenaiVisionProcessor  :
             input_data_snapshot = build_input_data_snapshot(input_data)
             
             completion = self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt4o-2024-08-06",
                 messages=[
                     {
                         "role": "user",
@@ -132,17 +132,14 @@ class OpenaiVisionProcessor  :
                 "error": str(e)
             }
 
-    def process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
-
-        """Process PDF with GPT-4o Vision API by converting pages to images
-        
-        Args:
-            pdf_path: Path to the PDF file
-            query: User query for information extraction
-            
-        Returns:
-            Dict[str, str]: Processing result with status and content
-        """
+    def process_pdf_with_vision(
+        self, 
+        pdf_path: str, 
+        query: str, 
+        input_data: List[FileDataInfo],
+        page_range: Optional[tuple[int, int]] = None
+    ) -> Dict[str, str]:
+        """Process PDF with GPT-4o Vision API by converting pages to images"""
         try:
             # Check if PDF exists
             if not os.path.exists(pdf_path):
@@ -153,13 +150,16 @@ class OpenaiVisionProcessor  :
             
             input_data_snapshot = build_input_data_snapshot(input_data)
             
-            # Process each page
-            for page_num in range(len(doc)):
-                # Convert page to base64
+            # Determine page range
+            start_page = page_range[0] if page_range else 0
+            end_page = min(page_range[1], len(doc)) if page_range else len(doc)
+            
+            # Process only pages in range
+            for page_num in range(start_page, end_page):
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
                 
                 completion = self.client.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt4o-2024-08-06",
                     messages=[
                         {
                             "role": "user",
@@ -191,9 +191,8 @@ class OpenaiVisionProcessor  :
                 )
                 print(f"\n -------LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
                 page_content = completion.choices[0].message.content
-                all_page_content += f"Page {page_num + 1}:\n{page_content}\n\n"
+                all_page_content += f"[Page {page_num + 1}]:\n{page_content}\n\n"
                 time.sleep(0.5)
-
 
             doc.close()
             
@@ -207,7 +206,7 @@ class OpenaiVisionProcessor  :
                 "status": "error",
                 "error": str(e)
             }
-        
+
 
 class AnthropicVisionProcessor  :
     def __init__(self, anthropic_client: Anthropic = None):
@@ -318,18 +317,15 @@ class AnthropicVisionProcessor  :
                 "error": str(e)
             }
 
-    def process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
-        """Process PDF with Claude 3 Vision API by converting pages to images
-        
-        Args:
-            pdf_path: Path to the PDF file
-            query: User query for information extraction
-            
-        Returns:
-            Dict[str, str]: Processing result with status and content
-        """
+    def process_pdf_with_vision(
+        self, 
+        pdf_path: str, 
+        query: str, 
+        input_data: List[FileDataInfo],
+        page_range: Optional[tuple[int, int]] = None
+    ) -> Dict[str, str]:
+        """Process PDF with Claude 3 Vision API by converting pages to images"""
         try:
-            # Check if PDF exists
             if not os.path.exists(pdf_path):
                 raise ValueError(f"PDF file not found at path: {pdf_path}")
                 
@@ -338,9 +334,12 @@ class AnthropicVisionProcessor  :
             
             input_data_snapshot = build_input_data_snapshot(input_data)
             
-            # Process each page
-            for page_num in range(len(doc)):
-                # Convert page to base64
+            # Determine page range
+            start_page = page_range[0] if page_range else 0
+            end_page = min(page_range[1], len(doc)) if page_range else len(doc)
+            
+            # Process only pages in range
+            for page_num in range(start_page, end_page):
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
                 
                 message = self.client.messages.create(
@@ -379,8 +378,7 @@ class AnthropicVisionProcessor  :
                 
                 page_content = message.content[0].text
                 all_page_content.append(f"[Page {page_num + 1}]\n{page_content}")
-            # Add a small delay between pages to avoid rate limiting
-            time.sleep(0.5)
+                time.sleep(0.5)
 
             doc.close()
             
@@ -507,7 +505,7 @@ class LLMService:
     async def _openai_generate_text(self, system_prompt: str, user_content: str) -> str:
         """Generate text using OpenAI with system and user prompts"""
         response = self.openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt4o-2024-08-06",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}

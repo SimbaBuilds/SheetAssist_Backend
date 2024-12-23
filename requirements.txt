@@ -90,6 +90,10 @@ email-validator==2.2.0
 et-xmlfile==2.0.0
     # via openpyxl
 fastapi[all]==0.115.4
+    # via
+    #   -r requirements.in
+    #   fastapi-cache2
+fastapi-cache2==0.2.2
     # via -r requirements.in
 fastapi-cli[standard]==0.0.5
     # via fastapi
@@ -270,6 +274,7 @@ pandas==2.2.3
     #   tabula-py
 pendulum==3.0.0
     # via
+    #   fastapi-cache2
     #   microsoft-kiota-serialization-form
     #   microsoft-kiota-serialization-json
     #   microsoft-kiota-serialization-multipart
@@ -360,6 +365,8 @@ pyyaml==6.0.2
     #   uvicorn
 realtime==2.0.6
     # via supabase
+redis==5.2.1
+    # via -r requirements.in
 reportlab==4.2.5
     # via -r requirements.in
 requests==2.32.3
@@ -415,6 +422,7 @@ typing-extensions==4.12.2
     #   azure-storage-blob
     #   azure-storage-file-share
     #   fastapi
+    #   fastapi-cache2
     #   openai
     #   opentelemetry-sdk
     #   pydantic
@@ -438,6 +446,7 @@ uvicorn[standard]==0.32.0
     # via
     #   -r requirements.in
     #   fastapi
+    #   fastapi-cache2
     #   fastapi-cli
 uvloop==0.21.0
     # via uvicorn

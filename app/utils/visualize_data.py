@@ -5,7 +5,7 @@ from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
 from app.utils.data_processing import get_data_snapshot
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.utils.process_query import extract_code
+from app.utils.process_query_standard import extract_code
 import pandas as pd
 import logging
 import matplotlib.pyplot as plt
