@@ -299,52 +299,42 @@ class FilePreprocessor:
         query: str = None, 
         llm_service = None, 
         input_data: List[FileDataInfo] = None,
-        page_range: Optional[tuple[int, int]] = None  # Add page_range parameter
+        page_range: Optional[tuple[int, int]] = None
     ) -> Tuple[str, str, bool]:
-        """
-        Process PDF files and convert to string if readable, otherwise handle with vision
-        
-        Args:
-            file: File object or path to PDF file
-            output_path: Optional path to save processed file
-            query: Optional query for vision processing
-            llm_service: LLM service instance for vision processing
-            input_data: Optional list of previously processed data
-            page_range: Optional tuple of (start_page, end_page) for batch processing
-            
-        Returns:
-            Tuple[str, str, bool]: (content, data_type, is_image-like)
-        """
+        """Process PDF files and convert to string if readable, otherwise handle with vision"""
         doc = None
         temp_path = None
         try:
             # Create a temporary file if we received a file object
             if not isinstance(file, str):
                 try:
-                    content = file.read()
-                    if not content:
-                        raise ValueError("Empty PDF file")
+                    # Read the entire content at once and store it
+                    if hasattr(file, 'read'):
+                        file.seek(0)  # Reset file position to start
+                        content = file.read()
+                        if not content:
+                            raise ValueError("Empty PDF file")
+                    else:
+                        content = file
+                    
+                    # Create a temporary file with the content
                     temp_path = temp_file_manager.save_temp_file(content, "temp.pdf")
                     pdf_path = str(temp_path)
+                    
                 except Exception as e:
                     logging.error(f"Error reading PDF file: {str(e)}")
                     raise ValueError(f"Failed to read PDF file: {str(e)}")
             else:
                 pdf_path = file
 
-            # Open PDF with PyMuPDF
-            try:
-                doc = fitz.open(pdf_path)
-            except Exception as e:
-                logging.error(f"Error opening PDF with PyMuPDF: {str(e)}")
-                raise ValueError(f"Failed to open PDF: {str(e)}")
+            # Now the file should be properly saved and readable
+            doc = fitz.open(pdf_path)
             
-            # Try to extract text
+            # Rest of the processing remains the same...
             text_content = ""
             total_text_length = 0
             page_count = len(doc)
             
-            # Determine which pages to process
             start_page = page_range[0] if page_range else 0
             end_page = min(page_range[1], page_count) if page_range else page_count
             
@@ -354,26 +344,23 @@ class FilePreprocessor:
                 total_text_length += len(page_text.strip())
                 text_content += f"\n[Page {page_num + 1}]\n{page_text}"
 
-            # Check if PDF is readable (has meaningful text content)
-            is_image_like_pdf = total_text_length < 10  # Arbitrary threshold
+            is_image_like_pdf = total_text_length < 10
 
             if not is_image_like_pdf:
                 return text_content, "text", False
             
             # For unreadable PDFs, process with vision
-            # Note: Vision processing should also respect page_range
             provider, vision_result = await llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
                 pdf_path=pdf_path,
                 query=query,
                 input_data=input_data,
-                page_range=page_range  # Pass page_range to vision processing
+                page_range=page_range
             )
 
             if isinstance(vision_result, dict) and vision_result.get("status") == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
-            # Increment the image counter only for processed pages
             self.num_images_processed += (end_page - start_page)
 
             content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
@@ -384,13 +371,13 @@ class FilePreprocessor:
             raise ValueError(f"Error processing PDF: {str(e)}")
         
         finally:
-            # Ensure we always close the document and clean up temp files
+            # Clean up resources in reverse order
             if doc:
                 try:
                     doc.close()
                 except:
                     pass
-            if temp_path and not isinstance(file, str):
+            if temp_path:
                 try:
                     temp_path.unlink()
                 except:

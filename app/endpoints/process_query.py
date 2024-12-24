@@ -1,17 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response, Depends, Request
-from typing import List, Optional, Any, Union, Annotated
-from pydantic import BaseModel
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request, Response
+from typing import List, Annotated
 from app.utils.process_query_standard import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, SandboxResult
+from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo
 import json
 from app.utils.file_management import temp_file_manager
 import os
 import logging
 from app.schemas import QueryRequest
-from fastapi.responses import FileResponse
-import pandas as pd
-from app.utils.postprocessing import handle_destination_upload, handle_download, handle_batch_destination_upload, handle_batch_chunk_result
+from app.utils.postprocessing import handle_destination_upload, handle_download, handle_batch_chunk_result
 from app.utils.data_processing import get_data_snapshot
 from app.utils.preprocessing import preprocess_files
 from fastapi import BackgroundTasks
@@ -20,6 +17,7 @@ from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
 from app.utils.llm_service import get_llm_service, LLMService
 from app.utils.check_connection import check_client_connection
+from app.schemas import InputUrl
 from datetime import datetime
 import time
 
@@ -79,12 +77,16 @@ def construct_status_response(job: dict) -> QueryResponse:
         )
     
     else:  # processing or created
+        message = job.get("message", "Processing in progress")
+        if not message:
+            message = f"Processing in progress. {job['processed_pages']}/{job['total_pages']} pages processed"
+            
         return QueryResponse(
             result=None,
             status="processing",
-            message=f"Processing in progress. {job['processed_pages']}/{job['total_pages']} pages processed",
+            message=message,
             files=None,
-            num_images_processed=job["processed_pages"]
+            num_images_processed=job['processed_pages']
         )
 
 
@@ -99,22 +101,15 @@ async def determine_pdf_page_count(file: UploadFile) -> int:
     try:
         # Read the file into memory
         contents = await file.read()
-        # Create a new BytesIO object to ensure proper handling
-        pdf_stream = io.BytesIO(contents)
-        pdf = PdfReader(pdf_stream)
+        pdf = PdfReader(io.BytesIO(contents))
         page_count = len(pdf.pages)
         
         # Reset file pointer for future reads
         await file.seek(0)
         
-        # Close the BytesIO stream
-        pdf_stream.close()
-        
         return page_count
     except Exception as e:
         logger.error(f"Error determining PDF page count: {str(e)}")
-        # Make sure to reset the file pointer even if there's an error
-        await file.seek(0)
         return 0
 
 
@@ -134,14 +129,28 @@ async def process_query_entry_endpoint(
     try:
         request_data = QueryRequest(**json.loads(json_data))
         
-        # Update page counts for PDF files
+        # Store file contents in memory before background processing
+        files_data = []
+        for file in files:
+            content = await file.read()
+            await file.seek(0)  # Reset for immediate use if needed
+            files_data.append({
+                'content': content,
+                'filename': file.filename,
+                'content_type': file.content_type
+            })
+        
+        # Update page counts using the original files
         if request_data.files_metadata:
             for file_meta, upload_file in zip(request_data.files_metadata, files):
-                if not file_meta.page_count:  # Only update if page_count is not set
+                if not file_meta.page_count:
                     page_count = await determine_pdf_page_count(upload_file)
                     file_meta.page_count = page_count
-                    # Reset file pointer after reading
                     await upload_file.seek(0)
+
+        #If destination url and no input url, add destination url and sheet name to input urls for processing context
+        if request_data.output_preferences.destination_url and not request_data.input_urls:
+            request_data.input_urls = [InputUrl(url=request_data.output_preferences.destination_url, sheet_name=request_data.output_preferences.sheet_name)]
         
         # Check if any PDF has more than 5 pages
         has_large_pdf = False
@@ -197,6 +206,20 @@ async def process_query_entry_endpoint(
                 "query": request_data.query
             }).execute()
             
+            # Add logging before background task
+            logger.info(f"Before background task - Files state: {[f.file._file.closed for f in files]}")
+            
+            # Create new UploadFile objects for the background task
+            batch_files = []
+            for f in files_data:
+                file_obj = io.BytesIO(f['content'])
+                upload_file = UploadFile(
+                    file=file_obj,
+                    filename=f['filename'],
+                    headers={'content-type': f['content_type']}
+                )
+                batch_files.append(upload_file)
+
             # Start first batch processing in background
             background_tasks.add_task(
                 process_query_batch_endpoint,
@@ -204,8 +227,8 @@ async def process_query_entry_endpoint(
                 user_id=user_id,
                 supabase=supabase,
                 llm_service=llm_service,
-                json_data=json_data,
-                files=files,
+                json_data=request_data,
+                files=batch_files,  # Use the new file objects
                 job_id=job_id
             )
             
@@ -391,21 +414,26 @@ async def process_query_batch_endpoint(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)],
+    json_data: QueryRequest,
     job_id: str,
     llm_service: LLMService = Depends(get_llm_service),
-    json_data: str = Form(...),
     files: List[UploadFile] = File(default=[]),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    
 ) -> QueryResponse:
     """Handles batch processing of large document sets asynchronously."""
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
+        # Add keep-alive headers to response
+        response = Response()
+        response.headers["Connection"] = "keep-alive"
+        response.headers["Keep-Alive"] = "timeout=3600"
+
         request_data = QueryRequest(**json.loads(json_data))
         session_dir = temp_file_manager.get_temp_dir()
         
-        # Remove await for Supabase operations
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).single().execute()
         if not job_response.data:
             raise ValueError("Job not found")
@@ -421,6 +449,25 @@ async def process_query_batch_endpoint(
             
         current_processing_info = BatchProcessingFileInfo(**page_chunks[current_chunk])
         
+        # Update status to show which pages are being processed
+        current_chunk_info = page_chunks[current_chunk]
+        page_range = current_chunk_info['page_range']
+        supabase.table("batch_jobs").update({
+            "status": "processing",
+            "started_at": datetime.utcnow().isoformat(),
+            "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
+        }).eq("job_id", job_id).execute()
+
+        files_data = []
+        for file in files:
+            content = await file.read()
+            await file.seek(0)  # Reset for immediate use if needed
+            files_data.append({
+                'content': content,
+                'filename': file.filename,
+                'content_type': file.content_type
+            })
+
         try:
             # Preprocess and process chunk
             preprocessed_data, num_images_processed = await preprocess_files(
@@ -470,15 +517,33 @@ async def process_query_batch_endpoint(
             # Trigger next chunk if not done
             if current_chunk + 1 < len(page_chunks):
                 logger.info(f"Triggering next chunk: {current_chunk + 1}/{len(page_chunks)}")
+                
+                # Create new UploadFile objects for the next chunk
+                batch_files = []
+                for f in files:
+                    file_obj = io.BytesIO(f['content'])
+                    upload_file = UploadFile(
+                        file=file_obj,
+                        filename=f['filename'],
+                        headers={'content-type': f['content_type']}
+                    )
+                    batch_files.append(upload_file)
+
+                # Update the current_chunk in the database before triggering next chunk
+                supabase.table("batch_jobs").update({
+                    "current_chunk": current_chunk + 1
+                }).eq("job_id", job_id).execute()
+
                 background_tasks.add_task(
                     process_query_batch_endpoint,
                     request=request,
                     user_id=user_id,
                     supabase=supabase,
-                    llm_service=llm_service,
                     json_data=json_data,
-                    files=files,
-                    job_id=job_id
+                    llm_service=llm_service,
+                    files=batch_files,  # Use the new file objects
+                    job_id=job_id,
+                    background_tasks=BackgroundTasks()  # Create new background tasks instance
                 )
 
             return QueryResponse(

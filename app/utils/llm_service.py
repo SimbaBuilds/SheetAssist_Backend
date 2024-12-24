@@ -154,10 +154,14 @@ class OpenaiVisionProcessor  :
             start_page = page_range[0] if page_range else 0
             end_page = min(page_range[1], len(doc)) if page_range else len(doc)
             
-            # Process only pages in range
+            b64_pages = []
             for page_num in range(start_page, end_page):
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
-                
+                b64_pages.append(b64_page)
+            i = 0    
+            # Process only pages in range
+            for b64_page in b64_pages:
+                i += 1
                 completion = self.client.chat.completions.create(
                     model="gpt-4o-2024-08-06",
                     messages=[
@@ -189,9 +193,13 @@ class OpenaiVisionProcessor  :
                     ],
                     max_tokens=2000
                 )
-                print(f"\n -------LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
                 page_content = completion.choices[0].message.content
-                all_page_content += f"[Page {page_num + 1}]:\n{page_content}\n\n"
+                print(f"""\n -------LLM called with query: {query} on page: {i} ------- \n\n
+                Input data snapshot:\n {input_data_snapshot}
+                Page Content:\n {page_content}\n
+                """)
+
+                all_page_content += f"[Page {i}]:\n{page_content}\n\n"
                 time.sleep(0.5)
 
             doc.close()
@@ -338,10 +346,15 @@ class AnthropicVisionProcessor  :
             start_page = page_range[0] if page_range else 0
             end_page = min(page_range[1], len(doc)) if page_range else len(doc)
             
-            # Process only pages in range
+
+            b64_pages = []
             for page_num in range(start_page, end_page):
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
-                
+                b64_pages.append(b64_page)
+            i = 0
+            # Process only pages in range
+            for b64_page in b64_pages:
+                i += 1
                 message = self.client.messages.create(
                     model="claude-3-5-sonnet-20241022",
                     max_tokens=1024,
@@ -377,7 +390,11 @@ class AnthropicVisionProcessor  :
                 )
                 
                 page_content = message.content[0].text
-                all_page_content.append(f"[Page {page_num + 1}]\n{page_content}")
+                print(f"""\n -------LLM called with query: {query} on page: {i} ------- \n\n
+                Input data snapshot:\n {input_data_snapshot}
+                Page Content:\n {page_content}\n
+                """)
+                all_page_content.append(f"[Page {i}]\n{page_content}")
                 time.sleep(0.5)
 
             doc.close()

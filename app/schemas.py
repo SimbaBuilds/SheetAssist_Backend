@@ -123,5 +123,6 @@ class BatchJob(BaseModel):
     page_chunks: Optional[List[dict]] = None  # Added for chunk tracking
     current_chunk: Optional[int] = None       # Added for chunk tracking
     query: Optional[str] = None               # Added to store original query
+    message: Optional[str] = None            # Added to store message
 
 

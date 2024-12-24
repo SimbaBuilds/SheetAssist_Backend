@@ -27,3 +27,6 @@ app.include_router(data_visualization.router)
 if __name__ == "__main__":    
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("app.main:app", host="localhost", port=port, reload=True)
+
+
+#python app/main.py

@@ -532,7 +532,7 @@ async def handle_batch_chunk_result(
                 raise
 
         # Update job status in database
-        await supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+        supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
 
         # Add checkpoint file
         checkpoint_path = os.path.join(session_dir, f"checkpoint_{current_chunk}.json")
@@ -553,7 +553,7 @@ async def handle_batch_chunk_result(
             "error_message": str(e),
             "completed_at": datetime.utcnow().isoformat()
         }
-        await supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
+        supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
         raise
 
 async def combine_chunk_results(session_dir: str, total_chunks: int) -> Any:
