@@ -41,6 +41,7 @@ async def process_query(
     
     # Create execution namespace by extending base namespace
     namespace = dict(sandbox.base_namespace)
+    await check_client_connection(request)
 
     # Handle different data types in namespace
     if data and len(data) > 0:

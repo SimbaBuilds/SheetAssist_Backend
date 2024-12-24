@@ -20,7 +20,6 @@ from app.utils.microsoft_integration import MicrosoftIntegration
 from app.utils.llm_service import LLMService
 from app.utils.auth import SupabaseClient
 from fastapi import Request
-from app.utils.check_connection import check_client_connection
 
 
 
@@ -532,7 +531,6 @@ async def preprocess_files(
     if files and files_metadata:
         for metadata in sorted_metadata:
             try:
-                await check_client_connection(request)
                 file = files[metadata.index]
                 logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
                 

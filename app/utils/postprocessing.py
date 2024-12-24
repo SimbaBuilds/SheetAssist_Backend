@@ -294,13 +294,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
 async def handle_download(result: SandboxResult, request: QueryRequest, preprocessed_data: List[FileDataInfo], llm_service: LLMService) -> Tuple[str, str]:
     # Get the desired output format, defaulting based on data type
     output_format = request.output_preferences.format
-    if not output_format:
-        if isinstance(result.return_value, pd.DataFrame):
-            output_format = 'csv'
-        elif isinstance(result.return_value, (dict, list)):
-            output_format = 'json'
-        else:
-            output_format = 'txt'
+
 
     # Create temporary file in requested format
     if output_format == 'pdf':

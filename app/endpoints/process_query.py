@@ -22,13 +22,9 @@ from app.utils.llm_service import get_llm_service, LLMService
 from app.utils.check_connection import check_client_connection
 from datetime import datetime
 import time
-from fastapi_cache import FastAPICache
-from fastapi_cache.decorator import cache
-from fastapi_cache.backends.redis import RedisBackend
-from redis import asyncio as aioredis
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-import pickle
+
+from PyPDF2 import PdfReader
+import io
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -92,14 +88,34 @@ def construct_status_response(job: dict) -> QueryResponse:
         )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Setup
-    redis = aioredis.from_url(os.getenv("REDIS_URL"), encoding="utf8", decode_responses=True)
-    FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache")
-    yield
-    # Cleanup (if needed)
-    await redis.close()
+async def determine_pdf_page_count(file: UploadFile) -> int:
+    """
+    Determines the page count of a PDF file.
+    Returns 0 if the file is not a PDF.
+    """
+    if not file.content_type == "application/pdf":
+        return 0
+        
+    try:
+        # Read the file into memory
+        contents = await file.read()
+        # Create a new BytesIO object to ensure proper handling
+        pdf_stream = io.BytesIO(contents)
+        pdf = PdfReader(pdf_stream)
+        page_count = len(pdf.pages)
+        
+        # Reset file pointer for future reads
+        await file.seek(0)
+        
+        # Close the BytesIO stream
+        pdf_stream.close()
+        
+        return page_count
+    except Exception as e:
+        logger.error(f"Error determining PDF page count: {str(e)}")
+        # Make sure to reset the file pointer even if there's an error
+        await file.seek(0)
+        return 0
 
 
 @router.post("/process_query", response_model=QueryResponse)
@@ -118,16 +134,29 @@ async def process_query_entry_endpoint(
     try:
         request_data = QueryRequest(**json.loads(json_data))
         
-        # Count total pages from all files
+        # Update page counts for PDF files
+        if request_data.files_metadata:
+            for file_meta, upload_file in zip(request_data.files_metadata, files):
+                if not file_meta.page_count:  # Only update if page_count is not set
+                    page_count = await determine_pdf_page_count(upload_file)
+                    file_meta.page_count = page_count
+                    # Reset file pointer after reading
+                    await upload_file.seek(0)
+        
+        # Check if any PDF has more than 5 pages
+        has_large_pdf = False
         total_pages = 0
         for file_meta in (request_data.files_metadata or []):
-            if file_meta.page_count:
+            logger.info(f"file_meta: {file_meta.page_count}")
+            if file_meta.page_count and file_meta.page_count > 5:
                 total_pages += file_meta.page_count
+                has_large_pdf = True
+                break
                 
         # Decision routing based on page count
-        if total_pages > 5:
+        if has_large_pdf:
             # Generate unique job ID
-            logger.info(f"Total pages: {total_pages}")
+            logger.info(f"Large PDF detected")
             job_id = f"job_{user_id}_{int(time.time())}"
             
             # Calculate page ranges for each file
@@ -141,7 +170,7 @@ async def process_query_entry_endpoint(
                         end_page = min(start_page + CHUNK_SIZE, file_meta.page_count)
                         page_chunks.append(
                             BatchProcessingFileInfo(
-                                file_id=file_meta.file_id,
+                                file_id=file_meta.file_id or str(file_meta.name),
                                 page_range=(start_page, end_page),
                                 metadata=file_meta
                             ).dict()
@@ -149,7 +178,7 @@ async def process_query_entry_endpoint(
                         start_page += CHUNK_SIZE
             
             # Initialize job in database with chunks information
-            await supabase.table("batch_jobs").insert({
+            response = supabase.table("batch_jobs").insert({
                 "job_id": job_id,
                 "user_id": user_id,
                 "status": "created",
@@ -229,13 +258,13 @@ async def process_query_standard_endpoint(
     truncated_result = None
     num_images_processed = 0
 
+    logger.info( f"process_query_standard_endpoint called")
 
 
     try:
         request_data = QueryRequest(**json.loads(json_data))
         logger.info( f"sheet: {request_data.output_preferences.destination_url}")
         logger.info( f"sheet: {request_data.output_preferences.sheet_name}")
-
         logger.info(f"Processing query for user {user_id} with {len(request_data.files_metadata or [])} files")
         # Initial connection check
         await check_client_connection(request)
@@ -259,7 +288,6 @@ async def process_query_standard_endpoint(
                 llm_service=llm_service,
                 num_images_processed=num_images_processed
             )
-            await check_client_connection(request)
 
 
             logger.info(f"num_images_processed: {num_images_processed}")
@@ -377,10 +405,15 @@ async def process_query_batch_endpoint(
         request_data = QueryRequest(**json.loads(json_data))
         session_dir = temp_file_manager.get_temp_dir()
         
-        # Get current job data
-        job_data = await supabase.table("batch_jobs").select("*").eq("job_id", job_id).single().execute()
-        current_chunk = job_data.data["current_chunk"]
-        page_chunks = job_data.data["page_chunks"]
+        # Remove await for Supabase operations
+        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).single().execute()
+        if not job_response.data:
+            raise ValueError("Job not found")
+            
+        job_data = job_response.data
+        current_chunk = job_data["current_chunk"]
+        page_chunks = job_data["page_chunks"]
+        
         logger.info(f"Batch processing chunk: {current_chunk}")
         
         if current_chunk >= len(page_chunks):
@@ -464,7 +497,8 @@ async def process_query_batch_endpoint(
             )
 
         except Exception as e:
-            await supabase.table("batch_jobs").update({
+            # Remove await for Supabase error update
+            supabase.table("batch_jobs").update({
                 "status": "error",
                 "error_message": str(e),
                 "completed_at": datetime.utcnow().isoformat()
@@ -476,7 +510,6 @@ async def process_query_batch_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/process_query/status", response_model=QueryResponse)
-@cache(expire=60)  
 async def process_query_status_endpoint(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user)],
@@ -487,15 +520,8 @@ async def process_query_status_endpoint(
         raise HTTPException(status_code=401, detail="Authentication required")
         
     try:
-        # First check cache for active jobs
-        cache_key = f"job_status:{job_id}"
-        cached_status = await FastAPICache.get(cache_key)
-        
-        if cached_status and cached_status["status"] != "completed":
-            return QueryResponse(**cached_status)
-            
-        # If not in cache or job completed, check database
-        job_response = await supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        # Remove cache-related code
+        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
         
         if not job_response.data:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -503,13 +529,7 @@ async def process_query_status_endpoint(
         job = job_response.data[0]
         
         # Construct response based on job status
-        response = construct_status_response(job)
-        
-        # Cache response if job is still processing
-        if job["status"] in ["created", "processing"]:
-            await FastAPICache.set(cache_key, response.dict(), expire=10)
-            
-        return response
+        return construct_status_response(job)
             
     except Exception as e:
         logger.error(f"Error in process_query_status_endpoint: {str(e)}")

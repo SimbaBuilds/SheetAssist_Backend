@@ -75,7 +75,6 @@ async def generate_visualization(
         )
         error_attempts = 0
         while result.error:
-            await check_client_connection(request)
             error_attempts += 1
             print(f"Error analysis {error_attempts}:")
             print(f"Error: {result.error}")
