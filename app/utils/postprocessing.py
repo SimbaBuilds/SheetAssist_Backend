@@ -4,12 +4,13 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 import tempfile
 import pandas as pd
-from typing import Any
+from typing import Any, Optional, List, Tuple
 import json
 from docx import Document
-from app.schemas import FileDataInfo, SandboxResult, QueryRequest
+from app.schemas import FileDataInfo, SandboxResult, QueryRequest, BatchProcessingFileInfo
 from typing import List, Tuple
 from app.utils.llm_service import LLMService
+from app.utils.data_processing import get_data_snapshot
 import csv
 import logging
 from fastapi import HTTPException
@@ -20,6 +21,9 @@ from typing import Any
 from app.utils.auth import SupabaseClient
 from app.utils.google_integration import GoogleIntegration
 from app.utils.microsoft_integration import MicrosoftIntegration
+import pickle
+import os
+from datetime import datetime
 
 
 
@@ -328,12 +332,22 @@ async def handle_batch_destination_upload(
 ) -> bool:
     """Handle destination upload for batch processing"""
     try:
+        # Process data if it's a tuple
+        processed_data = data
+        if isinstance(data, tuple):
+            if isinstance(data[0], pd.DataFrame):
+                processed_data = data[0]
+            elif isinstance(data[0], str):
+                processed_data = data[0]
+            else:
+                processed_data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
+
         g_integration = GoogleIntegration(supabase, user_id)
         msft_integration = MicrosoftIntegration(supabase, user_id)
         
         url_lower = request.output_preferences.destination_url.lower()
-        
-        # For first chunk, we might need to create new sheet or clear existing
+        suggested_name = None
+        # For first chunk with new sheet creation
         if is_first_chunk and not request.output_preferences.modify_existing:
             provider, suggested_name = await llm_service.execute_with_fallback(
                 "file_namer",
@@ -343,27 +357,49 @@ async def handle_batch_destination_upload(
             
             if "docs.google.com" in url_lower:
                 return await g_integration.append_to_new_google_sheet(
-                    data,
+                    processed_data,
                     request.output_preferences.destination_url,
                     suggested_name
                 )
             elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
                 return await msft_integration.append_to_new_office_sheet(
-                    data,
+                    processed_data,
                     request.output_preferences.destination_url,
                     suggested_name
                 )
         
-        # For subsequent chunks or when modifying existing, always append
+        # For first chunk with new sheet creation
+        if not is_first_chunk and not request.output_preferences.modify_existing:
+            provider, suggested_name = await llm_service.execute_with_fallback(
+                "file_namer",
+                request.query,
+                old_data
+            )
+            
+            if "docs.google.com" in url_lower:
+                return await g_integration.append_to_new_google_sheet(
+                    processed_data,
+                    request.output_preferences.destination_url,
+                    suggested_name
+                )
+            elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+                return await msft_integration.append_to_new_office_sheet(
+                    processed_data,
+                    request.output_preferences.destination_url,
+                    suggested_name
+                )
+        
+        
+        # For subsequent chunks or when modifying existing
         if "docs.google.com" in url_lower:
             return await g_integration.append_to_current_google_sheet(
-                data,
+                processed_data,
                 request.output_preferences.destination_url,
                 request.output_preferences.sheet_name
             )
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
             return await msft_integration.append_to_current_office_sheet(
-                data,
+                processed_data,
                 request.output_preferences.destination_url,
                 request.output_preferences.sheet_name
             )
@@ -373,3 +409,214 @@ async def handle_batch_destination_upload(
     except Exception as e:
         logging.error(f"Failed to upload batch to destination: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")
+
+async def handle_batch_chunk_result(
+    result: SandboxResult,
+    request_data: QueryRequest,
+    preprocessed_data: List[FileDataInfo],
+    supabase: SupabaseClient,
+    user_id: str,
+    llm_service: LLMService,
+    job_id: str,
+    session_dir: str,
+    current_chunk: int,
+    total_chunks: int,
+    num_images_processed: int
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """Handle the result of a batch chunk processing."""
+    try:
+        # Extract data from tuple if needed
+        processed_data = result.return_value
+        if isinstance(processed_data, tuple):
+            if isinstance(processed_data[0], pd.DataFrame):
+                processed_data = processed_data[0]
+            elif isinstance(processed_data[0], str):
+                processed_data = processed_data[0]
+            else:
+                processed_data = pd.DataFrame([processed_data], columns=[f'Value_{i}' for i in range(len(processed_data))])
+
+        # Initialize return values
+        status = "processing"
+        result_file_path = None
+        result_media_type = None
+
+        # Get data snapshot for database update
+        result_snapshot = get_data_snapshot(
+            processed_data,
+            type(processed_data).__name__
+        )
+
+        # Prepare base update data
+        update_data = {
+            "processed_pages": num_images_processed,
+            "current_chunk": current_chunk + 1,
+            "result_snapshot": result_snapshot,
+            "query": request_data.query
+        }
+
+        # Set started_at for first chunk
+        if current_chunk == 0:
+            update_data["started_at"] = datetime.utcnow().isoformat()
+
+        # Handle based on output preference type
+        if request_data.output_preferences.type == "download":
+            # Store intermediate results
+            chunk_results_path = os.path.join(session_dir, f"chunk_{current_chunk}.pkl")
+            try:
+                if isinstance(processed_data, pd.DataFrame):
+                    processed_data.to_pickle(chunk_results_path)
+                else:
+                    with open(chunk_results_path, 'wb') as f:
+                        pickle.dump(processed_data, f)
+            except Exception as e:
+                logging.error(f"Error saving chunk results: {str(e)}")
+                raise
+
+            # Process final chunk
+            if current_chunk == total_chunks - 1:
+                try:
+                    combined_data = await combine_chunk_results(session_dir, total_chunks)
+                    tmp_path, media_type = await handle_download(
+                        SandboxResult(
+                            return_value=combined_data,
+                            error=None,
+                            original_query=request_data.query,
+                            print_output="",
+                            code="",
+                            timed_out=False
+                        ),
+                        request_data,
+                        preprocessed_data,
+                        llm_service
+                    )
+                    status = "completed"
+                    result_file_path = str(tmp_path)
+                    result_media_type = media_type
+                    
+                    # Update final data
+                    update_data.update({
+                        "status": status,
+                        "completed_at": datetime.utcnow().isoformat(),
+                        "result_file_path": result_file_path,
+                        "result_media_type": result_media_type
+                    })
+                    
+                    # Clean up session directory after successful combination
+                    try:
+                        import shutil
+                        shutil.rmtree(session_dir)
+                    except Exception as e:
+                        logging.warning(f"Failed to clean up session directory: {str(e)}")
+                        
+                except Exception as e:
+                    logging.error(f"Error processing final chunk: {str(e)}")
+                    raise
+
+        elif request_data.output_preferences.type == "online":
+            try:
+                # Handle online output
+                is_first_chunk = current_chunk == 0
+                await handle_batch_destination_upload(
+                    processed_data,
+                    request_data,
+                    preprocessed_data,
+                    supabase,
+                    user_id,
+                    llm_service,
+                    is_first_chunk
+                )
+
+                # Mark as completed if last chunk
+                if current_chunk == total_chunks - 1:
+                    status = "completed"
+                    update_data.update({
+                        "status": status,
+                        "completed_at": datetime.utcnow().isoformat()
+                    })
+            except Exception as e:
+                logging.error(f"Error handling online output: {str(e)}")
+                raise
+
+        # Update job status in database
+        await supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+
+        # Add checkpoint file
+        checkpoint_path = os.path.join(session_dir, f"checkpoint_{current_chunk}.json")
+        with open(checkpoint_path, 'w') as f:
+            json.dump({
+                "chunk": current_chunk,
+                "processed_pages": num_images_processed,
+                "status": "completed"
+            }, f)
+
+        return status, result_file_path, result_media_type
+
+    except Exception as e:
+        logging.error(f"Error in handle_batch_chunk_result: {str(e)}")
+        # Update job with error status
+        error_update = {
+            "status": "error",
+            "error_message": str(e),
+            "completed_at": datetime.utcnow().isoformat()
+        }
+        await supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
+        raise
+
+async def combine_chunk_results(session_dir: str, total_chunks: int) -> Any:
+    """Combine results from multiple chunks."""
+    try:
+        combined_data = None
+        chunk_paths = []
+        
+        for i in range(total_chunks):
+            chunk_path = os.path.join(session_dir, f"chunk_{i}.pkl")
+            chunk_paths.append(chunk_path)
+            
+            try:
+                with open(chunk_path, 'rb') as f:
+                    chunk_data = pickle.load(f)
+                    
+                    # Initialize combined_data with first chunk
+                    if combined_data is None:
+                        combined_data = chunk_data
+                        continue
+                        
+                    # Combine based on data type
+                    if isinstance(combined_data, pd.DataFrame):
+                        if isinstance(chunk_data, pd.DataFrame):
+                            combined_data = pd.concat([combined_data, chunk_data], ignore_index=True)
+                        else:
+                            # Handle case where chunk data is different type
+                            chunk_df = prepare_dataframe(chunk_data)
+                            combined_data = pd.concat([combined_data, chunk_df], ignore_index=True)
+                    elif isinstance(combined_data, list):
+                        if isinstance(chunk_data, list):
+                            combined_data.extend(chunk_data)
+                        else:
+                            combined_data.append(chunk_data)
+                    elif isinstance(combined_data, dict):
+                        if isinstance(chunk_data, dict):
+                            combined_data.update(chunk_data)
+                        else:
+                            # Add non-dict data as a numbered entry
+                            combined_data[f'chunk_{i}'] = chunk_data
+                    else:
+                        # For string or other types, convert to string and concatenate
+                        combined_data = str(combined_data) + '\n' + str(chunk_data)
+                        
+            except Exception as e:
+                logging.error(f"Error processing chunk {i}: {str(e)}")
+                raise
+        
+        # Clean up intermediate chunk files
+        for path in chunk_paths:
+            try:
+                os.remove(path)
+            except Exception as e:
+                logging.warning(f"Failed to remove chunk file {path}: {str(e)}")
+        
+        return combined_data
+        
+    except Exception as e:
+        logging.error(f"Error combining chunk results: {str(e)}")
+        raise

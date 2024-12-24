@@ -397,7 +397,7 @@ class FilePreprocessor:
                 except:
                     pass
 
-    #Class method to FilePreprocessor -- adds UNNECCESARY step between main processor method below and FilePreprocessor class -- refactor and remove if too confusing
+    #Class method to FilePreprocessor 
     async def preprocess_file(
         self, 
         file: Union[BinaryIO, str], 

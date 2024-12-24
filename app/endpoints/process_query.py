@@ -11,7 +11,7 @@ import logging
 from app.schemas import QueryRequest
 from fastapi.responses import FileResponse
 import pandas as pd
-from app.utils.postprocessing import handle_destination_upload, handle_download
+from app.utils.postprocessing import handle_destination_upload, handle_download, handle_batch_destination_upload, handle_batch_chunk_result
 from app.utils.data_processing import get_data_snapshot
 from app.utils.preprocessing import preprocess_files
 from fastapi import BackgroundTasks
@@ -28,6 +28,7 @@ from fastapi_cache.backends.redis import RedisBackend
 from redis import asyncio as aioredis
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+import pickle
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -126,9 +127,28 @@ async def process_query_entry_endpoint(
         # Decision routing based on page count
         if total_pages > 5:
             # Generate unique job ID
+            logger.info(f"Total pages: {total_pages}")
             job_id = f"job_{user_id}_{int(time.time())}"
             
-            # Initialize job in database
+            # Calculate page ranges for each file
+            page_chunks = []
+            CHUNK_SIZE = 5  # Process 5 pages at a time
+            
+            for file_meta in (request_data.files_metadata or []):
+                if file_meta.page_count:
+                    start_page = 0
+                    while start_page < file_meta.page_count:
+                        end_page = min(start_page + CHUNK_SIZE, file_meta.page_count)
+                        page_chunks.append(
+                            BatchProcessingFileInfo(
+                                file_id=file_meta.file_id,
+                                page_range=(start_page, end_page),
+                                metadata=file_meta
+                            ).dict()
+                        )
+                        start_page += CHUNK_SIZE
+            
+            # Initialize job in database with chunks information
             await supabase.table("batch_jobs").insert({
                 "job_id": job_id,
                 "user_id": user_id,
@@ -136,10 +156,19 @@ async def process_query_entry_endpoint(
                 "total_pages": total_pages,
                 "processed_pages": 0,
                 "output_preferences": request_data.output_preferences.dict(),
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.utcnow().isoformat(),
+                "started_at": None,
+                "completed_at": None,
+                "error_message": None,
+                "result_snapshot": None,
+                "result_file_path": None,
+                "result_media_type": None,
+                "page_chunks": page_chunks,
+                "current_chunk": 0,
+                "query": request_data.query
             }).execute()
             
-            # Start batch processing in background
+            # Start first batch processing in background
             background_tasks.add_task(
                 process_query_batch_endpoint,
                 request=request,
@@ -348,48 +377,23 @@ async def process_query_batch_endpoint(
         request_data = QueryRequest(**json.loads(json_data))
         session_dir = temp_file_manager.get_temp_dir()
         
-        # Calculate page ranges for each file
-        page_chunks = []
-        CHUNK_SIZE = 5  # Process 5 pages at a time
+        # Get current job data
+        job_data = await supabase.table("batch_jobs").select("*").eq("job_id", job_id).single().execute()
+        current_chunk = job_data.data["current_chunk"]
+        page_chunks = job_data.data["page_chunks"]
+        logger.info(f"Batch processing chunk: {current_chunk}")
         
-        for file_meta in (request_data.files_metadata or []):
-            if file_meta.page_count:
-                start_page = 0
-                while start_page < file_meta.page_count:
-                    end_page = min(start_page + CHUNK_SIZE, file_meta.page_count)
-                    page_chunks.append(
-                        BatchProcessingFileInfo(
-                            file_id=file_meta.file_id,
-                            page_range=(start_page, end_page),
-                            metadata=file_meta
-                        )
-                    )
-                    start_page += CHUNK_SIZE
+        if current_chunk >= len(page_chunks):
+            raise ValueError("No more chunks to process")
+            
+        current_processing_info = BatchProcessingFileInfo(**page_chunks[current_chunk])
         
-        # Store page chunks information in the job record
-        await supabase.table("batch_jobs").update({
-            "status": "processing",
-            "started_at": datetime.utcnow().isoformat(),
-            "page_chunks": [chunk.dict() for chunk in page_chunks],
-            "current_chunk": 0
-        }).eq("job_id", job_id).execute()
-
-        # Preprocess files
         try:
-            # Get current chunk information
-            job_data = await supabase.table("batch_jobs").select("*").eq("job_id", job_id).single().execute()
-            current_chunk = job_data.data["current_chunk"]
-            
-            if current_chunk >= len(page_chunks):
-                raise ValueError("No more chunks to process")
-                
-            current_processing_info = page_chunks[current_chunk]
-            
-            # Use the processing info for preprocessing
+            # Preprocess and process chunk
             preprocessed_data, num_images_processed = await preprocess_files(
                 request=request,
                 files=files,
-                files_metadata=[current_processing_info.metadata],  # Pass original metadata
+                files_metadata=[current_processing_info.metadata],
                 input_urls=request_data.input_urls,
                 query=request_data.query,
                 session_dir=session_dir,
@@ -397,14 +401,67 @@ async def process_query_batch_endpoint(
                 user_id=user_id,
                 llm_service=llm_service,
                 num_images_processed=0,
-                page_range=current_processing_info.page_range  # Pass page range separately
+                page_range=current_processing_info.page_range
             )
-            
-            # Update processed pages count and current chunk
-            await supabase.table("batch_jobs").update({
-                "processed_pages": job_data.data["processed_pages"] + num_images_processed,
-                "current_chunk": current_chunk + 1
-            }).eq("job_id", job_id).execute()
+
+            sandbox = EnhancedPythonInterpreter()
+            result = await process_query(
+                request=request,
+                query=request_data.query,
+                sandbox=sandbox,
+                data=preprocessed_data,
+                llm_service=llm_service
+            )
+
+            if result.error:
+                raise ValueError(result.error)
+
+            # Handle post-processing
+            status, result_file_path, result_media_type = await handle_batch_chunk_result(
+                result=result,
+                request_data=request_data,
+                preprocessed_data=preprocessed_data,
+                supabase=supabase,
+                user_id=user_id,
+                llm_service=llm_service,
+                job_id=job_id,
+                session_dir=session_dir,
+                current_chunk=current_chunk,
+                total_chunks=len(page_chunks),
+                num_images_processed=num_images_processed
+            )
+
+            # Cleanup temporary files for this chunk
+            temp_file_manager.cleanup_marked()
+
+            # Trigger next chunk if not done
+            if current_chunk + 1 < len(page_chunks):
+                logger.info(f"Triggering next chunk: {current_chunk + 1}/{len(page_chunks)}")
+                background_tasks.add_task(
+                    process_query_batch_endpoint,
+                    request=request,
+                    user_id=user_id,
+                    supabase=supabase,
+                    llm_service=llm_service,
+                    json_data=json_data,
+                    files=files,
+                    job_id=job_id
+                )
+
+            return QueryResponse(
+                result=TruncatedSandboxResult(
+                    original_query=request_data.query,
+                    print_output="",
+                    error=None,
+                    timed_out=False,
+                    return_value_snapshot=result.return_value_snapshot
+                ),
+                status=status,
+                message=f"Batch {current_chunk + 1}/{len(page_chunks)} processed successfully",
+                files=None,
+                num_images_processed=num_images_processed,
+                job_id=job_id
+            )
 
         except Exception as e:
             await supabase.table("batch_jobs").update({
@@ -414,106 +471,12 @@ async def process_query_batch_endpoint(
             }).eq("job_id", job_id).execute()
             raise
 
-        # Process the query
-        sandbox = EnhancedPythonInterpreter()
-        result = await process_query(
-            request=request,
-            query=request_data.query,
-            sandbox=sandbox,
-            data=preprocessed_data,
-            llm_service=llm_service
-        )
-
-        if result.error:
-            await supabase.table("batch_jobs").update({
-                "status": "error",
-                "error_message": result.error,
-                "completed_at": datetime.utcnow().isoformat()
-            }).eq("job_id", job_id).execute()
-            raise ValueError(result.error)
-
-        # Get current job data
-        job_data = await supabase.table("batch_jobs").select("*").eq("job_id", job_id).single().execute()
-        
-        # Handle output based on preferences
-        if request_data.output_preferences.type == "download":
-            # Store intermediate results for later combination
-            chunk_results_path = os.path.join(session_dir, f"chunk_{job_data.data['current_chunk']}.pkl")
-            result.return_value.to_pickle(chunk_results_path)
-            
-            # If this is the last chunk, combine all results
-            if job_data.data["current_chunk"] == len(job_data.data["page_chunks"]) - 1:
-                combined_df = pd.DataFrame()
-                for i in range(len(job_data.data["page_chunks"])):
-                    chunk_path = os.path.join(session_dir, f"chunk_{i}.pkl")
-                    chunk_df = pd.read_pickle(chunk_path)
-                    combined_df = pd.concat([combined_df, chunk_df], ignore_index=True)
-                
-                # Generate final downloadable file
-                tmp_path, media_type = await handle_download(
-                    SandboxResult(return_value=combined_df, error=None),
-                    request_data,
-                    preprocessed_data,
-                    llm_service
-                )
-                
-                await supabase.table("batch_jobs").update({
-                    "status": "completed",
-                    "result_file_path": str(tmp_path),
-                    "result_media_type": media_type,
-                    "completed_at": datetime.utcnow().isoformat()
-                }).eq("job_id", job_id).execute()
-
-        elif request_data.output_preferences.type == "online":
-            # For online output, handle each chunk immediately
-            await handle_destination_upload(
-                result.return_value,
-                request_data,
-                preprocessed_data,
-                supabase,
-                user_id,
-                llm_service
-            )
-            
-            if job_data.data["current_chunk"] == len(job_data.data["page_chunks"]) - 1:
-                await supabase.table("batch_jobs").update({
-                    "status": "completed",
-                    "completed_at": datetime.utcnow().isoformat()
-                }).eq("job_id", job_id).execute()
-
-        # Cleanup temporary files
-        temp_file_manager.cleanup_marked()
-
-        # Return success response
-        return QueryResponse(
-            result=TruncatedSandboxResult(
-                original_query=request_data.query,
-                print_output="",
-                error=None,
-                timed_out=False,
-                return_value_snapshot=None
-            ),
-            status="success",
-            message=f"Batch processing completed for job {job_id}",
-            files=None,
-            num_images_processed=num_images_processed,
-            job_id=job_id
-        )
-
     except Exception as e:
         logger.error(f"Batch processing error for job {job_id}: {str(e)}")
-        # Update job status to error if not already done
-        await supabase.table("batch_jobs").update({
-            "status": "error",
-            "error_message": str(e),
-            "completed_at": datetime.utcnow().isoformat()
-        }).eq("job_id", job_id).execute()
-        
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/process_query/status", response_model=QueryResponse)
-@cache(expire=10)  # Cache for 10 seconds
+@cache(expire=60)  
 async def process_query_status_endpoint(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user)],

@@ -84,7 +84,7 @@ class OpenaiVisionProcessor  :
             input_data_snapshot = build_input_data_snapshot(input_data)
             
             completion = self.client.chat.completions.create(
-                model="gpt4o-2024-08-06",
+                model="gpt-4o-2024-08-06",
                 messages=[
                     {
                         "role": "user",
@@ -159,7 +159,7 @@ class OpenaiVisionProcessor  :
                 b64_page = self.pdf_page_to_base64(pdf_path, page_num)
                 
                 completion = self.client.chat.completions.create(
-                    model="gpt4o-2024-08-06",
+                    model="gpt-4o-2024-08-06",
                     messages=[
                         {
                             "role": "user",
@@ -505,7 +505,7 @@ class LLMService:
     async def _openai_generate_text(self, system_prompt: str, user_content: str) -> str:
         """Generate text using OpenAI with system and user prompts"""
         response = self.openai_client.chat.completions.create(
-            model="gpt4o-2024-08-06",
+            model="gpt-4o-2024-08-06",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
@@ -548,15 +548,15 @@ class LLMService:
         processor = AnthropicVisionProcessor(self.anthropic_client)
         return processor.process_image_with_vision(image_path, query, input_data)
 
-    async def _openai_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
+    async def _openai_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]] = None) -> Dict[str, str]:
         """Process image using OpenAI's vision API"""
         processor = OpenaiVisionProcessor(self.openai_client)
-        return processor.process_pdf_with_vision(pdf_path, query, input_data)
+        return processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
 
-    async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
+    async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]] = None) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor(self.anthropic_client)
-        return processor.process_pdf_with_vision(pdf_path, query, input_data)
+        return processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
 
     
     

@@ -48,7 +48,7 @@
             Real-time progress visible to user
         
         2. If online output and not modify_existing:
-            Same as online output and modify_existing but a sheet name and headers must be decided on beforehand
+            Same as online output and modify_existing but we need to use append to new sheet on the first batch and append to current on the newly created sheet for the ensuing batches
 
         3. If download: 
             Decision Router → Batch Processor
