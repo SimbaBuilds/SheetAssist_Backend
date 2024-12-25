@@ -34,18 +34,9 @@ async def check_client_connection(request: Request) -> bool:
 
 def construct_status_response(job: dict) -> QueryResponse:
     """Helper function to construct status response"""
-    # Map backend status to frontend expected status
-    status_mapping = {
-        "processing": "processing",
-        "processing_chunk": "processing",
-        "completed": "success",  # Frontend expects 'success' instead of 'completed'
-        "error": "error"
-    }
-    
+
     current_status = job.get("status", "unknown")
-    frontend_status = status_mapping.get(current_status, current_status)
-    
-    logger.info(f"Constructing status response - Job status: {current_status} (mapped to {frontend_status})")
+
     logger.info(f"Current chunk: {job.get('current_chunk')}, Total chunks: {len(job.get('page_chunks', []))}")
     
     if current_status == "completed":
@@ -58,7 +49,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                     timed_out=False,
                     return_value_snapshot=job["result_snapshot"]
                 ),
-                status=frontend_status,
+                status=current_status,
                 message="Processing completed",
                 files=None,
                 num_images_processed=job["processed_pages"],
@@ -73,7 +64,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                     timed_out=False,
                     return_value_snapshot=None
                 ),
-                status=frontend_status,
+                status=current_status,
                 message="File ready for download",
                 files=[FileInfo(
                     file_path=job["result_file_path"],
@@ -107,7 +98,7 @@ def construct_status_response(job: dict) -> QueryResponse:
             
         return QueryResponse(
             result=None,
-            status=frontend_status,
+            status=current_status,
             message=message,
             files=None,
             num_images_processed=job['processed_pages'],

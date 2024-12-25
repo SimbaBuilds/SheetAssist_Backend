@@ -295,7 +295,7 @@ async def process_query_standard_endpoint(
             await check_client_connection(request)
             return QueryResponse(
                 result=truncated_result,
-                status="success",
+                status="completed",
                 message="File ready for download",
                 files=[FileInfo(
                     file_path=str(tmp_path),
@@ -324,7 +324,7 @@ async def process_query_standard_endpoint(
             await check_client_connection(request)
             return QueryResponse(
                 result=truncated_result,
-                status="success",
+                status="completed",
                 message="Data successfully uploaded to destination",
                 files=None,
                 num_images_processed=num_images_processed
@@ -521,7 +521,7 @@ async def process_query_batch_endpoint(
             )
 
             # Update progress
-            processed_pages = (chunk_index + 1) * int(os.getenv("CHUNK_SIZE"))
+            processed_pages = min((chunk_index + 1) * int(os.getenv("CHUNK_SIZE")), job_data["total_pages"])
             supabase.table("batch_jobs").update({
                 "current_chunk": chunk_index + 1,
                 "processed_pages": processed_pages,

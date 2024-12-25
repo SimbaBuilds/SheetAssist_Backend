@@ -445,7 +445,6 @@ async def handle_batch_chunk_result(
 
         # Prepare base update data
         update_data = {
-            "processed_pages": num_images_processed,
             "current_chunk": current_chunk + 1,
             "result_snapshot": result_snapshot,
             "query": request_data.query
@@ -537,14 +536,6 @@ async def handle_batch_chunk_result(
         # Update job status in database
         supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
 
-        # Add checkpoint file
-        checkpoint_path = os.path.join(session_dir, f"checkpoint_{current_chunk}.json")
-        with open(checkpoint_path, 'w') as f:
-            json.dump({
-                "chunk": current_chunk,
-                "processed_pages": num_images_processed,
-                "status": "completed"
-            }, f)
 
         return status, result_file_path, result_media_type
 

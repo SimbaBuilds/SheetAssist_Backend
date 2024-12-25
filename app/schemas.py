@@ -95,7 +95,7 @@ class FileInfo(BaseModel):
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
     result: Optional[TruncatedSandboxResult]
-    status: str  # "success", "error", or "processing"
+    status: str  # "completed", "error", or "processing"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files
     num_images_processed: int = 0

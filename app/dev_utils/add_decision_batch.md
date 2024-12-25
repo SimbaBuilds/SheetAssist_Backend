@@ -93,7 +93,7 @@ class OutputPreferences(BaseModel):
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
     result: TruncatedSandboxResult
-    status: str  # "success" or "error"
+    status: str  # "processing","completed" or "error"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files
     num_images_processed: int = 0

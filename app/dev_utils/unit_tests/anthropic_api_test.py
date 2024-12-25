@@ -49,7 +49,7 @@ def test_process_image_with_vision(vision_processor, test_image):
     query = "What text do you see in this image?"
     result = vision_processor.process_image_with_vision(test_image, query)
     
-    assert result["status"] == "success"
+    assert result["status"] == "completed"
     assert isinstance(result["content"], str)
     assert len(result["content"]) > 0
     assert "Hello, World!" in result["content"].lower()
@@ -59,7 +59,7 @@ def test_process_image_with_vision(vision_processor, test_image):
 #     query = "What text do you see in this PDF?"
 #     result = vision_processor.process_pdf_with_vision(test_pdf, query)
     
-#     assert result["status"] == "success"
+#     assert result["status"] == "completed"
 #     assert isinstance(result["content"], str)
 #     assert len(result["content"]) > 0
 #     assert "test pdf document" in result["content"].lower()

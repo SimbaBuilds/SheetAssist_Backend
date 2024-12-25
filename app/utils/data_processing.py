@@ -218,6 +218,13 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
             df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
         return df
     
+    def convert_dict_timestamps(d):
+        """Convert any timestamp values in a dictionary to strings"""
+        for k, v in d.items():
+            if isinstance(v, pd.Timestamp):
+                d[k] = v.strftime('%Y-%m-%d %H:%M:%S')
+        return d
+    
     # Create copies and replace NaT values with None before any processing
     old_df = convert_timestamps(old_df.copy().replace({pd.NaT: None}))
     new_df = convert_timestamps(new_df.copy().replace({pd.NaT: None}))
@@ -232,23 +239,23 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     # Get random sample of output dataframe with row numbers
     sample_rows = new_df.sample(n=min(10, len(new_df))).copy()
     sample_rows.index.name = 'row_number'
-    sample_output = sample_rows.reset_index().to_dict(orient='records')
+    sample_output = [convert_dict_timestamps(row) for row in sample_rows.reset_index().to_dict(orient='records')]
     logging.info(f"Sample output: {sample_output[:100]}...cont'd")
     
     # Only include non-empty changes
     changes = {}
     if not diff.added_rows.empty:
-        changes['added_rows'] = diff.added_rows.head(3).to_dict(orient='records')
+        changes['added_rows'] = [convert_dict_timestamps(row) for row in diff.added_rows.head(3).to_dict(orient='records')]
     
     if not diff.modified_rows.empty:
         changes['modified_rows'] = {
-            'before': old_df.loc[diff.modified_rows.index[:3]].to_dict(orient='records'),
-            'after': diff.modified_rows.head(3).to_dict(orient='records')
+            'before': [convert_dict_timestamps(row) for row in old_df.loc[diff.modified_rows.index[:3]].to_dict(orient='records')],
+            'after': [convert_dict_timestamps(row) for row in diff.modified_rows.head(3).to_dict(orient='records')]
         }
     logging.info(f"Changes: {changes}")
     
     if not diff.deleted_rows.empty:
-        changes['deleted_rows'] = diff.deleted_rows.head(3).to_dict(orient='records')
+        changes['deleted_rows'] = [convert_dict_timestamps(row) for row in diff.deleted_rows.head(3).to_dict(orient='records')]
     logging.info(f"Changes: {changes}")
     
     context = {

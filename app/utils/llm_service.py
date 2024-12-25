@@ -119,7 +119,7 @@ class OpenaiVisionProcessor  :
             )
             print(f"\n ------- LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
             return {
-                "status": "success",
+                "status": "completed",
                 "content": completion.choices[0].message.content
             }
 
@@ -208,7 +208,7 @@ class OpenaiVisionProcessor  :
             doc.close()
             
             return {
-                "status": "success",
+                "status": "completed",
                 "content": all_page_content
             }
 
@@ -312,7 +312,7 @@ class AnthropicVisionProcessor  :
             )
             
             return {
-                "status": "success",
+                "status": "completed",
                 "content": message.content[0].text
             }
 
@@ -406,7 +406,7 @@ class AnthropicVisionProcessor  :
             combined_content = "\n\n".join(all_page_content)
             
             return {
-                "status": "success",
+                "status": "completed",
                 "content": combined_content
             }
 
