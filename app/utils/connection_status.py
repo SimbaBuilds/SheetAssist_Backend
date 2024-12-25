@@ -88,13 +88,14 @@ def construct_status_response(job: dict) -> QueryResponse:
     
     else:  # processing or created
         message = job.get("message", "Processing in progress")
-
+        
         if job.get('page_chunks'):
+            file_id = page_chunks[current_chunk]['file_id']
             page_chunks = job.get('page_chunks', [])
             current_chunk = job.get('current_chunk', 0)
             start_page = page_chunks[current_chunk]['page_range'][0]
             end_page = page_chunks[current_chunk]['page_range'][1]
-            message = f"Processing pages {start_page} to {end_page}"
+            message = f"Processing pages {start_page} to {end_page} of file {file_id}"
             
         return QueryResponse(
             result=None,
