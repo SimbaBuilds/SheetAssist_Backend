@@ -20,20 +20,27 @@ from app.utils.microsoft_integration import MicrosoftIntegration
 from app.utils.llm_service import LLMService
 from app.utils.auth import SupabaseClient
 from fastapi import Request
+from PyPDF2 import PdfReader
+
+
+# Add logging configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
     
-    def __init__(self, num_images_processed: int = 0, llm_service: LLMService = None, supabase: SupabaseClient = None, user_id: str = None):
+    def __init__(self, num_images_processed: int = 0, supabase: SupabaseClient = None, user_id: str = None):
         """Initialize the FilePreprocessor with optional authentication"""
         self.num_images_processed = num_images_processed
         self.supabase = supabase
         self.user_id = user_id
         self.google_integration = None
         self.microsoft_integration = None
-        self.llm_service = llm_service
+        self.llm_service = LLMService()
         if supabase and user_id:
             self.google_integration = GoogleIntegration(supabase, user_id)
             self.microsoft_integration = MicrosoftIntegration(supabase, user_id)
@@ -161,7 +168,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
-    async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, llm_service = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
+    async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
         """
         Process image files (.png, .jpg, .jpeg) and extract content using vision processing
         
@@ -211,7 +218,7 @@ class FilePreprocessor:
                         f.write(file.read())
 
             # Process with vision using LLM service
-            provider, vision_result = await llm_service.execute_with_fallback(
+            provider, vision_result = await self.llm_service.execute_with_fallback(
                 "process_image_with_vision",
                 image_path=image_path,
                 query=query,
@@ -297,7 +304,6 @@ class FilePreprocessor:
         file: Union[BinaryIO, str], 
         output_path: str = None, 
         query: str = None, 
-        llm_service = None, 
         input_data: List[FileDataInfo] = None,
         page_range: Optional[tuple[int, int]] = None
     ) -> Tuple[str, str, bool]:
@@ -350,7 +356,7 @@ class FilePreprocessor:
                 return text_content, "text", False
             
             # For unreadable PDFs, process with vision
-            provider, vision_result = await llm_service.execute_with_fallback(
+            provider, vision_result = await self.llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
                 pdf_path=pdf_path,
                 query=query,
@@ -390,7 +396,6 @@ class FilePreprocessor:
         query: str, 
         file_type: str, 
         sheet_name: str = None, 
-        llm_service = None, 
         processed_data: List[FileDataInfo] = None,
         page_range: Optional[tuple[int, int]] = None  # Add page_range parameter
     ) -> Union[str, pd.DataFrame]:
@@ -421,12 +426,11 @@ class FilePreprocessor:
                 file, 
                 output_path=None, 
                 query=query, 
-                llm_service=llm_service, 
                 input_data=input_data,
                 page_range=page_range
             )
         if file_type.lower() in ['png', 'jpg', 'jpeg']:
-            return await processor(file, output_path=None, query=query, llm_service=llm_service, input_data=input_data)
+            return await processor(file, output_path=None, query=query, input_data=input_data)
         if file_type.lower() in ['gsheet', 'office_sheet']:
             return await processor(file, sheet_name)
         return processor(file)
@@ -445,7 +449,6 @@ class FilePreprocessor:
 
 
 async def preprocess_files(
-    request: Request,
     files: List[UploadFile],
     files_metadata: List[FileMetadata],
     input_urls: List[InputUrl],
@@ -453,7 +456,6 @@ async def preprocess_files(
     session_dir,
     supabase: SupabaseClient,
     user_id: str,
-    llm_service: LLMService,
     num_images_processed: int = 0,
     page_range: Optional[tuple[int, int]] = None
 ) -> Tuple[List[FileDataInfo], int]:
@@ -462,10 +464,10 @@ async def preprocess_files(
     For batch processing, page_range specifies which pages to process.
     """
     
+    llm_service = LLMService()
     
     preprocessor = FilePreprocessor(
         num_images_processed=num_images_processed,
-        llm_service=llm_service,
         supabase=supabase,
         user_id=user_id
     )
@@ -477,9 +479,9 @@ async def preprocess_files(
         try:
             logging.info(f"Processing URL: {input_url.url}")
             if 'docs.google' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name, llm_service) 
+                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name) 
             elif 'onedrive.live' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, query, 'office_sheet', input_url.sheet_name, llm_service)
+                content = await preprocessor.preprocess_file(input_url.url, query, 'office_sheet', input_url.sheet_name)
             else:
                 logging.error(f"Unsupported URL format: {input_url.url}")
                 continue
@@ -555,7 +557,6 @@ async def preprocess_files(
                         query, 
                         file_type, 
                         sheet_name=None, 
-                        llm_service=llm_service, 
                         processed_data=processed_data,
                         page_range=page_range  # Pass page_range to preprocess_file
                     )
@@ -588,3 +589,24 @@ async def preprocess_files(
 
     return processed_data, preprocessor.num_images_processed
 
+async def determine_pdf_page_count(file: UploadFile) -> int:
+    """
+    Determines the page count of a PDF file.
+    Returns 0 if the file is not a PDF.
+    """
+    if not file.content_type == "application/pdf":
+        return 0
+        
+    try:
+        # Read the file into memory
+        contents = await file.read()
+        pdf = PdfReader(io.BytesIO(contents))
+        page_count = len(pdf.pages)
+        
+        # Reset file pointer for future reads
+        await file.seek(0)
+        
+        return page_count
+    except Exception as e:
+        logger.error(f"Error determining PDF page count: {str(e)}")
+        return 0

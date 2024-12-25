@@ -20,7 +20,10 @@ from pathlib import Path
 import os
 import fitz
 
+from dotenv import load_dotenv
 
+# Add at the top of the file, after imports
+load_dotenv()
 
 
 def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
@@ -84,7 +87,7 @@ class OpenaiVisionProcessor  :
             input_data_snapshot = build_input_data_snapshot(input_data)
             
             completion = self.client.chat.completions.create(
-                model="gpt-4o-2024-08-06",
+                model=os.getenv("OPENAI_MAIN_MODEL"),
                 messages=[
                     {
                         "role": "user",
@@ -114,7 +117,7 @@ class OpenaiVisionProcessor  :
                 ],
                 max_tokens=2000
             )
-            print(f"\n -------LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
+            print(f"\n ------- LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
             return {
                 "status": "success",
                 "content": completion.choices[0].message.content
@@ -163,7 +166,7 @@ class OpenaiVisionProcessor  :
             for b64_page in b64_pages:
                 i += 1
                 completion = self.client.chat.completions.create(
-                    model="gpt-4o-2024-08-06",
+                    model=os.getenv("OPENAI_MAIN_MODEL"),
                     messages=[
                         {
                             "role": "user",
@@ -200,7 +203,7 @@ class OpenaiVisionProcessor  :
                 """)
 
                 all_page_content += f"[Page {i}]:\n{page_content}\n\n"
-                time.sleep(0.5)
+                time.sleep(float(os.getenv("SLEEP_TIME")))
 
             doc.close()
             
@@ -275,7 +278,7 @@ class AnthropicVisionProcessor  :
             input_data_snapshot = build_input_data_snapshot(input_data)
             
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=os.getenv("ANTHROPIC_MAIN_MODEL"),
                 max_tokens=1024,
                 messages=[
                     {
@@ -356,7 +359,7 @@ class AnthropicVisionProcessor  :
             for b64_page in b64_pages:
                 i += 1
                 message = self.client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model=os.getenv("ANTHROPIC_MAIN_MODEL"),
                     max_tokens=1024,
                     messages=[
                         {
@@ -395,7 +398,7 @@ class AnthropicVisionProcessor  :
                 Page Content:\n {page_content}\n
                 """)
                 all_page_content.append(f"[Page {i}]\n{page_content}")
-                time.sleep(0.5)
+                time.sleep(float(os.getenv("SLEEP_TIME")))
 
             doc.close()
             
@@ -413,7 +416,6 @@ class AnthropicVisionProcessor  :
                 "error": str(e)
             }
         
-
 
 class LLMService:
     def __init__(self):
@@ -522,7 +524,7 @@ class LLMService:
     async def _openai_generate_text(self, system_prompt: str, user_content: str) -> str:
         """Generate text using OpenAI with system and user prompts"""
         response = self.openai_client.chat.completions.create(
-            model="gpt-4o-2024-08-06",
+            model=os.getenv("OPENAI_MAIN_MODEL"),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
@@ -535,7 +537,7 @@ class LLMService:
     async def _anthropic_generate_text(self, system_prompt: str, user_content: str) -> str:
         """Generate text using Anthropic with system and user prompts"""
         response = self.anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model=os.getenv("ANTHROPIC_MAIN_MODEL"),
             max_tokens=5000,
             temperature=0,
             system=system_prompt,
@@ -555,20 +557,47 @@ class LLMService:
             raise ValueError("Empty response from API")
         return response.content[0].text
 
-    async def _openai_process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
-        """Process image using OpenAI's vision API"""
+    async def _openai_process_image_with_vision(
+        self, 
+        image_path: str, 
+        query: str, 
+        input_data: List[FileDataInfo]
+    ) -> Dict[str, str]:
+        """Process image using OpenAI's vision API. Raises an exception on connection errors 
+           so that the fallback logic is triggered."""
         processor = OpenaiVisionProcessor(self.openai_client)
-        return processor.process_image_with_vision(image_path, query, input_data)
+        result = processor.process_image_with_vision(image_path, query, input_data)
+
+        if result.get("status") == "error" and "connection error" in result.get("error", "").lower():
+            import httpx
+            raise httpx.ConnectError(f"OpenAI Connection Error: {result['error']}")
+
+        return result
 
     async def _anthropic_process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor(self.anthropic_client)
         return processor.process_image_with_vision(image_path, query, input_data)
 
-    async def _openai_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]] = None) -> Dict[str, str]:
-        """Process image using OpenAI's vision API"""
+    async def _openai_process_pdf_with_vision(
+        self, 
+        pdf_path: str, 
+        query: str, 
+        input_data: List[FileDataInfo], 
+        page_range: Optional[tuple[int, int]] = None
+    ) -> Dict[str, str]:
+        """Process PDF using OpenAI's vision API. Raises an exception on connection errors 
+           so that the fallback logic is triggered."""
         processor = OpenaiVisionProcessor(self.openai_client)
-        return processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
+        result = processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
+
+        # If the returned dict indicates an error related to connection, raise an actual exception
+        if result.get("status") == "error" and "connection error" in result.get("error", "").lower():
+            import httpx
+            # Raise a ConnectError so execute_with_fallback will catch it
+            raise httpx.ConnectError(f"OpenAI Connection Error: {result['error']}")
+
+        return result
 
     async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]] = None) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
@@ -739,14 +768,15 @@ class LLMService:
                     Query: {query}
                     Available Data: {data_description}"""
         
-        # Updated to use gpt-4o-mini-2024-07-18
         response = self.openai_client.chat.completions.create(
-            model="gpt-4o-mini-2024-07-18",
+            model=os.getenv("OPENAI_SMALL_MODEL"),
             messages=[
                 {"role": "system", "content": self._file_namer_prompt},
                 {"role": "user", "content": user_content}
             ]
         ).choices[0].message.content
+        time.sleep(float(os.getenv("SLEEP_TIME")))
+
         
         return self._clean_filename(response)
 
@@ -760,7 +790,7 @@ class LLMService:
         
         # Updated to use claude-3-5-haiku-20241022
         response = self.anthropic_client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model=os.getenv("ANTHROPIC_SMALL_MODEL"),
             max_tokens=5000,
             temperature=0,
             system=self._file_namer_prompt,
@@ -776,7 +806,7 @@ class LLMService:
                 }
             ]
         ).content[0].text
-        
+        time.sleep(float(os.getenv("SLEEP_TIME")))
         return self._clean_filename(response)
 
     async def _openai_gen_visualization(
@@ -808,7 +838,6 @@ class LLMService:
             user_content=self._build_gen_vis_user_content(data_snapshot, color_palette, custom_instructions, past_errors)
         )
 
-    
     
     def _build_data_description(self, data: List[FileDataInfo]) -> str:
         if not data:
@@ -855,10 +884,6 @@ class LLMService:
 
 
 
-
-@lru_cache()
-def get_llm_service() -> LLMService:
-    return LLMService()
 
 
 

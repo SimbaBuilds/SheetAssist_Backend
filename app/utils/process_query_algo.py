@@ -1,5 +1,5 @@
 from app.schemas import SandboxResult, FileDataInfo
-from app.utils.llm_service import get_llm_service, LLMService
+from app.utils.llm_service import LLMService
 from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, DatasetDiff, prepare_analyzer_context
 from typing import List, Tuple, Any
 from app.utils.sandbox import EnhancedPythonInterpreter
@@ -8,7 +8,7 @@ import logging
 import os
 import json
 from fastapi import Request
-from app.utils.check_connection import check_client_connection
+from app.utils.connection_status import check_client_connection
 
 
 def extract_code(suggested_code: str) -> str:
@@ -35,10 +35,10 @@ async def process_query(
     query: str, 
     sandbox: EnhancedPythonInterpreter,
     data: List[FileDataInfo] = None,
-    llm_service: LLMService = None
 ) -> SandboxResult:
     
     
+    llm_service = LLMService()
     # Create execution namespace by extending base namespace
     namespace = dict(sandbox.base_namespace)
     await check_client_connection(request)
@@ -115,8 +115,9 @@ async def process_query(
                             this_context = {}
                             diff_key = f"diff{i+1}_{j+1}"
                             this_context[diff_key] = prepare_analyzer_context(old_data[i].content, item)
+                            logging.info(f"This context: {this_context}")
                             full_diff_context += json.dumps(this_context)
-
+                            logging.info(f"Full diff context: {full_diff_context[:100]}...cont'd")
             # Analyze results
             provider, analysis_result = await llm_service.execute_with_fallback(
                 "analyze_sandbox_result",

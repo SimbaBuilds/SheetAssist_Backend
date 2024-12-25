@@ -5,14 +5,14 @@ from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
 from app.utils.data_processing import get_data_snapshot
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.utils.process_query_standard import extract_code
+from app.utils.process_query_algo import extract_code
 import pandas as pd
 import logging
 import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple, Any, Union
 from io import BytesIO
 from fastapi import Request
-from app.utils.check_connection import check_client_connection
+from app.utils.connection_status import check_client_connection
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

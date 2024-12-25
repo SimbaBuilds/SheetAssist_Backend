@@ -229,7 +229,7 @@ async def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo], ll
 
 
 
-async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], supabase: SupabaseClient, user_id: str, llm_service: LLMService) -> bool:
+async def handle_destination_upload(data: Any, request: QueryRequest, old_data: List[FileDataInfo], supabase: SupabaseClient, user_id: str) -> bool:
     """Upload data to various destination types"""
     try:
         # Process tuple data if present
@@ -244,7 +244,7 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
 
         g_integration = GoogleIntegration(supabase, user_id)
         msft_integration = MicrosoftIntegration(supabase, user_id)
-
+        llm_service = LLMService()
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
@@ -291,11 +291,12 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
         logging.error(f"Failed to upload to destination: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-async def handle_download(result: SandboxResult, request: QueryRequest, preprocessed_data: List[FileDataInfo], llm_service: LLMService) -> Tuple[str, str]:
+async def handle_download(result: SandboxResult, request: QueryRequest, preprocessed_data: List[FileDataInfo]) -> Tuple[str, str]:
     # Get the desired output format, defaulting based on data type
     output_format = request.output_preferences.format
 
 
+    llm_service = LLMService()
     # Create temporary file in requested format
     if output_format == 'pdf':
         tmp_path = await create_pdf(result.return_value, request.query, preprocessed_data, llm_service)
@@ -410,7 +411,6 @@ async def handle_batch_chunk_result(
     preprocessed_data: List[FileDataInfo],
     supabase: SupabaseClient,
     user_id: str,
-    llm_service: LLMService,
     job_id: str,
     session_dir: str,
     current_chunk: int,
@@ -419,6 +419,9 @@ async def handle_batch_chunk_result(
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """Handle the result of a batch chunk processing."""
     try:
+        
+        llm_service = LLMService()
+        
         # Extract data from tuple if needed
         processed_data = result.return_value
         if isinstance(processed_data, tuple):

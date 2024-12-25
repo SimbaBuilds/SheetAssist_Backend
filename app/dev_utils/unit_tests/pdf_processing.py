@@ -6,7 +6,7 @@ sys.path.insert(0, project_root)
 
 # Now we can import from app
 from app.utils.preprocessing import FilePreprocessor
-from app.utils.llm_service import get_llm_service
+from app.utils.llm_service import LLMService
 
 import pytest
 import os
@@ -27,7 +27,7 @@ load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-llm_service = get_llm_service()
+llm_service = LLMService()
 
 # Get test user ID from environment variable or set a test value
 user_id = "695eadee-feda-492c-8f95-86f72fcc10c4"
@@ -44,7 +44,7 @@ LONG_UNREADABLE_PDF = TEST_FILES_DIR / "long_unreadable.pdf"
 
 @pytest.fixture
 def llm_service():
-    return get_llm_service()
+    return LLMService()
 
 @pytest.fixture
 def file_preprocessor():

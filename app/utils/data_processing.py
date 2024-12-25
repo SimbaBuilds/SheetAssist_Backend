@@ -12,13 +12,14 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
     """Generate appropriate snapshot based on data type"""
     
 
-    
     # Handle tuple type -- (from sandbox return values)
     if isinstance(content, tuple):
         # Process each item in tuple and join with newlines
         snapshots = []
         for item in content:
             if isinstance(item, pd.DataFrame):
+                # Replace NaT values with None before converting to string
+                item = item.replace({pd.NaT: None})
                 df_info = f"DataFrame Info:\n"
                 df_info += f"Shape: {item.shape}\n"
                 df_info += f"Columns: {list(item.columns)}\n"
@@ -26,10 +27,13 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
                 df_info += f"\nFirst 5 rows:\n{item.head(5).to_string()}"
                 snapshots.append(df_info)
             elif isinstance(item, dict):
-                snapshot_dict = dict(list(item.items())[:5])
+                # Handle potential NaT values in dictionary
+                snapshot_dict = {k: (None if pd.isna(v) else v) for k, v in list(item.items())[:5]}
                 snapshots.append(json.dumps(snapshot_dict, indent=2))
             elif isinstance(item, list):
-                snapshots.append(json.dumps(item[:5], indent=2))
+                # Handle potential NaT values in list
+                clean_list = [None if pd.isna(x) else x for x in item[:5]]
+                snapshots.append(json.dumps(clean_list, indent=2))
             elif hasattr(item, 'file') and hasattr(item, 'filename'):
                 # Handle image file objects
                 item.file.seek(0)
@@ -37,7 +41,8 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
                 item.file.seek(0)
                 snapshots.append(f"Image file: {item.filename}, Size: {size} bytes")
             else:
-                snapshots.append(str(item)[:500])
+                # Handle potential NaT value in other types
+                snapshots.append(str(None if pd.isna(item) else item)[:500])
         return "\n---\n".join(snapshots)
 
 
@@ -46,6 +51,8 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
     
     # Handle non-tuple types
     if data_type == "DataFrame":
+        # Replace NaT values with None before converting to string
+        content = content.replace({pd.NaT: None})
         df_info = f"DataFrame Info:\n"
         df_info += f"Shape: {content.shape}\n"
         df_info += f"Columns: {list(content.columns)}\n"
@@ -53,22 +60,23 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
         df_info += f"\nFirst 5 rows:\n{content.head(5).to_string()}"
         return df_info
     elif data_type == "json":
-        # For JSON, return first few key-value pairs or array elements
+        # For JSON, handle NaT values before serialization
         if isinstance(content, dict):
-            snapshot_dict = dict(list(content.items())[:5])
+            snapshot_dict = {k: (None if pd.isna(v) else v) for k, v in list(content.items())[:5]}
             return json.dumps(snapshot_dict, indent=2)
         elif isinstance(content, list):
-            return json.dumps(content[:5], indent=2)
-        return str(content)[:500]
+            clean_list = [None if pd.isna(x) else x for x in content[:5]]
+            return json.dumps(clean_list, indent=2)
+        return str(None if pd.isna(content) else content)[:500]
     elif data_type == "text":
         # Return first 500 characters for text
-        return content[:500] + ("..." if len(content) > 500 else "")
+        return str(None if pd.isna(content) else content)[:500] + ("..." if len(str(content)) > 500 else "")
     elif data_type == "image":
         content.file.seek(0)
         size = len(content.file.read())
         content.file.seek(0)
         return f"Image file: {content.filename}, Size: {size} bytes"
-    return str(content)[:500]
+    return str(None if pd.isna(content) else content)[:500]
 
 @dataclass
 class DatasetDiff:
@@ -202,14 +210,31 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     Prepare optimized context for the analyzer LLM, focusing on essential differences.
     """
     logging.info("Preparing analyzer context")
+    
+    def convert_timestamps(df):
+        """Convert timestamps to string format"""
+        df = df.copy()
+        for col in df.select_dtypes(include=['datetime64[ns]']).columns:
+            df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+        return df
+    
+    # Create copies and replace NaT values with None before any processing
+    old_df = convert_timestamps(old_df.copy().replace({pd.NaT: None}))
+    new_df = convert_timestamps(new_df.copy().replace({pd.NaT: None}))
+    
     diff = compute_dataset_diff(old_df, new_df)
     logging.info("Computed dataset diff")
+
+    # Replace NaT values with None in both dataframes
+    old_df = old_df.replace({pd.NaT: None})
+    new_df = new_df.replace({pd.NaT: None})
 
     # Get random sample of output dataframe with row numbers
     sample_rows = new_df.sample(n=min(10, len(new_df))).copy()
     sample_rows.index.name = 'row_number'
     sample_output = sample_rows.reset_index().to_dict(orient='records')
-
+    logging.info(f"Sample output: {sample_output[:100]}...cont'd")
+    
     # Only include non-empty changes
     changes = {}
     if not diff.added_rows.empty:
@@ -220,10 +245,12 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
             'before': old_df.loc[diff.modified_rows.index[:3]].to_dict(orient='records'),
             'after': diff.modified_rows.head(3).to_dict(orient='records')
         }
+    logging.info(f"Changes: {changes}")
     
     if not diff.deleted_rows.empty:
         changes['deleted_rows'] = diff.deleted_rows.head(3).to_dict(orient='records')
-
+    logging.info(f"Changes: {changes}")
+    
     context = {
         'output_sample': sample_output,
         'changes': {
