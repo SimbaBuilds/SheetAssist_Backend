@@ -124,5 +124,6 @@ class BatchJob(BaseModel):
     current_chunk: Optional[int] = None       # Added for chunk tracking
     query: Optional[str] = None               # Added to store original query
     message: Optional[str] = None            # Added to store message
-
+    images_processed: Optional[List[dict]] = None  # Added for image processing
+    total_images_processed: Optional[int] = None  # Added for total images
 

@@ -390,7 +390,7 @@ async def _process_batch_chunk(
             session_dir=session_dir,
             supabase=supabase,
             user_id=user_id,
-            num_images_processed=0,
+            num_images_processed=0,  # Initialize for each chunk
             page_range=current_processing_info.page_range
         )
 
@@ -422,6 +422,14 @@ async def _process_batch_chunk(
         # Cleanup temporary files
         temp_file_manager.cleanup_marked()
 
+        # Update job with images processed count
+        supabase.table("batch_jobs").update({
+            "images_processed": num_images_processed,
+            "status": "processing",
+            "started_at": datetime.utcnow().isoformat(),
+            "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
+        }).eq("job_id", job_id).execute()
+
         return QueryResponse(
             result=TruncatedSandboxResult(
                 original_query=request_data.query,
@@ -433,7 +441,7 @@ async def _process_batch_chunk(
             status=status,
             message=f"Batch {current_chunk + 1}/{len(page_chunks)} processed successfully",
             files=None,
-            num_images_processed=num_images_processed,
+            num_images_processed=num_images_processed,  # Include in response
             job_id=job_id
         )
 
@@ -462,7 +470,8 @@ async def process_query_batch_endpoint(
 
     try:
         session_dir = temp_file_manager.get_temp_dir()
-        
+        total_images_processed = 0  # Track total images across all chunks
+
         # Store file contents for processing
         files_data = []
         for file in files:
@@ -520,11 +529,15 @@ async def process_query_batch_endpoint(
                 current_chunk=chunk_index
             )
 
-            # Update progress
+            # Accumulate total images processed
+            total_images_processed += response.num_images_processed
+
+            # Update progress including images processed
             processed_pages = min((chunk_index + 1) * int(os.getenv("CHUNK_SIZE")), job_data["total_pages"])
             supabase.table("batch_jobs").update({
                 "current_chunk": chunk_index + 1,
                 "processed_pages": processed_pages,
+                "total_images_processed": total_images_processed,  # Add total
                 "status": "processing" if chunk_index < len(page_chunks) - 1 else "completed",
                 "completed_at": datetime.utcnow().isoformat() if chunk_index == len(page_chunks) - 1 else None
             }).eq("job_id", job_id).execute()

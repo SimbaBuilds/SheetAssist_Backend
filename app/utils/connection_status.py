@@ -52,7 +52,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                 status=current_status,
                 message="Processing completed",
                 files=None,
-                num_images_processed=job["processed_pages"],
+                num_images_processed=job["total_images_processed"],
                 total_pages=job.get("total_pages", 0)
             )
         else:  # download type
@@ -72,7 +72,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                     filename=os.path.basename(job["result_file_path"]),
                     download_url=f"/download?file_path={job['result_file_path']}"
                 )],
-                num_images_processed=job["processed_pages"],
+                num_images_processed=job["total_images_processed"],
                 total_pages=job.get("total_pages", 0)
             )
     
@@ -82,7 +82,7 @@ def construct_status_response(job: dict) -> QueryResponse:
             status="error",
             message=job["error_message"],
             files=None,
-            num_images_processed=job["processed_pages"],
+            num_images_processed=job["total_images_processed"],
             total_pages=job.get("total_pages", 0)
         )
     
@@ -90,9 +90,9 @@ def construct_status_response(job: dict) -> QueryResponse:
         message = job.get("message", "Processing in progress")
         
         if job.get('page_chunks'):
-            file_id = page_chunks[current_chunk]['file_id']
             page_chunks = job.get('page_chunks', [])
             current_chunk = job.get('current_chunk', 0)
+            file_id = page_chunks[current_chunk]['file_id']
             start_page = page_chunks[current_chunk]['page_range'][0]
             end_page = page_chunks[current_chunk]['page_range'][1]
             message = f"Processing pages {start_page} to {end_page} of file {file_id}"
@@ -102,6 +102,6 @@ def construct_status_response(job: dict) -> QueryResponse:
             status=current_status,
             message=message,
             files=None,
-            num_images_processed=job['processed_pages'],
+            num_images_processed=job['total_images_processed'],
             total_pages=job.get("total_pages", 0)
         )
