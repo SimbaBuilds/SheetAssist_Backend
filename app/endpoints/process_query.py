@@ -17,7 +17,7 @@ from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
 from app.utils.connection_and_status import check_client_connection, construct_status_response
 from app.schemas import InputUrl
-from datetime import datetime
+from datetime import datetime, UTC
 import time
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
@@ -110,8 +110,8 @@ async def process_query_entry_endpoint(
                 "status": "created",
                 "total_pages": total_pages,
                 "processed_pages": 0,
-                "output_preferences": request_data.output_preferences,
-                "created_at": datetime.utcnow().isoformat(),
+                "output_preferences": request_data.output_preferences.model_dump(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "started_at": None,
                 "completed_at": None,
                 "error_message": None,
@@ -377,7 +377,7 @@ async def _process_batch_chunk(
         page_range = current_chunk_info['page_range']
         supabase.table("batch_jobs").update({
             "status": "processing",
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
             "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
         }).eq("job_id", job_id).execute()
 
@@ -426,7 +426,7 @@ async def _process_batch_chunk(
         supabase.table("batch_jobs").update({
             "images_processed": num_images_processed,
             "status": "processing",
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
             "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
         }).eq("job_id", job_id).execute()
 
@@ -450,7 +450,7 @@ async def _process_batch_chunk(
         supabase.table("batch_jobs").update({
             "status": "error",
             "error_message": str(e),
-            "completed_at": datetime.utcnow().isoformat()
+            "completed_at": datetime.now(UTC).isoformat()
         }).eq("job_id", job_id).execute()
         raise
 
@@ -539,7 +539,7 @@ async def process_query_batch_endpoint(
                 "processed_pages": processed_pages,
                 "total_images_processed": total_images_processed,  # Add total
                 "status": "processing" if chunk_index < len(page_chunks) - 1 else "completed",
-                "completed_at": datetime.utcnow().isoformat() if chunk_index == len(page_chunks) - 1 else None
+                "completed_at": datetime.now(UTC).isoformat() if chunk_index == len(page_chunks) - 1 else None
             }).eq("job_id", job_id).execute()
 
         return response
@@ -549,7 +549,7 @@ async def process_query_batch_endpoint(
         supabase.table("batch_jobs").update({
             "status": "error",
             "error_message": str(e),
-            "completed_at": datetime.utcnow().isoformat()
+            "completed_at": datetime.now(UTC).isoformat()
         }).eq("job_id", job_id).execute()
         raise HTTPException(status_code=500, detail=str(e))
 

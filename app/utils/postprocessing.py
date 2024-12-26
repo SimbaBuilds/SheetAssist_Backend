@@ -23,7 +23,8 @@ from app.utils.google_integration import GoogleIntegration
 from app.utils.microsoft_integration import MicrosoftIntegration
 import pickle
 import os
-from datetime import datetime
+from datetime import datetime, UTC
+
 
 
 
@@ -452,10 +453,33 @@ async def handle_batch_chunk_result(
 
         # Set started_at for first chunk
         if current_chunk == 0:
-            update_data["started_at"] = datetime.utcnow().isoformat()
+            update_data["started_at"] = datetime.now(UTC).isoformat()
 
         # Handle based on output preference type
         if request_data.output_preferences.type == "download":
+            # Load previous chunk results if not first chunk
+            previous_data = []
+            if current_chunk > 0:
+                try:
+                    for i in range(current_chunk):
+                        prev_chunk_path = os.path.join(session_dir, f"chunk_{i}.pkl")
+                        if os.path.exists(prev_chunk_path):
+                            with open(prev_chunk_path, 'rb') as f:
+                                chunk_data = pickle.load(f)
+                                if isinstance(chunk_data, pd.DataFrame):
+                                    previous_data.append(FileDataInfo(
+                                        content=chunk_data,
+                                        data_type="DataFrame",
+                                        snapshot=get_data_snapshot(chunk_data, "DataFrame"),
+                                        original_file_name=f"chunk_{i}"
+                                    ))
+                except Exception as e:
+                    logging.warning(f"Error loading previous chunks: {str(e)}")
+
+            # Add previous chunks to preprocessed_data
+            if previous_data:
+                preprocessed_data.extend(previous_data)
+
             # Store intermediate results
             chunk_results_path = os.path.join(session_dir, f"chunk_{current_chunk}.pkl")
             try:
@@ -492,7 +516,7 @@ async def handle_batch_chunk_result(
                     # Update final data
                     update_data.update({
                         "status": status,
-                        "completed_at": datetime.utcnow().isoformat(),
+                        "completed_at": datetime.now(UTC).isoformat(),
                         "result_file_path": result_file_path,
                         "result_media_type": result_media_type
                     })
@@ -527,7 +551,7 @@ async def handle_batch_chunk_result(
                     status = "completed"
                     update_data.update({
                         "status": status,
-                        "completed_at": datetime.utcnow().isoformat()
+                        "completed_at": datetime.now(UTC).isoformat()
                     })
             except Exception as e:
                 logging.error(f"Error handling online output: {str(e)}")
@@ -545,7 +569,7 @@ async def handle_batch_chunk_result(
         error_update = {
             "status": "error",
             "error_message": str(e),
-            "completed_at": datetime.utcnow().isoformat()
+            "completed_at": datetime.now(UTC).isoformat()
         }
         supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
         raise

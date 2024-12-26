@@ -98,11 +98,11 @@ def construct_status_response(job: dict) -> QueryResponse:
             output_preferences = job.get('output_preferences')
             if output_preferences['type'] == 'online':
                 if output_preferences['modify_existing']:
-                    message = f"{max(0, start_page - 1)} pages of file {file_id} processed and appended to selected sheet."
+                    message = f"{max(0, start_page)} pages of file {file_id} processed and appended to selected sheet."
                 else:
-                    message = f"{max(0, start_page - 1)} pages of file {file_id} processed and added to new sheet."
+                    message = f"{max(0, start_page)} pages of file {file_id} processed and added to new sheet."
             else:
-                message = f"Processing pages {start_page} to {end_page} of file {file_id}"
+                message = f"Processing pages {start_page + 1} to {end_page} of file {file_id}"
             
         return QueryResponse(
             result=None,

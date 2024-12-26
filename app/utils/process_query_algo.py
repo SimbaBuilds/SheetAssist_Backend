@@ -42,7 +42,7 @@ async def process_query(
     llm_service = LLMService()
     # Create execution namespace by extending base namespace
     namespace = dict(sandbox.base_namespace)
-    await check_client_connection(request)
+    
 
     # Handle different data types in namespace
     if data and len(data) > 0:
@@ -68,7 +68,6 @@ async def process_query(
         error_attempts = 0
         past_errors = []
         while result.error and error_attempts < 6:
-            await check_client_connection(request)
             print(f"\n\nError analysis {error_attempts}:")
             print(f"Error: {result.error}")
             past_errors.append(result.error)
@@ -92,8 +91,7 @@ async def process_query(
             
         # Analysis and improvement loop
         analysis_attempts = 1
-        while analysis_attempts < 6:    
-            await check_client_connection(request)
+        while analysis_attempts < 6:
             logging.info(f"Starting post-error analysis attempt {analysis_attempts}")
             old_data = data
             
@@ -115,7 +113,6 @@ async def process_query(
                         if isinstance(item, pd.DataFrame):
                             this_context = {}
                             diff_key = f"diff{i+1}_{j+1}"
-                            
                             # Convert timestamps, NaT values, and other non-JSON serializable types
                             processed_item = item.copy()
                             # Handle datetime columns
@@ -180,7 +177,6 @@ async def process_query(
             # Restart error handling for new attempt 
             error_attempts = 0
             while result.error and error_attempts < 6:
-                await check_client_connection(request)
                 print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
                 past_errors.append(result.error)
