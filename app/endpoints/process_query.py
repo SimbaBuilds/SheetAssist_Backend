@@ -15,7 +15,7 @@ from fastapi import BackgroundTasks
 from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
-from app.utils.connection_status import check_client_connection, construct_status_response
+from app.utils.connection_and_status import check_client_connection, construct_status_response
 from app.schemas import InputUrl
 from datetime import datetime
 import time
@@ -110,7 +110,7 @@ async def process_query_entry_endpoint(
                 "status": "created",
                 "total_pages": total_pages,
                 "processed_pages": 0,
-                "output_preferences": request_data.output_preferences.dict(),
+                "output_preferences": request_data.output_preferences,
                 "created_at": datetime.utcnow().isoformat(),
                 "started_at": None,
                 "completed_at": None,
@@ -120,7 +120,7 @@ async def process_query_entry_endpoint(
                 "result_media_type": None,
                 "page_chunks": page_chunks,
                 "current_chunk": 0,
-                "query": request_data.query
+                "query": request_data.query,
             }).execute()
             
             # Add logging before background task

@@ -9,7 +9,7 @@ import os
 import json
 from fastapi import Request
 import numpy as np
-from app.utils.connection_status import check_client_connection
+from app.utils.connection_and_status import check_client_connection
 
 
 def extract_code(suggested_code: str) -> str:
