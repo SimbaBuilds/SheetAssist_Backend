@@ -105,6 +105,20 @@ class QueryResponse(BaseModel):
         """docstring"""
         arbitrary_types_allowed = True
 
+
+class ChunkResponse(BaseModel):
+    """Unified response model for all query processing results"""
+    result: SandboxResult
+    status: str  # "completed", "error", or "processing"
+    message: str  # Description of result or error message
+    files: Optional[List[FileInfo]] = None  # For downloadable files
+    num_images_processed: int = 0
+    job_id: Optional[str] = None  # Added for batch processing
+
+    class Config:
+        """docstring"""
+        arbitrary_types_allowed = True
+
 # batch_jobs table
 class BatchJob(BaseModel):
     job_id: str

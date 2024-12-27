@@ -1,8 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request, Response
-from typing import List, Annotated
+from typing import List, Annotated, Optional
 from app.utils.process_query_algo import process_query
 from app.utils.sandbox import EnhancedPythonInterpreter
-from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo
+from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, ChunkResponse, FileDataInfo
 import json
 from app.utils.file_management import temp_file_manager
 import os
@@ -352,8 +352,9 @@ async def _process_batch_chunk(
     files: List[UploadFile],
     job_id: str,
     session_dir: str,
-    current_chunk: int = None
-) -> QueryResponse:
+    current_chunk: Optional[int] = None,
+    previous_chunk_return_value: Optional[tuple] = None
+) -> ChunkResponse:
     """Internal function to process a single batch chunk without route dependencies."""
     try:
         # Get job data and validate chunk
@@ -390,18 +391,38 @@ async def _process_batch_chunk(
             session_dir=session_dir,
             supabase=supabase,
             user_id=user_id,
-            num_images_processed=0,  # Initialize for each chunk
-            page_range=current_processing_info.page_range
+            num_images_processed=0,  
+            page_range=current_processing_info.page_range,
         )
 
+
+        #append previous chunk to input data if it exists and output type is download (online sheet output appends each batch, persisting results)
+        if previous_chunk_return_value and request_data.output_preferences.type == "download":
+            job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+            if not job_response.data:
+                raise HTTPException(status_code=404, detail="Job not found")
+            job = job_response.data[0]
+            page_chunks = job.get('page_chunks', [])
+            current_chunk = job.get('current_chunk', 0)
+            file_name = page_chunks[current_chunk]['file_id']
+            previous_chunk_df = previous_chunk_return_value[0]
+            previous_chunk_data = FileDataInfo(
+                content=previous_chunk_df,
+                snapshot=get_data_snapshot(previous_chunk_df, "DataFrame"),
+                data_type="DataFrame",
+                original_file_name=file_name
+            )
+            preprocessed_data.append(previous_chunk_data)
+
         sandbox = EnhancedPythonInterpreter()
-        result = await process_query(
+        #Obtain SandboxResult
+        result = await process_query( 
             request=None,  # Not needed for core processing
             query=request_data.query,
             sandbox=sandbox,
             data=preprocessed_data,
         )
-
+        
         if result.error:
             raise ValueError(result.error)
 
@@ -430,14 +451,8 @@ async def _process_batch_chunk(
             "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
         }).eq("job_id", job_id).execute()
 
-        return QueryResponse(
-            result=TruncatedSandboxResult(
-                original_query=request_data.query,
-                print_output="",
-                error=None,
-                timed_out=False,
-                return_value_snapshot=result.return_value_snapshot
-            ),
+        return ChunkResponse(
+            result=result,
             status=status,
             message=f"Batch {current_chunk + 1}/{len(page_chunks)} processed successfully",
             files=None,
@@ -470,7 +485,8 @@ async def process_query_batch_endpoint(
 
     try:
         session_dir = temp_file_manager.get_temp_dir()
-        total_images_processed = 0  # Track total images across all chunks
+        total_images_processed = 0
+        previous_chunk_return_value = None
 
         # Store file contents for processing
         files_data = []
@@ -483,17 +499,6 @@ async def process_query_batch_endpoint(
                 'content_type': file.content_type
             })
         
-        # Process the first chunk
-        response = await _process_batch_chunk(
-            user_id=user_id,
-            supabase=supabase,
-            request_data=request_data,
-            files=files,
-            job_id=job_id,
-            session_dir=session_dir,
-            current_chunk=0
-        )
-
         # Get job data
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
         if not job_response.data or len(job_response.data) == 0:
@@ -501,6 +506,7 @@ async def process_query_batch_endpoint(
             
         job_data = job_response.data[0]
         page_chunks = job_data["page_chunks"]
+        response = None
 
         # Process all chunks sequentially
         for chunk_index in range(len(page_chunks)):
@@ -518,7 +524,7 @@ async def process_query_batch_endpoint(
                 )
                 chunk_files.append(upload_file)
 
-            # Process the chunk
+            # Process the chunk for ChunkResponse
             response = await _process_batch_chunk(
                 user_id=user_id,
                 supabase=supabase,
@@ -526,8 +532,12 @@ async def process_query_batch_endpoint(
                 files=chunk_files,
                 job_id=job_id,
                 session_dir=session_dir,
-                current_chunk=chunk_index
+                current_chunk=chunk_index,
+                previous_chunk_return_value=previous_chunk_return_value
             )
+
+            # Store the return value for the next chunk
+            previous_chunk_return_value = response.result.return_value #tuple
 
             # Accumulate total images processed
             total_images_processed += response.num_images_processed
@@ -537,12 +547,27 @@ async def process_query_batch_endpoint(
             supabase.table("batch_jobs").update({
                 "current_chunk": chunk_index + 1,
                 "processed_pages": processed_pages,
-                "total_images_processed": total_images_processed,  # Add total
+                "total_images_processed": total_images_processed,
                 "status": "processing" if chunk_index < len(page_chunks) - 1 else "completed",
                 "completed_at": datetime.now(UTC).isoformat() if chunk_index == len(page_chunks) - 1 else None
             }).eq("job_id", job_id).execute()
 
-        return response
+        truncated_result = TruncatedSandboxResult(
+            original_query=request_data.query,
+            print_output="",
+            error=response.result.error,
+            timed_out=response.result.timed_out,
+            return_value_snapshot=response.result.return_value_snapshot
+        )
+        
+        return ChunkResponse(
+            result=truncated_result,
+            status=response.status,
+            message=response.message,
+            files=response.files,
+            num_images_processed=response.num_images_processed,
+            job_id=response.job_id
+        )
 
     except Exception as e:
         logger.error(f"Batch processing error for job {job_id}: {str(e)}")

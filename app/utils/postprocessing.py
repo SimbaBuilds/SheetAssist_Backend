@@ -420,7 +420,6 @@ async def handle_batch_chunk_result(
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """Handle the result of a batch chunk processing."""
     try:
-        
         llm_service = LLMService()
         
         # Extract data from tuple if needed
@@ -457,48 +456,12 @@ async def handle_batch_chunk_result(
 
         # Handle based on output preference type
         if request_data.output_preferences.type == "download":
-            # Load previous chunk results if not first chunk
-            previous_data = []
-            if current_chunk > 0:
-                try:
-                    for i in range(current_chunk):
-                        prev_chunk_path = os.path.join(session_dir, f"chunk_{i}.pkl")
-                        if os.path.exists(prev_chunk_path):
-                            with open(prev_chunk_path, 'rb') as f:
-                                chunk_data = pickle.load(f)
-                                if isinstance(chunk_data, pd.DataFrame):
-                                    previous_data.append(FileDataInfo(
-                                        content=chunk_data,
-                                        data_type="DataFrame",
-                                        snapshot=get_data_snapshot(chunk_data, "DataFrame"),
-                                        original_file_name=f"chunk_{i}"
-                                    ))
-                except Exception as e:
-                    logging.warning(f"Error loading previous chunks: {str(e)}")
-
-            # Add previous chunks to preprocessed_data
-            if previous_data:
-                preprocessed_data.extend(previous_data)
-
-            # Store intermediate results
-            chunk_results_path = os.path.join(session_dir, f"chunk_{current_chunk}.pkl")
-            try:
-                if isinstance(processed_data, pd.DataFrame):
-                    processed_data.to_pickle(chunk_results_path)
-                else:
-                    with open(chunk_results_path, 'wb') as f:
-                        pickle.dump(processed_data, f)
-            except Exception as e:
-                logging.error(f"Error saving chunk results: {str(e)}")
-                raise
-
             # Process final chunk
             if current_chunk == total_chunks - 1:
                 try:
-                    combined_data = await combine_chunk_results(session_dir, total_chunks)
                     tmp_path, media_type = await handle_download(
                         SandboxResult(
-                            return_value=combined_data,
+                            return_value=processed_data,
                             error=None,
                             original_query=request_data.query,
                             print_output="",
@@ -507,7 +470,6 @@ async def handle_batch_chunk_result(
                         ),
                         request_data,
                         preprocessed_data,
-                        llm_service
                     )
                     status = "completed"
                     result_file_path = str(tmp_path)
@@ -520,14 +482,6 @@ async def handle_batch_chunk_result(
                         "result_file_path": result_file_path,
                         "result_media_type": result_media_type
                     })
-                    
-                    # Clean up session directory after successful combination
-                    try:
-                        import shutil
-                        shutil.rmtree(session_dir)
-                    except Exception as e:
-                        logging.warning(f"Failed to clean up session directory: {str(e)}")
-                        
                 except Exception as e:
                     logging.error(f"Error processing final chunk: {str(e)}")
                     raise
@@ -560,7 +514,6 @@ async def handle_batch_chunk_result(
         # Update job status in database
         supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
 
-
         return status, result_file_path, result_media_type
 
     except Exception as e:
@@ -572,63 +525,4 @@ async def handle_batch_chunk_result(
             "completed_at": datetime.now(UTC).isoformat()
         }
         supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
-        raise
-
-async def combine_chunk_results(session_dir: str, total_chunks: int) -> Any:
-    """Combine results from multiple chunks."""
-    try:
-        combined_data = None
-        chunk_paths = []
-        
-        for i in range(total_chunks):
-            chunk_path = os.path.join(session_dir, f"chunk_{i}.pkl")
-            chunk_paths.append(chunk_path)
-            
-            try:
-                with open(chunk_path, 'rb') as f:
-                    chunk_data = pickle.load(f)
-                    
-                    # Initialize combined_data with first chunk
-                    if combined_data is None:
-                        combined_data = chunk_data
-                        continue
-                        
-                    # Combine based on data type
-                    if isinstance(combined_data, pd.DataFrame):
-                        if isinstance(chunk_data, pd.DataFrame):
-                            combined_data = pd.concat([combined_data, chunk_data], ignore_index=True)
-                        else:
-                            # Handle case where chunk data is different type
-                            chunk_df = prepare_dataframe(chunk_data)
-                            combined_data = pd.concat([combined_data, chunk_df], ignore_index=True)
-                    elif isinstance(combined_data, list):
-                        if isinstance(chunk_data, list):
-                            combined_data.extend(chunk_data)
-                        else:
-                            combined_data.append(chunk_data)
-                    elif isinstance(combined_data, dict):
-                        if isinstance(chunk_data, dict):
-                            combined_data.update(chunk_data)
-                        else:
-                            # Add non-dict data as a numbered entry
-                            combined_data[f'chunk_{i}'] = chunk_data
-                    else:
-                        # For string or other types, convert to string and concatenate
-                        combined_data = str(combined_data) + '\n' + str(chunk_data)
-                        
-            except Exception as e:
-                logging.error(f"Error processing chunk {i}: {str(e)}")
-                raise
-        
-        # Clean up intermediate chunk files
-        for path in chunk_paths:
-            try:
-                os.remove(path)
-            except Exception as e:
-                logging.warning(f"Failed to remove chunk file {path}: {str(e)}")
-        
-        return combined_data
-        
-    except Exception as e:
-        logging.error(f"Error combining chunk results: {str(e)}")
         raise

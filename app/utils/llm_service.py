@@ -164,7 +164,6 @@ class OpenaiVisionProcessor  :
             i = 0    
             # Process only pages in range
             for b64_page in b64_pages:
-                i += 1
                 completion = self.client.chat.completions.create(
                     model=os.getenv("OPENAI_MAIN_MODEL"),
                     messages=[
@@ -196,8 +195,9 @@ class OpenaiVisionProcessor  :
                     ],
                     max_tokens=2000
                 )
+                i += 1
                 page_content = completion.choices[0].message.content
-                print(f"""\n -------LLM called with query: {query} on page: {i} ------- \n\n
+                print(f"""\n -------LLM called with query: {query} on page: {i} of batch ------- \n\n
                 Input data snapshot:\n {input_data_snapshot}
                 Page Content:\n {page_content}\n
                 """)
@@ -393,7 +393,7 @@ class AnthropicVisionProcessor  :
                 )
                 
                 page_content = message.content[0].text
-                print(f"""\n -------LLM called with query: {query} on page: {i} ------- \n\n
+                print(f"""\n -------LLM called with query: {query} on page: {i} of batch ------- \n\n
                 Input data snapshot:\n {input_data_snapshot}
                 Page Content:\n {page_content}\n
                 """)
@@ -703,7 +703,7 @@ class LLMService:
                 Old Data Snapshots:\n{old_data_snapshot}\n
                 Error Free Code:\n{result.code}\n
                 Result Snapshot:\n{new_data.snapshot}\n
-                Dataset Diff Information:\n{analyzer_context}\n
+                Dataset Diff Information:\n{analyzer_context[:200]} cont'd...\n
                 """
 
         response = await self._openai_generate_text(
@@ -714,7 +714,7 @@ class LLMService:
                 Old Data Snapshots:\n{old_data_snapshot}\n
                 Error Free Code:\n{result.code}\n
                 Result Snapshot:\n{new_data.snapshot}\n
-                Dataset Diff Information:\n{analyzer_context}\n\n
+                Dataset Diff Information:\n{analyzer_context} cont'd...\n\n
                 """
         )
         return response
@@ -728,7 +728,7 @@ class LLMService:
                 Old Data Snapshots:\n{old_data_snapshot}\n
                 Error Free Code:\n{result.code}\n
                 Result Snapshot:\n{new_data.snapshot}\n
-                Dataset Diff Information:\n{analyzer_context}\n
+                Dataset Diff Information:\n{analyzer_context} cont'd...\n
                 """
 
         return await self._anthropic_generate_text(

@@ -1,7 +1,7 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
 from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, DatasetDiff, prepare_analyzer_context
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 import logging
@@ -40,6 +40,7 @@ async def process_query(
     
     
     llm_service = LLMService()
+    
     # Create execution namespace by extending base namespace
     namespace = dict(sandbox.base_namespace)
     

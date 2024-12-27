@@ -305,7 +305,7 @@ class FilePreprocessor:
         output_path: str = None, 
         query: str = None, 
         input_data: List[FileDataInfo] = None,
-        page_range: Optional[tuple[int, int]] = None
+        page_range: Optional[tuple[int, int]] = None,
     ) -> Tuple[str, str, bool]:
         """Process PDF files and convert to string if readable, otherwise handle with vision"""
         doc = None
@@ -341,8 +341,12 @@ class FilePreprocessor:
             total_text_length = 0
             page_count = len(doc)
             
-            start_page = page_range[0] if page_range else 0
-            end_page = min(page_range[1], page_count) if page_range else page_count
+            if page_range:
+                start_page = page_range[0] if page_range else 0
+                end_page = min(page_range[1], page_count) if page_range else page_count
+            else:
+                start_page = 0
+                end_page = page_count
             
             for page_num in range(start_page, end_page):
                 page = doc[page_num]
@@ -354,6 +358,7 @@ class FilePreprocessor:
 
             if not is_image_like_pdf:
                 return text_content, "text", False
+            
             
             # For unreadable PDFs, process with vision
             provider, vision_result = await self.llm_service.execute_with_fallback(
@@ -397,7 +402,7 @@ class FilePreprocessor:
         file_type: str, 
         sheet_name: str = None, 
         processed_data: List[FileDataInfo] = None,
-        page_range: Optional[tuple[int, int]] = None  # Add page_range parameter
+        page_range: Optional[tuple[int, int]] = None,
     ) -> Union[str, pd.DataFrame]:
         """
         Preprocess file based on its type
@@ -427,7 +432,7 @@ class FilePreprocessor:
                 output_path=None, 
                 query=query, 
                 input_data=input_data,
-                page_range=page_range
+                page_range=page_range,
             )
         if file_type.lower() in ['png', 'jpg', 'jpeg']:
             return await processor(file, output_path=None, query=query, input_data=input_data)
@@ -457,7 +462,7 @@ async def preprocess_files(
     supabase: SupabaseClient,
     user_id: str,
     num_images_processed: int = 0,
-    page_range: Optional[tuple[int, int]] = None
+    page_range: Optional[tuple[int, int]] = None,
 ) -> Tuple[List[FileDataInfo], int]:
     """
     Preprocesses files and URLs, extracting their content for query processing.
@@ -558,7 +563,7 @@ async def preprocess_files(
                         file_type, 
                         sheet_name=None, 
                         processed_data=processed_data,
-                        page_range=page_range  # Pass page_range to preprocess_file
+                        page_range=page_range,  # Pass page_range to preprocess_file
                     )
 
                 

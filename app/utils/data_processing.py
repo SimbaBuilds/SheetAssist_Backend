@@ -240,7 +240,6 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     sample_rows = new_df.sample(n=min(10, len(new_df))).copy()
     sample_rows.index.name = 'row_number'
     sample_output = [convert_dict_timestamps(row) for row in sample_rows.reset_index().to_dict(orient='records')]
-    logging.info(f"Sample output: {sample_output[:100]}...cont'd")
     
     # Only include non-empty changes
     changes = {}
