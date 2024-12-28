@@ -340,7 +340,7 @@ async def process_query_standard_endpoint(
         return QueryResponse(
             result=truncated_result,
             status="error",
-            message="An error occurred -- please try rephrasing or adding more information to your request.",
+            message=error_msg,
             files=None,
             num_images_processed=num_images_processed
         )

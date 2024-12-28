@@ -169,19 +169,12 @@ class FilePreprocessor:
             raise ValueError(FilePreprocessor._sanitize_error(e))
 
     async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
-        """
-        Process image files (.png, .jpg, .jpeg) and extract content using vision processing
-        
-        Args:
-            file: File object or path to file
-            output_path: Optional path to save converted image
-            query: Optional query for vision processing
-            llm_service: LLM service instance for vision processing
-            
-        Returns:
-            Tuple[str, str]: (vision_content, new_file_path)
-        """
+        """Process image files and extract content using vision processing"""
         try:
+            # Check limits before processing
+            if self.supabase and self.user_id:
+                await self.check_image_processing_limits(self.supabase, self.user_id)
+            
             # Process the image file
             if isinstance(file, str):
                 img = Image.open(file)
@@ -311,6 +304,7 @@ class FilePreprocessor:
         doc = None
         temp_path = None
         try:
+
             # Create a temporary file if we received a file object
             if not isinstance(file, str):
                 try:
@@ -358,6 +352,11 @@ class FilePreprocessor:
 
             if not is_image_like_pdf:
                 return text_content, "text", False
+                        
+            num_pages = page_range[1] - page_range[0]
+            # Check limits before processing if PDF needs vision processing
+            if self.supabase and self.user_id:
+                await self.check_image_processing_limits(self.supabase, self.user_id, num_pages)
             
             
             # For unreadable PDFs, process with vision
@@ -451,6 +450,44 @@ class FilePreprocessor:
             return error_msg.encode('ascii', 'ignore').decode('ascii')
         except:
             return "Error processing file"
+
+    async def check_image_processing_limits(self, supabase: SupabaseClient, user_id: str, num_pages: int = 1) -> None:
+        """
+        Check if user has exceeded image processing limits
+        
+        Args:
+            supabase: Supabase client
+            user_id: User ID
+            num_pages: Number of pages/images to process (default 1)
+            
+        Raises:
+            ValueError: If user has exceeded limits
+        """
+        # Get user profile and usage
+        profile_response = supabase.table("user_profile").select("*").eq("id", user_id).execute()
+        usage_response = supabase.table("user_usage").select("*").eq("user_id", user_id).execute()
+        
+        if not profile_response.data or not usage_response.data:
+            raise ValueError("Could not fetch user data")
+        
+        profile = profile_response.data[0]
+        usage = usage_response.data[0]
+        
+        # Get plan limits
+        plan = profile.get("plan", "free")
+        image_limit = {"free": 10, "pro": 200}.get(plan, 0)
+        
+        # Check image limit
+        current_images = usage.get("images_processed_this_month", 0)
+        if current_images + num_pages > image_limit:
+            raise ValueError("Image limit reached. Upgrade to pro in your account settings.")
+        
+        # Check overage limit
+        overage_this_month = usage.get("overage_this_month", 0)
+        overage_hard_limit = usage.get("overage_hard_limit", 0)
+        
+        if overage_this_month >= overage_hard_limit:
+            raise ValueError("Overage hard limit reached. Increase this limit in your account settings.")
 
 
 async def preprocess_files(

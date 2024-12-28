@@ -100,6 +100,8 @@ class QueryResponse(BaseModel):
     files: Optional[List[FileInfo]] = None  # For downloadable files
     num_images_processed: int = 0
     job_id: Optional[str] = None  # Added for batch processing
+    error: Optional[str] = None
+    error_message: Optional[str] = None
 
     class Config:
         """docstring"""
