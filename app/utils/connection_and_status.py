@@ -94,15 +94,15 @@ def construct_status_response(job: dict) -> QueryResponse:
             current_chunk = job.get('current_chunk', 0)
             file_id = page_chunks[current_chunk]['file_id']
             start_page = page_chunks[current_chunk]['page_range'][0]
-            end_page = page_chunks[current_chunk]['page_range'][1]
             output_preferences = job.get('output_preferences')
+            total_pages = page_chunks[current_chunk]['metadata']['page_count']
             if output_preferences['type'] == 'online':
                 if output_preferences['modify_existing']:
-                    message = f"{max(0, start_page)} of {job.get('total_pages', 0)} pages from file {file_id} processed and appended to selected sheet."
+                    message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and appended to selected sheet."
                 else:
-                    message = f"{max(0, start_page)} of {job.get('total_pages', 0)} pages from file {file_id} processed and added to new sheet."
-            else:
-                message = f"Processing pages {start_page + 1} to {end_page} of file {file_id}"
+                    message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and added to new sheet."
+            else: #download output
+                message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed."
             
         return QueryResponse(
             result=None,

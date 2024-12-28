@@ -57,12 +57,14 @@ async def process_query_entry_endpoint(
                 'content_type': file.content_type
             })
         
+        total_pages = 0
         # Update page counts using the original files
         if request_data.files_metadata:
             for file_meta, upload_file in zip(request_data.files_metadata, files):
                 if not file_meta.page_count:
                     page_count = await determine_pdf_page_count(upload_file)
                     file_meta.page_count = page_count
+                    total_pages += file_meta.page_count
                     await upload_file.seek(0)
 
         #If destination url and no input url, add destination url and sheet name to input urls for processing context
@@ -71,11 +73,9 @@ async def process_query_entry_endpoint(
         
         # Check if any PDF has more than CHUNK_SIZE pages
         has_large_pdf = False
-        total_pages = 0
         for file_meta in (request_data.files_metadata or []):
             logger.info(f"file_meta: {file_meta.page_count}")
             if file_meta.page_count and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
-                total_pages += file_meta.page_count
                 has_large_pdf = True
                 break
                 
@@ -560,7 +560,7 @@ async def process_query_batch_endpoint(
             return_value_snapshot=response.result.return_value_snapshot
         )
         
-        return ChunkResponse(
+        return QueryResponse(
             result=truncated_result,
             status=response.status,
             message=response.message,

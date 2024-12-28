@@ -145,7 +145,7 @@ async def process_query(
                 analysis_result
             )
             logging.info(f"Analysis result: {analysis_result}")
-
+            print(f"\n\n----- Analysis result -----\n {analysis_result}\n")
 
             if success:
                 #SUCCESS
