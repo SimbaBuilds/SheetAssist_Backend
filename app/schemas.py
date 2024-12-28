@@ -92,20 +92,17 @@ class FileInfo(BaseModel):
     download_url: Optional[str] = None
 
 
+# Handles batch and standard query processing results
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
-    result: Optional[TruncatedSandboxResult]
+    original_query: str
     status: str  # "completed", "error", or "processing"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files
     num_images_processed: int = 0
     job_id: Optional[str] = None  # Added for batch processing
     error: Optional[str] = None
-    error_message: Optional[str] = None
-
-    class Config:
-        """docstring"""
-        arbitrary_types_allowed = True
+    total_pages: Optional[int] = 0
 
 
 class ChunkResponse(BaseModel):

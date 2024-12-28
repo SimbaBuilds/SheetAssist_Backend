@@ -31,7 +31,7 @@ def extract_code(suggested_code: str) -> str:
     )
     return cleaned_code
 
-async def process_query(
+async def process_query_algo(
     request: Request,
     query: str, 
     sandbox: EnhancedPythonInterpreter,
@@ -87,7 +87,7 @@ async def process_query(
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
             error_attempts += 1
             if error_attempts == 6:
-                result.error = "Failed to interpret query. Please try rephrasing your request."
+
                 return result
             
         # Analysis and improvement loop
@@ -207,21 +207,23 @@ async def process_query(
         return result
         
     except ConnectionError as e:
+        detailed_error = f'Connection Error: {str(e)}'
         result = SandboxResult(
             original_query=query,
             print_output="",
             code="",
-            error=f'Connection Error: {str(e)}',
+            error=detailed_error,
             return_value=None,
             timed_out=False
         )
         return result
     except Exception as e:
+        detailed_error = f'LLM interpretation failed: {str(e)}\nType: {type(e).__name__}'
         result = SandboxResult(
             original_query=query,
             print_output="",
             code="",
-            error=f'LLM interpretation failed: {str(e)}\nType: {type(e).__name__}',
+            error=detailed_error,
             return_value=None,
             timed_out=False
         )

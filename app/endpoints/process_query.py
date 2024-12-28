@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request, Response
 from typing import List, Annotated, Optional
-from app.utils.process_query_algo import process_query
+from app.utils.process_query_algo import process_query_algo
 from app.utils.sandbox import EnhancedPythonInterpreter
 from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, ChunkResponse, FileDataInfo
 import json
@@ -30,6 +30,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_entry_endpoint(
@@ -149,13 +151,6 @@ async def process_query_entry_endpoint(
             )
             
             return QueryResponse(
-                result=TruncatedSandboxResult(
-                    original_query=request_data.query,
-                    print_output="",
-                    error=None,
-                    timed_out=False,
-                    return_value_snapshot=None
-                ),
                 status="processing",
                 message=f"Batch processing initiated. Job ID: {job_id}",
                 files=None,
@@ -219,7 +214,6 @@ async def process_query_standard_endpoint(
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
         
-    truncated_result = None
     num_images_processed = 0
 
     logger.info( f"process_query_standard_endpoint called")
@@ -249,15 +243,25 @@ async def process_query_standard_endpoint(
                 user_id=user_id,
                 num_images_processed=num_images_processed
             )
+        except ValueError as e:  # Specific handling for preprocessing errors
+            logger.error(f"Preprocessing error for user {user_id}: {str(e)}")
+            return QueryResponse(
+                original_query=request_data.query,
+                status="error",
+                message=str(e),
+                files=None,
+                num_images_processed=num_images_processed,
+                error=str(e),
+                total_pages=0
+            )
 
 
-            logger.info(f"num_images_processed: {num_images_processed}")
         except Exception as e:
             raise ValueError(e)
 
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
-        result = await process_query(
+        result = await process_query_algo(
             request=request,
             query=request_data.query,
             sandbox=sandbox,
@@ -269,66 +273,88 @@ async def process_query_standard_endpoint(
         logger.info(f"Query processed for user {user_id} with return value snapshot type: {type(result.return_value).__name__}")
 
         if result.error:
-            raise HTTPException(status_code=400, detail=result.error + " -- please try rephrasing your request")
-        
-
-        truncated_result = TruncatedSandboxResult(
-                original_query=result.original_query,
-                print_output=result.print_output,
+            return QueryResponse(
+                original_query=request_data.query,
+                status="error",
+                message="There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request.",
+                files=None,
+                num_images_processed=num_images_processed,
                 error=result.error,
-                timed_out=result.timed_out,
-                return_value_snapshot=result.return_value_snapshot
+                total_pages=0
             )
-
-
+        
+        await check_client_connection(request)
+       
         # Handle output based on type
         if request_data.output_preferences.type == "download":
-            tmp_path, media_type = handle_download(result, request_data, preprocessed_data)
-            # Add cleanup task but DON'T execute immediately
-            background_tasks.add_task(temp_file_manager.cleanup_marked)
-            
-            # Update download URL to match client expectations
-            download_url = f"/download?file_path={tmp_path}"
-            
-
-            logger.info(f"num_images_processed: {num_images_processed}")
-            await check_client_connection(request)
-            return QueryResponse(
-                result=truncated_result,
-                status="completed",
-                message="File ready for download",
-                files=[FileInfo(
-                    file_path=str(tmp_path),
-                    media_type=media_type,
-                    filename=os.path.basename(tmp_path),
-                    download_url=download_url
-                )],
-                num_images_processed=num_images_processed
-            )
+            try:
+                tmp_path, media_type = handle_download(result, request_data, preprocessed_data)
+                # Add cleanup task but DON'T execute immediately
+                background_tasks.add_task(temp_file_manager.cleanup_marked)
+                
+                # Update download URL to match client expectations
+                download_url = f"/download?file_path={tmp_path}"
+                
+                logger.info(f"num_images_processed: {num_images_processed}")
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="completed",
+                    message="Processing complete.  Your file should download automatically.",
+                    files=[FileInfo(
+                        file_path=str(tmp_path),
+                        media_type=media_type,
+                        filename=os.path.basename(tmp_path),
+                        download_url=download_url
+                    )],
+                    num_images_processed=num_images_processed
+                )
+            except Exception as e:
+                logger.error(f"Download processing failed for user {user_id}: {str(e)}")
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="error",
+                    message=f"Failed to process download: {str(e)[:100]}...",
+                    files=None,
+                    num_images_processed=num_images_processed,
+                    error=str(e),
+                    total_pages=0
+                )
 
         elif request_data.output_preferences.type == "online":
             if not request_data.output_preferences.destination_url:
                 raise ValueError("destination_url is required for online type")
                 
-            # Handle destination sheet upload
-            await handle_destination_upload(
-                result.return_value,
-                request_data,
-                preprocessed_data,
-                supabase,
-                user_id
-            )
+            try:
+                # Handle destination sheet upload
+                await handle_destination_upload(
+                    result.return_value,
+                    request_data,
+                    preprocessed_data,
+                    supabase,
+                    user_id
+                )
 
-            # Only cleanup immediately for online type
-            temp_file_manager.cleanup_marked()
-            await check_client_connection(request)
-            return QueryResponse(
-                result=truncated_result,
-                status="completed",
-                message="Data successfully uploaded to destination",
-                files=None,
-                num_images_processed=num_images_processed
-            )
+                # Only cleanup immediately for online type
+                temp_file_manager.cleanup_marked()
+                await check_client_connection(request)
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="completed",
+                    message="Data successfully uploaded to destination",
+                    files=None,
+                    num_images_processed=num_images_processed
+                )
+            except Exception as e:
+                logger.error(f"Online destination upload failed for user {user_id}: {str(e)}")
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="error", 
+                    message=f"Failed to upload to destination: {str(e)[:100]}...",
+                    files=None,
+                    num_images_processed=num_images_processed,
+                    error=str(e),
+                    total_pages=0
+                )
         
         else:
             raise ValueError(f"Invalid output type: {request_data.output_preferences.type}")
@@ -336,13 +362,15 @@ async def process_query_standard_endpoint(
     except Exception as e:
         error_msg = str(e)[:200] if str(e).isascii() else f"Error processing request: {e.__class__.__name__}"
         logger.error(f"Process query error for user {user_id}: {error_msg}")
-
+        
         return QueryResponse(
-            result=truncated_result,
+            original_query=request_data.query,
             status="error",
             message=error_msg,
             files=None,
-            num_images_processed=num_images_processed
+            num_images_processed=num_images_processed,
+            error=str(e),
+            total_pages=0
         )
 
 async def _process_batch_chunk(
@@ -416,7 +444,7 @@ async def _process_batch_chunk(
 
         sandbox = EnhancedPythonInterpreter()
         #Obtain SandboxResult
-        result = await process_query( 
+        result = await process_query_algo( 
             request=None,  # Not needed for core processing
             query=request_data.query,
             sandbox=sandbox,
@@ -424,7 +452,15 @@ async def _process_batch_chunk(
         )
         
         if result.error:
-            raise ValueError(result.error)
+            error_msg = f"Chunk processing error: {result.error}"
+            supabase.table("batch_jobs").update({
+                "status": "error",
+                "message": "There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request.",
+                "error_message": error_msg,
+                "completed_at": datetime.now(UTC).isoformat()
+            }).eq("job_id", job_id).execute()
+            
+            raise ValueError(error_msg)
 
         # Handle post-processing
         status, result_file_path, result_media_type = await handle_batch_chunk_result(
@@ -460,6 +496,14 @@ async def _process_batch_chunk(
             job_id=job_id
         )
 
+    except ValueError as e:  # Specific handling for preprocessing errors
+        logger.error(f"Preprocessing error in batch chunk {current_chunk}: {str(e)}")
+        supabase.table("batch_jobs").update({
+            "status": "error",
+            "error_message": str(e),
+            "completed_at": datetime.now(UTC).isoformat()
+        }).eq("job_id", job_id).execute()
+        raise
     except Exception as e:
         logger.error(f"Error processing batch chunk {current_chunk}: {str(e)}")
         supabase.table("batch_jobs").update({
@@ -551,17 +595,9 @@ async def process_query_batch_endpoint(
                 "status": "processing" if chunk_index < len(page_chunks) - 1 else "completed",
                 "completed_at": datetime.now(UTC).isoformat() if chunk_index == len(page_chunks) - 1 else None
             }).eq("job_id", job_id).execute()
-
-        truncated_result = TruncatedSandboxResult(
-            original_query=request_data.query,
-            print_output="",
-            error=response.result.error,
-            timed_out=response.result.timed_out,
-            return_value_snapshot=response.result.return_value_snapshot
-        )
         
         return QueryResponse(
-            result=truncated_result,
+            original_query=request_data.query,
             status=response.status,
             message=response.message,
             files=response.files,

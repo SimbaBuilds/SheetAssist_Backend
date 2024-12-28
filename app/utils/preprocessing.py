@@ -541,7 +541,7 @@ async def preprocess_files(
         except Exception as e:
             error_msg = sanitize_error_message(e)
             logging.error(f"Error processing URL {input_url.url}: {error_msg}")
-            raise Exception(f"Error processing URL {input_url.url}: {error_msg}")
+            raise ValueError(f"Error processing URL {input_url.url}: {error_msg}")
     
     
     # Sort files_metadata to process CSV and XLSX files first

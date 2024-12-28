@@ -483,8 +483,15 @@ async def handle_batch_chunk_result(
                         "result_media_type": result_media_type
                     })
                 except Exception as e:
-                    logging.error(f"Error processing final chunk: {str(e)}")
-                    raise
+                    error_msg = f"Error creating download for batch result: {str(e)}"
+                    logging.error(error_msg)
+                    update_data.update({
+                        "status": "error",
+                        "error_message": error_msg,
+                        "completed_at": datetime.now(UTC).isoformat()
+                    })
+                    supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+                    raise ValueError(error_msg)
 
         elif request_data.output_preferences.type == "online":
             try:
@@ -508,8 +515,15 @@ async def handle_batch_chunk_result(
                         "completed_at": datetime.now(UTC).isoformat()
                     })
             except Exception as e:
-                logging.error(f"Error handling online output: {str(e)}")
-                raise
+                error_msg = f"Error uploading batch result to destination: {str(e)}"
+                logging.error(error_msg)
+                update_data.update({
+                    "status": "error",
+                    "error_message": error_msg,
+                    "completed_at": datetime.now(UTC).isoformat()
+                })
+                supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+                raise ValueError(error_msg)
 
         # Update job status in database
         supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
@@ -517,12 +531,12 @@ async def handle_batch_chunk_result(
         return status, result_file_path, result_media_type
 
     except Exception as e:
-        logging.error(f"Error in handle_batch_chunk_result: {str(e)}")
-        # Update job with error status
+        error_msg = f"Error in batch chunk postprocessing: {str(e)}"
+        logging.error(error_msg)
         error_update = {
             "status": "error",
-            "error_message": str(e),
+            "error_message": error_msg,
             "completed_at": datetime.now(UTC).isoformat()
         }
         supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
-        raise
+        raise ValueError(error_msg)

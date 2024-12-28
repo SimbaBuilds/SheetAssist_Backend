@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request
-from typing import List, Optional, Annotated
+from typing import List, Optional, Annotated, Union
 from pydantic import BaseModel
 from app.utils.sandbox import EnhancedPythonInterpreter
 import json
@@ -32,14 +32,18 @@ class DataVisualizationRequest(BaseModel):
     input_urls: Optional[List[InputUrl]] = None
     options: VisualizationOptions
 
-class VisualizationResponse(BaseModel):
-    status: str = "success"
+class VisualizationSuccessResponse(BaseModel):
+    success: bool = True
     image_data: str = None # base64 encoded image
     generated_image_name: str = None
-    error: Optional[str] = None
     message: str = "Visualization generated successfully"
 
-@router.post("/visualize_data", response_model=VisualizationResponse)
+class VisualizationErrorResponse(BaseModel):
+    success: bool = False
+    error: str = None
+    message: str = "Error generating visualization"
+
+@router.post("/visualize_data", response_model=Union[VisualizationSuccessResponse, VisualizationErrorResponse])
 async def create_visualization(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user)],
@@ -108,8 +112,8 @@ async def create_visualization(
         with open(temp_image_path, "wb") as f:
             f.write(buf.getvalue())
 
-        return VisualizationResponse(
-            status="success",
+        return VisualizationSuccessResponse(
+            success=True,
             image_data=image_data,
             generated_image_name=generated_image_name,
             message="Visualization generated successfully"
@@ -117,8 +121,8 @@ async def create_visualization(
 
     except ValueError as e:
         logger.error(f"Visualization error for user {user_id}: {str(e)}")
-        return VisualizationResponse(
-            status="error",
+        return VisualizationErrorResponse(
+            success=False,
             error=str(e),
             message="Error generating visualization",
             image_data=None
@@ -126,8 +130,8 @@ async def create_visualization(
     except Exception as e:
         error_msg = str(e)[:200] if str(e).isascii() else f"Error processing request: {e.__class__.__name__}"
         logger.error(f"Visualization error for user {user_id}: {error_msg}")
-        return VisualizationResponse(
-            status="error",
+        return VisualizationErrorResponse(
+            success=False,
             error=error_msg,
             message="An unexpected error occurred while creating the visualization",
             image_data=None
