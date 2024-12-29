@@ -43,18 +43,54 @@ class GoogleIntegration:
         """Helper function to format data for Google Sheets."""
         def format_value(v: Any) -> str:
             """Helper function to format individual values"""
+            # Handle None/null values
+            if v is None:
+                return ''
+            
+            # Handle lists and nested structures
+            if isinstance(v, (list, tuple)):
+                # Handle nested lists/dicts
+                formatted_items = []
+                for item in v:
+                    if isinstance(item, (dict, list, tuple)):
+                        formatted_items.append(str(item))  # Convert complex items to string
+                    else:
+                        formatted_items.append(format_value(item))  # Recursively format simple items
+                return ', '.join(formatted_items)
+            
+            # Handle dictionaries (common in LLM responses)
+            if isinstance(v, dict):
+                return '; '.join(f"{k}: {format_value(val)}" for k, val in v.items())
+            
             # Handle pandas Series
             if isinstance(v, pd.Series):
                 return format_value(v.iloc[0] if len(v) > 0 else '')
-            # Handle other types
+            
+            # Handle various date formats
             if isinstance(v, pd.Timestamp):
                 return v.strftime('%Y-%m-%d %H:%M:%S')
             elif isinstance(v, (datetime, date)):
                 return v.strftime('%Y-%m-%d')
-            elif pd.isna(v):
-                return ''
-            else:
+            
+            # Handle boolean values
+            if isinstance(v, bool):
+                return str(v).lower()
+            
+            # Handle numeric values
+            if isinstance(v, (int, float)):
+                if pd.isna(v):
+                    return ''
                 return str(v)
+            
+            # Handle special float values
+            if pd.isna(v) or v == float('inf') or v == float('-inf'):
+                return ''
+            
+            # Handle very long strings (LLMs might generate these)
+            if isinstance(v, str) and len(v) > 32767:  # Excel cell character limit
+                return v[:32767]  # Truncate to Excel's limit
+            
+            return str(v)
 
         if isinstance(data, pd.DataFrame):
             df_copy = data.copy()
@@ -215,16 +251,6 @@ class GoogleIntegration:
     async def extract_google_sheets_data(self, sheet_url: str, sheet_name: str) -> pd.DataFrame:
         """
         Extract data from a Google Sheets URL using the provided sheet name.
-        
-        Args:
-            sheet_url (str): URL of the Google Sheet
-            sheet_name (str): Name of the sheet to extract data from
-            
-        Returns:
-            pd.DataFrame: DataFrame containing the sheet data
-            
-        Raises:
-            ValueError: If URL is invalid or file cannot be accessed
         """
         if 'docs.google.com/spreadsheets' not in sheet_url:
             raise ValueError("Invalid Google Sheets URL format")
@@ -254,7 +280,21 @@ class GoogleIntegration:
             
             headers = values[0]
             data = values[1:]
-            return pd.DataFrame(data, columns=headers)
+
+            # Create DataFrame with dynamic columns based on actual data
+            df = pd.DataFrame(data)
+            
+            # If we have more headers than data columns, pad the data with empty strings
+            if len(headers) > len(df.columns):
+                for i in range(len(df.columns), len(headers)):
+                    df[i] = ''  # Use empty string instead of pd.NA
+            # If we have more data columns than headers, add generic headers
+            elif len(headers) < len(df.columns):
+                for i in range(len(headers), len(df.columns)):
+                    headers.append(f'Column_{i+1}')
+                
+            df.columns = headers
+            return df
             
         except Exception as e:
             error_msg = str(e)

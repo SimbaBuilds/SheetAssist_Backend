@@ -69,7 +69,6 @@ async def create_visualization(
 
         # Preprocess files/urls to get dataframe
         preprocessed_data, _ = await preprocess_files(
-            request=request,
             files=files,
             files_metadata=request_data.files_metadata,
             input_urls=request_data.input_urls,
@@ -77,7 +76,6 @@ async def create_visualization(
             session_dir=session_dir,
             supabase=supabase,
             user_id=user_id,
-            llm_service=llm_service,
             num_images_processed=0
         )
         await check_client_connection(request)

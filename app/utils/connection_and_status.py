@@ -91,9 +91,9 @@ def construct_status_response(job: dict) -> QueryResponse:
         
         if job.get('page_chunks'):
             page_chunks = job.get('page_chunks', [])
-            current_chunk = job.get('current_chunk', 0)
+            current_chunk = int(job.get('current_chunk', 0))
             file_id = page_chunks[current_chunk]['file_id']
-            start_page = page_chunks[current_chunk]['page_range'][0]
+            start_page = int(page_chunks[current_chunk]['page_range'][0])
             output_preferences = job.get('output_preferences')
             if output_preferences.get('doc_name'):
                 doc_name = output_preferences.get('doc_name')

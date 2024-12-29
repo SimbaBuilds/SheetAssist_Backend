@@ -107,30 +107,31 @@ async def process_query_algo(
             
             # Prepare analyzer context
             full_diff_context = ""
-            for i in range(len(old_data)):
-                if isinstance(old_data[i].content, pd.DataFrame):
-                    logging.info(f"Processing DataFrame from old_data[{i}]")
-                    for j, item in enumerate(new_data.content):
-                        if isinstance(item, pd.DataFrame):
-                            this_context = {}
-                            diff_key = f"diff{i+1}_{j+1}"
-                            # Convert timestamps, NaT values, and other non-JSON serializable types
-                            processed_item = item.copy()
-                            # Handle datetime columns
-                            for col in processed_item.select_dtypes(include=['datetime64[ns]']).columns:
-                                processed_item[col] = processed_item[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                            # Handle other non-JSON serializable types
-                            for col in processed_item.columns:
-                                if processed_item[col].dtype == 'object':
-                                    # Convert numpy types to native Python types
-                                    processed_item[col] = processed_item[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
-                            # Replace NaN, NaT, etc with None
-                            processed_item = processed_item.replace({pd.NaT: None, pd.NA: None, np.nan: None})
-                            
-                            this_context[diff_key] = prepare_analyzer_context(old_data[i].content, processed_item)
-                            logging.info(f"This context: {this_context}")
-                            full_diff_context += json.dumps(this_context)
-                            logging.info(f"Full diff context: {full_diff_context[:100]}...cont'd")
+            if old_data and not old_data[0].content.empty and new_data:
+                for i in range(len(old_data)):
+                    if isinstance(old_data[i].content, pd.DataFrame):
+                        logging.info(f"Processing DataFrame from old_data[{i}]")
+                        for j, item in enumerate(new_data.content):
+                            if isinstance(item, pd.DataFrame):
+                                this_context = {}
+                                diff_key = f"diff{i+1}_{j+1}"
+                                # Convert timestamps, NaT values, and other non-JSON serializable types
+                                processed_item = item.copy()
+                                # Handle datetime columns
+                                for col in processed_item.select_dtypes(include=['datetime64[ns]']).columns:
+                                    processed_item[col] = processed_item[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                                # Handle other non-JSON serializable types
+                                for col in processed_item.columns:
+                                    if processed_item[col].dtype == 'object':
+                                        # Convert numpy types to native Python types
+                                        processed_item[col] = processed_item[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
+                                # Replace NaN, NaT, etc with None
+                                processed_item = processed_item.replace({pd.NaT: None, pd.NA: None, np.nan: None})
+                                
+                                this_context[diff_key] = prepare_analyzer_context(old_data[i].content, processed_item)
+                                logging.info(f"This context: {this_context}")
+                                full_diff_context += json.dumps(this_context)
+                                logging.info(f"Full diff context: {full_diff_context[:100]}...cont'd")
             # Analyze results
             provider, analysis_result = await llm_service.execute_with_fallback(
                 "analyze_sandbox_result",

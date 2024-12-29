@@ -352,7 +352,7 @@ async def process_query_standard_endpoint(
                 return QueryResponse(
                     original_query=request_data.query,
                     status="error", 
-                    message=f"Failed to upload to destination: {str(e)[:100]}...",
+                    message=f"Failed to upload to destination.",
                     files=None,
                     num_images_processed=0,
                     error=str(e),
@@ -522,7 +522,7 @@ async def _process_batch_chunk(
         )
 
     except ValueError as e:  # Specific handling for preprocessing errors
-        logger.error(f"Preprocessing error in batch chunk {current_chunk}: {str(e)}")
+        logger.error(f"Processing error in batch chunk {current_chunk}: {str(e)}")
         supabase.table("batch_jobs").update({
             "status": "error",
             "error_message": str(e),

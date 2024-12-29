@@ -93,7 +93,20 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     Compute comprehensive diff between old and new datasets with context.
     Handles dataframes with different shapes by comparing only common columns.
     """
-
+    # Fill NaN values in indices before converting to int
+    old_df = old_df.copy()
+    new_df = new_df.copy()
+    
+    # Handle NaN indices by filling them with a valid integer
+    if old_df.index.isna().any():
+        old_df = old_df.reset_index(drop=True)
+    if new_df.index.isna().any():
+        new_df = new_df.reset_index(drop=True)
+    
+    # Now safely convert to int
+    old_df.index = old_df.index.astype(int)
+    new_df.index = new_df.index.astype(int)
+    
     # Ensure we only compare common columns
     common_columns = list(set(old_df.columns) & set(new_df.columns))
 
@@ -146,8 +159,9 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     all_affected_indices = set(modified_indices) | set(added_indices) | set(deleted_indices)
     context_indices = set()
     for idx in all_affected_indices:
-        start = max(0, idx - context_radius)
-        end = min(max(old_df.index.max(), new_df.index.max()), idx + context_radius + 1)
+        # Ensure integer operations for range bounds
+        start = max(0, int(idx - context_radius))
+        end = min(int(max(old_df.index.max(), new_df.index.max())), int(idx + context_radius + 1))
         # Only add indices that exist in new_df
         valid_indices = [i for i in range(start, end) if i in new_df.index]
         context_indices.update(valid_indices)
@@ -214,6 +228,8 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     def convert_timestamps(df):
         """Convert timestamps to string format"""
         df = df.copy()
+        # Handle NaN values before conversion
+        df = df.fillna(pd.NA)  # Convert NaN to pandas NA type
         for col in df.select_dtypes(include=['datetime64[ns]']).columns:
             df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
         return df

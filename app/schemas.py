@@ -97,7 +97,7 @@ class FileInfo(BaseModel):
 # Handles batch and standard query processing results
 class QueryResponse(BaseModel):
     """Unified response model for all query processing results"""
-    original_query: str
+    original_query: Optional[str] = None    
     status: str  # "completed", "error", or "processing"
     message: str  # Description of result or error message
     files: Optional[List[FileInfo]] = None  # For downloadable files

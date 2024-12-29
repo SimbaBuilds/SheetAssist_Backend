@@ -154,8 +154,8 @@ class OpenaiVisionProcessor  :
             input_data_snapshot = build_input_data_snapshot(input_data)
             
             # Determine page range
-            start_page = page_range[0] if page_range else 0
-            end_page = min(page_range[1], len(doc)) if page_range else len(doc)
+            start_page = int(page_range[0]) if page_range else 0
+            end_page = min(int(page_range[1]), len(doc)) if page_range else len(doc)
             
             b64_pages = []
             for page_num in range(start_page, end_page):
@@ -346,8 +346,8 @@ class AnthropicVisionProcessor  :
             input_data_snapshot = build_input_data_snapshot(input_data)
             
             # Determine page range
-            start_page = page_range[0] if page_range else 0
-            end_page = min(page_range[1], len(doc)) if page_range else len(doc)
+            start_page = int(page_range[0]) if page_range else 0
+            end_page = min(int(page_range[1]), len(doc)) if page_range else len(doc)
             
 
             b64_pages = []
@@ -586,9 +586,11 @@ class LLMService:
         input_data: List[FileDataInfo], 
         page_range: Optional[tuple[int, int]] = None
     ) -> Dict[str, str]:
-        """Process PDF using OpenAI's vision API. Raises an exception on connection errors 
-           so that the fallback logic is triggered."""
+        """Process PDF using OpenAI's vision API"""
         processor = OpenaiVisionProcessor(self.openai_client)
+        # Ensure page_range values are integers if provided
+        if page_range:
+            page_range = (int(page_range[0]), int(page_range[1]))
         result = processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
 
         # If the returned dict indicates an error related to connection, raise an actual exception
@@ -599,9 +601,18 @@ class LLMService:
 
         return result
 
-    async def _anthropic_process_pdf_with_vision(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]] = None) -> Dict[str, str]:
-        """Process image using Anthropic's vision API"""
+    async def _anthropic_process_pdf_with_vision(
+        self, 
+        pdf_path: str, 
+        query: str, 
+        input_data: List[FileDataInfo], 
+        page_range: Optional[tuple[int, int]] = None
+    ) -> Dict[str, str]:
+        """Process PDF using Anthropic's vision API"""
         processor = AnthropicVisionProcessor(self.anthropic_client)
+        # Ensure page_range values are integers if provided
+        if page_range:
+            page_range = (int(page_range[0]), int(page_range[1]))
         return processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
 
     
