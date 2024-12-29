@@ -461,7 +461,7 @@ class FilePreprocessor:
             num_pages: Number of pages/images to process (default 1)
             
         Raises:
-            ValueError: If user has exceeded limits
+            ValueError: If user has exceeded limits with specific message
         """
         # Get user profile and usage
         profile_response = supabase.table("user_profile").select("*").eq("id", user_id).execute()
@@ -480,14 +480,14 @@ class FilePreprocessor:
         # Check image limit
         current_images = usage.get("images_processed_this_month", 0)
         if current_images + num_pages > image_limit:
-            raise ValueError("Image limit reached. Upgrade to pro in your account settings.")
+            raise ValueError(f"Image processing limit reached.")
         
         # Check overage limit
         overage_this_month = usage.get("overage_this_month", 0)
         overage_hard_limit = usage.get("overage_hard_limit", 0)
         
         if overage_this_month >= overage_hard_limit:
-            raise ValueError("Overage hard limit reached. Increase this limit in your account settings.")
+            raise ValueError(f"Monthly overage limit reached")
 
 
 async def preprocess_files(

@@ -9,6 +9,7 @@ class OutputPreferences(BaseModel):
     format: Optional[str] = None  # One of: 'csv', 'xlsx', 'docx', 'txt', 'pdf'
     modify_existing: Optional[bool] = None
     sheet_name: Optional[str] = None
+    doc_name: Optional[str] = None
 
 
 
@@ -37,6 +38,7 @@ class BatchProcessingFileInfo(BaseModel):
 class InputUrl(BaseModel):
     url: str
     sheet_name: Optional[str] = None
+    doc_name: Optional[str] = None
 
 
 class QueryRequest(BaseModel):

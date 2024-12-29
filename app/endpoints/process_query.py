@@ -243,17 +243,20 @@ async def process_query_standard_endpoint(
                 user_id=user_id,
                 num_images_processed=num_images_processed
             )
-        except ValueError as e:  # Specific handling for preprocessing errors
-            logger.error(f"Preprocessing error for user {user_id}: {str(e)}")
-            return QueryResponse(
-                original_query=request_data.query,
-                status="error",
-                message=str(e),
-                files=None,
-                num_images_processed=num_images_processed,
-                error=str(e),
-                total_pages=0
-            )
+        except ValueError as e:
+            # Specifically handle image/overage limit errors
+            error_msg = str(e)
+            if "limit reached" in error_msg.lower():
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="error",
+                    message = "Limit reached.  Please check usage in your account settings.",
+                    files=None,
+                    num_images_processed=0,
+                    error=error_msg,
+                    total_pages=0
+                )
+            raise  # Re-raise other ValueError exceptions
 
 
         except Exception as e:
@@ -278,7 +281,7 @@ async def process_query_standard_endpoint(
                 status="error",
                 message="There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request.",
                 files=None,
-                num_images_processed=num_images_processed,
+                num_images_processed=0,
                 error=result.error,
                 total_pages=0
             )
@@ -315,7 +318,7 @@ async def process_query_standard_endpoint(
                     status="error",
                     message=f"Failed to process download: {str(e)[:100]}...",
                     files=None,
-                    num_images_processed=num_images_processed,
+                    num_images_processed=0,
                     error=str(e),
                     total_pages=0
                 )
@@ -351,7 +354,7 @@ async def process_query_standard_endpoint(
                     status="error", 
                     message=f"Failed to upload to destination: {str(e)[:100]}...",
                     files=None,
-                    num_images_processed=num_images_processed,
+                    num_images_processed=0,
                     error=str(e),
                     total_pages=0
                 )
@@ -368,7 +371,7 @@ async def process_query_standard_endpoint(
             status="error",
             message=error_msg,
             files=None,
-            num_images_processed=num_images_processed,
+            num_images_processed=0,
             error=str(e),
             total_pages=0
         )
@@ -411,18 +414,40 @@ async def _process_batch_chunk(
         }).eq("job_id", job_id).execute()
 
         # Process chunk
-        preprocessed_data, num_images_processed = await preprocess_files(
-            files=files,
-            files_metadata=[current_processing_info.metadata],
-            input_urls=request_data.input_urls,
-            query=request_data.query,
-            session_dir=session_dir,
-            supabase=supabase,
-            user_id=user_id,
-            num_images_processed=0,  
-            page_range=current_processing_info.page_range,
-        )
+        try:
+            preprocessed_data, num_images_processed = await preprocess_files(
+                files=files,
+                files_metadata=[current_processing_info.metadata],
+                input_urls=request_data.input_urls,
+                query=request_data.query,
+                session_dir=session_dir,
+                supabase=supabase,
+                user_id=user_id,
+                num_images_processed=0,  
+                page_range=current_processing_info.page_range,
+            )
+        except ValueError as e:
+            error_msg = str(e)
+            if "limit reached" in error_msg.lower():
+                # Get current job data
+                job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
+                if job_response.data:
+                    job_data = job_response.data[0]
+                    page_chunks = job_data["page_chunks"]
+                    
+                    # Remove unprocessed chunks
+                    updated_chunks = page_chunks[:current_chunk + 1]
+                    
+                    # Update job with error and truncated chunks
+                    supabase.table("batch_jobs").update({
+                        "status": "error",
+                        "message": "Limit reached.  Please check usage in your account settings.",
+                        "error_message": error_msg,
+                        "page_chunks": updated_chunks,
+                        "completed_at": datetime.now(UTC).isoformat()
+                    }).eq("job_id", job_id).execute()
 
+            raise ValueError(error_msg)
 
         #append previous chunk to input data if it exists and output type is download (online sheet output appends each batch, persisting results)
         if previous_chunk_return_value and request_data.output_preferences.type == "download":
