@@ -521,14 +521,19 @@ async def preprocess_files(
         try:
             logging.info(f"Processing URL: {input_url.url}")
             if 'docs.google' in input_url.url:
-                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name) 
+                logging.info(f"Processing Google Sheet URL with sheet name: {input_url.sheet_name}")
+                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name)
+                logging.info("Successfully processed Google Sheet") 
             elif 'onedrive.live' in input_url.url:
+                logging.info(f"Processing OneDrive URL with sheet name: {input_url.sheet_name}")
                 content = await preprocessor.preprocess_file(input_url.url, query, 'office_sheet', input_url.sheet_name)
+                logging.info("Successfully processed OneDrive file")
             else:
                 logging.error(f"Unsupported URL format: {input_url.url}")
                 continue
             
             data_type = "DataFrame" if isinstance(content, pd.DataFrame) else "text"
+        
             processed_data.append(
                 FileDataInfo(
                     content=content,
@@ -538,12 +543,12 @@ async def preprocess_files(
                     url=input_url.url
                 )
             )
+            logging.info(f"Successfully added processed data for URL: {input_url.url}")
+            
         except Exception as e:
             error_msg = sanitize_error_message(e)
-            logging.error(f"Error processing URL {input_url.url}: {error_msg}")
-            raise ValueError(f"Error processing URL {input_url.url}: {error_msg}")
-    
-    
+            logging.error(f"Error processing URL {input_url.url}")
+            raise ValueError(f"Error processing URL {input_url.url}")
     # Sort files_metadata to process CSV and XLSX files first
     if files and files_metadata:
         priority_types = {

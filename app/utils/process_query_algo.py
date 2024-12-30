@@ -92,19 +92,22 @@ async def process_query_algo(
             
         # Analysis and improvement loop
         analysis_attempts = 1
-        while analysis_attempts < 6:
+        while analysis_attempts < 2:
             logging.info(f"Starting post-error analysis attempt {analysis_attempts}")
             old_data = data
             
             # Create new FileDataInfo based on return value type (get_data_snapshot handles tuples)
-            logging.info(f"Creating new FileDataInfo with return value of type {type(result.return_value).__name__}")
-            new_data = FileDataInfo(
-                content=result.return_value, #likely a tuple containing a dataframe or string
-                snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__), 
-                data_type=type(result.return_value).__name__,
-                original_file_name=data[0].original_file_name if data else None
-            )
-            
+            try:
+                logging.info(f"Creating new FileDataInfo with return value of type {type(result.return_value).__name__}")
+                new_data = FileDataInfo(
+                    content=result.return_value, #likely a tuple containing a dataframe or string
+                    snapshot=get_data_snapshot(result.return_value, type(result.return_value).__name__), 
+                    data_type=type(result.return_value).__name__,
+                    original_file_name= "None"
+                )
+            except Exception as e:
+                logging.error(f"Error creating FileDataInfo: {str(e)[:100]}...")
+                raise
             # Prepare analyzer context
             full_diff_context = ""
             if old_data and not old_data[0].content.empty and new_data:
@@ -145,6 +148,7 @@ async def process_query_algo(
                 "sentiment_analysis",
                 analysis_result
             )
+            logging.info(f"Sentiment analysis result - success: {success}")
             logging.info(f"Analysis result: {analysis_result}")
             print(f"\n\n----- Analysis result -----\n {analysis_result}\n")
 

@@ -271,7 +271,7 @@ async def process_query_standard_endpoint(
             data=preprocessed_data,
         )
         await check_client_connection(request)
-
+        logger.info(f"result: {result}")
         result.return_value_snapshot = get_data_snapshot(result.return_value, type(result.return_value).__name__)
         logger.info(f"Query processed for user {user_id} with return value snapshot type: {type(result.return_value).__name__}")
 

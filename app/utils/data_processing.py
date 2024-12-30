@@ -10,11 +10,9 @@ def sanitize_error_message(e: Exception) -> str:
     return str(e).encode('ascii', 'ignore').decode('ascii')
 def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = False) -> str:
     """Generate appropriate snapshot based on data type"""
-    
-
+    print("Holiday hooby whatty")
     # Handle tuple type -- (from sandbox return values)
     if isinstance(content, tuple):
-        # Process each item in tuple and join with newlines
         snapshots = []
         for item in content:
             if isinstance(item, pd.DataFrame):
@@ -28,23 +26,24 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
                 snapshots.append(df_info)
             elif isinstance(item, dict):
                 # Handle potential NaT values in dictionary
-                snapshot_dict = {k: (None if pd.isna(v) else v) for k, v in list(item.items())[:5]}
+                snapshot_dict = {k: (None if isinstance(v, (pd.Series, pd.DataFrame)) else (None if pd.isna(v) else v)) 
+                               for k, v in list(item.items())[:5]}
                 snapshots.append(json.dumps(snapshot_dict, indent=2))
             elif isinstance(item, list):
                 # Handle potential NaT values in list
-                clean_list = [None if pd.isna(x) else x for x in item[:5]]
+                clean_list = [None if isinstance(x, (pd.Series, pd.DataFrame)) else (None if pd.isna(x) else x) 
+                            for x in item[:5]]
                 snapshots.append(json.dumps(clean_list, indent=2))
             elif hasattr(item, 'file') and hasattr(item, 'filename'):
-                # Handle image file objects
                 item.file.seek(0)
                 size = len(item.file.read())
                 item.file.seek(0)
                 snapshots.append(f"Image file: {item.filename}, Size: {size} bytes")
             else:
                 # Handle potential NaT value in other types
-                snapshots.append(str(None if pd.isna(item) else item)[:500])
+                value = None if isinstance(item, (pd.Series, pd.DataFrame)) else (None if pd.isna(item) else item)
+                snapshots.append(str(value)[:500])
         return "\n---\n".join(snapshots)
-
 
     if is_image_like_pdf:
         return content
@@ -52,7 +51,7 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
     # Handle non-tuple types
     if data_type == "DataFrame":
         # Replace NaT values with None before converting to string
-        content = content.replace({pd.NaT: None})
+        # content = content.replace({pd.NaT: None})
         df_info = f"DataFrame Info:\n"
         df_info += f"Shape: {content.shape}\n"
         df_info += f"Columns: {list(content.columns)}\n"
@@ -198,9 +197,9 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
             'end_row': max(all_affected_indices) if all_affected_indices else None,
         },
         'change_patterns': {
-            'is_append_only': len(added_indices) > 0 and len(modified_indices) == 0 and len(deleted_indices) == 0,
-            'is_modify_only': len(added_indices) == 0 and len(modified_indices) > 0 and len(deleted_indices) == 0,
-            'is_schema_change': len(set(new_df.columns) ^ set(old_df.columns)) > 0,
+            'is_append_only': bool(len(added_indices) > 0 and len(modified_indices) == 0 and len(deleted_indices) == 0),
+            'is_modify_only': bool(len(added_indices) == 0 and len(modified_indices) > 0 and len(deleted_indices) == 0),
+            'is_schema_change': bool(len(set(new_df.columns) ^ set(old_df.columns)) > 0),
             'common_columns': common_columns,
             'affected_columns': list(set(
                 col for idx in modified_indices
