@@ -51,7 +51,7 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
     # Handle non-tuple types
     if data_type == "DataFrame":
         # Replace NaT values with None before converting to string
-        # content = content.replace({pd.NaT: None})
+        content = content.replace({pd.NaT: None})
         df_info = f"DataFrame Info:\n"
         df_info += f"Shape: {content.shape}\n"
         df_info += f"Columns: {list(content.columns)}\n"
