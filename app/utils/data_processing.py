@@ -10,7 +10,6 @@ def sanitize_error_message(e: Exception) -> str:
     return str(e).encode('ascii', 'ignore').decode('ascii')
 def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = False) -> str:
     """Generate appropriate snapshot based on data type"""
-    print("Holiday hooby whatty")
     # Handle tuple type -- (from sandbox return values)
     if isinstance(content, tuple):
         snapshots = []
@@ -142,8 +141,13 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     common_indices = old_df.index.intersection(new_df.index)
 
     if len(common_indices) > 0:
-        modified_mask = (old_df.loc[common_indices, common_columns] != 
-                        new_df.loc[common_indices, common_columns]).any(axis=1)
+        # Replace NA/NaN with None before comparison
+        old_subset = old_df.loc[common_indices, common_columns].fillna(pd.NA)
+        new_subset = new_df.loc[common_indices, common_columns].fillna(pd.NA)
+        
+        # Use pandas.isna() to handle NA values properly
+        modified_mask = ~((old_subset.equals(new_subset)) | 
+                         (pd.isna(old_subset) & pd.isna(new_subset)).all(axis=1))
         modified_indices = common_indices[modified_mask]
         logging.info(f"Found {len(modified_indices)} modified rows")
     else:
@@ -184,6 +188,7 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
                 'old_mean': old_df[col].mean() if col in old_df.columns and pd.api.types.is_numeric_dtype(old_df[col]) else None,
                 'new_mean': new_df[col].mean() if col in new_df.columns and pd.api.types.is_numeric_dtype(new_df[col]) else None,
                 'modified_columns': [col for col in common_columns if len(modified_indices) > 0 and 
+                                   not (old_df.loc[modified_indices, col].isna() & new_df.loc[modified_indices, col].isna()).all() and
                                    (old_df.loc[modified_indices, col] != new_df.loc[modified_indices, col]).any()]
             }
             for col in set(old_df.columns) | set(new_df.columns)
@@ -232,6 +237,11 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
         for col in df.select_dtypes(include=['datetime64[ns]']).columns:
             df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
         return df
+
+    # Create copies and replace NaT values with None before any processing
+    old_df = convert_timestamps(old_df.copy().replace({pd.NaT: None}))
+    new_df = convert_timestamps(new_df.copy().replace({pd.NaT: None}))
+    
     
     def convert_dict_timestamps(d):
         """Convert any timestamp values in a dictionary to strings"""

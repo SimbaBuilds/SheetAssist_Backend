@@ -68,7 +68,7 @@ async def process_query_algo(
         # Error handling for initial execution
         error_attempts = 0
         past_errors = []
-        while result.error and error_attempts < 6:
+        while result.error and error_attempts < int(os.getenv("ERROR_ATTEMPTS")):
             print(f"\n\nError analysis {error_attempts}:")
             print(f"Error: {result.error}")
             past_errors.append(result.error)
@@ -92,7 +92,7 @@ async def process_query_algo(
             
         # Analysis and improvement loop
         analysis_attempts = 1
-        while analysis_attempts < 2:
+        while analysis_attempts < int(os.getenv("ANALYSIS_ATTEMPTS")):
             logging.info(f"Starting post-error analysis attempt {analysis_attempts}")
             old_data = data
             
@@ -182,7 +182,7 @@ async def process_query_algo(
 
             # Restart error handling for new attempt 
             error_attempts = 0
-            while result.error and error_attempts < 6:
+            while result.error and error_attempts < int(os.getenv("ERROR_ATTEMPTS")):
                 print(f"\n\nError analysis {error_attempts}:")
                 print("Error:", result.error)
                 past_errors.append(result.error)
@@ -199,13 +199,13 @@ async def process_query_algo(
                 cleaned_code = extract_code(suggested_code)
                 result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
                 error_attempts += 1
-                if error_attempts == 5:
+                if error_attempts == int(os.getenv("ERROR_ATTEMPTS")):
                     result.error = "Failed to interpret query. Please try rephrasing your request."
                     return result      
                     
             analysis_attempts += 1
             print("Analysis attempt:", analysis_attempts)
-            if analysis_attempts == 5:
+            if analysis_attempts == int(os.getenv("ANALYSIS_ATTEMPTS")):
                 result.error = "Failed to interpret query. Please try rephrasing your request."
                 return result
 
