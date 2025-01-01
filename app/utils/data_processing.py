@@ -64,6 +64,24 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
     
     return str(None if pd.isna(content) else content)[:500]
 
+def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
+    """Process a DataFrame to make it JSON serializable by handling datetime, object types, and NA values."""
+    processed_df = df.copy()
+    
+    # Handle datetime columns
+    for col in processed_df.select_dtypes(include=['datetime64[ns]']).columns:
+        processed_df[col] = processed_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Handle object columns with numpy types
+    for col in processed_df.columns:
+        if processed_df[col].dtype == 'object':
+            processed_df[col] = processed_df[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
+    
+    # Replace NaN, NaT, etc with None
+    processed_df = processed_df.replace({pd.NaT: None, pd.NA: None, np.nan: None})
+    
+    return processed_df
+
 @dataclass
 class DatasetDiff:
     added_rows: pd.DataFrame
@@ -79,9 +97,9 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     Compute comprehensive diff between old and new datasets with context.
     Handles dataframes with different shapes by comparing only common columns.
     """
-    # Fill NaN values in indices before converting to int
-    old_df = old_df.copy()
-    new_df = new_df.copy()
+    # Process both dataframes to ensure JSON serializable and consistent handling
+    old_df = process_dataframe_for_json(old_df.copy())
+    new_df = process_dataframe_for_json(new_df.copy())
     
     # Handle NaN indices by filling them with a valid integer
     if old_df.index.isna().any():
@@ -98,7 +116,6 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
 
     if not common_columns:
         logging.warning("No common columns found between dataframes")
-        # If no common columns, treat all rows as added/deleted
         return DatasetDiff(
             added_rows=new_df if len(new_df) > 0 else pd.DataFrame(),
             modified_rows=pd.DataFrame(),
@@ -129,18 +146,14 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     common_indices = old_df.index.intersection(new_df.index)
 
     if len(common_indices) > 0:
-        # Replace NA/NaN with None before comparison
-        old_subset = old_df.loc[common_indices, common_columns].fillna(pd.NA)
-        new_subset = new_df.loc[common_indices, common_columns].fillna(pd.NA)
+        old_subset = old_df.loc[common_indices, common_columns]
+        new_subset = new_df.loc[common_indices, common_columns]
         
-        # Use pandas.isna() to handle NA values properly
-        modified_mask = ~((old_subset.equals(new_subset)) | 
-                         (pd.isna(old_subset) & pd.isna(new_subset)).all(axis=1))
+        # Compare dataframes element by element, handling NA values properly
+        modified_mask = ~(old_subset.fillna(pd.NA).equals(new_subset.fillna(pd.NA)))
         modified_indices = common_indices[modified_mask]
-        logging.info(f"Found {len(modified_indices)} modified rows")
     else:
         modified_indices = pd.Index([])
-        logging.info("No modified rows found")
     
     # Identify added and deleted rows
     added_indices = new_df.index.difference(old_df.index)
@@ -296,21 +309,3 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     }
     
     return context
-
-def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
-    """Process a DataFrame to make it JSON serializable by handling datetime, object types, and NA values."""
-    processed_df = df.copy()
-    
-    # Handle datetime columns
-    for col in processed_df.select_dtypes(include=['datetime64[ns]']).columns:
-        processed_df[col] = processed_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Handle object columns with numpy types
-    for col in processed_df.columns:
-        if processed_df[col].dtype == 'object':
-            processed_df[col] = processed_df[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
-    
-    # Replace NaN, NaT, etc with None
-    processed_df = processed_df.replace({pd.NaT: None, pd.NA: None, np.nan: None})
-    
-    return processed_df
