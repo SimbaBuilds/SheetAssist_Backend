@@ -4,76 +4,64 @@ import pandas as pd
 from typing import Dict, Any
 from dataclasses import dataclass
 import logging
+import numpy as np
 
-def sanitize_error_message(e: Exception) -> str:
-    """Sanitize error messages to remove binary data"""
-    return str(e).encode('ascii', 'ignore').decode('ascii')
+def _process_dataframe(df: pd.DataFrame) -> str:
+    """Helper function to process DataFrame and generate info string"""
+    df = df.replace({pd.NaT: None})
+    df_info = f"DataFrame Info:\n"
+    df_info += f"Shape: {df.shape}\n"
+    df_info += f"Columns: {list(df.columns)}\n"
+    df_info += f"Data Types:\n{df.dtypes}\n"
+    df_info += f"\nFirst 5 rows:\n{df.head(5).to_string()}"
+    return df_info
+
+def _process_collection(data: Any, limit: int = 5) -> str:
+    """Helper function to process dictionaries and lists"""
+    if isinstance(data, dict):
+        snapshot_dict = {k: (None if isinstance(v, (pd.Series, pd.DataFrame)) else (None if pd.isna(v) else v)) 
+                        for k, v in list(data.items())[:limit]}
+        return json.dumps(snapshot_dict, indent=2)
+    elif isinstance(data, list):
+        clean_list = [None if isinstance(x, (pd.Series, pd.DataFrame)) else (None if pd.isna(x) else x) 
+                     for x in data[:limit]]
+        return json.dumps(clean_list, indent=2)
+    return str(None if pd.isna(data) else data)[:500]
+
 def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = False) -> str:
     """Generate appropriate snapshot based on data type"""
-    # Handle tuple type -- (from sandbox return values)
+    if is_image_like_pdf:
+        return content
+
     if isinstance(content, tuple):
         snapshots = []
         for item in content:
             if isinstance(item, pd.DataFrame):
-                # Replace NaT values with None before converting to string
-                item = item.replace({pd.NaT: None})
-                df_info = f"DataFrame Info:\n"
-                df_info += f"Shape: {item.shape}\n"
-                df_info += f"Columns: {list(item.columns)}\n"
-                df_info += f"Data Types:\n{item.dtypes}\n"
-                df_info += f"\nFirst 5 rows:\n{item.head(5).to_string()}"
-                snapshots.append(df_info)
-            elif isinstance(item, dict):
-                # Handle potential NaT values in dictionary
-                snapshot_dict = {k: (None if isinstance(v, (pd.Series, pd.DataFrame)) else (None if pd.isna(v) else v)) 
-                               for k, v in list(item.items())[:5]}
-                snapshots.append(json.dumps(snapshot_dict, indent=2))
-            elif isinstance(item, list):
-                # Handle potential NaT values in list
-                clean_list = [None if isinstance(x, (pd.Series, pd.DataFrame)) else (None if pd.isna(x) else x) 
-                            for x in item[:5]]
-                snapshots.append(json.dumps(clean_list, indent=2))
+                snapshots.append(_process_dataframe(item))
+            elif isinstance(item, (dict, list)):
+                snapshots.append(_process_collection(item))
             elif hasattr(item, 'file') and hasattr(item, 'filename'):
                 item.file.seek(0)
                 size = len(item.file.read())
                 item.file.seek(0)
                 snapshots.append(f"Image file: {item.filename}, Size: {size} bytes")
             else:
-                # Handle potential NaT value in other types
-                value = None if isinstance(item, (pd.Series, pd.DataFrame)) else (None if pd.isna(item) else item)
-                snapshots.append(str(value)[:500])
+                snapshots.append(_process_collection(item))
         return "\n---\n".join(snapshots)
 
-    if is_image_like_pdf:
-        return content
-    
-    # Handle non-tuple types
     if data_type == "DataFrame":
-        # Replace NaT values with None before converting to string
-        content = content.replace({pd.NaT: None})
-        df_info = f"DataFrame Info:\n"
-        df_info += f"Shape: {content.shape}\n"
-        df_info += f"Columns: {list(content.columns)}\n"
-        df_info += f"Data Types:\n{content.dtypes}\n"
-        df_info += f"\nFirst 5 rows:\n{content.head(5).to_string()}"
-        return df_info
+        return _process_dataframe(content)
     elif data_type == "json":
-        # For JSON, handle NaT values before serialization
-        if isinstance(content, dict):
-            snapshot_dict = {k: (None if pd.isna(v) else v) for k, v in list(content.items())[:5]}
-            return json.dumps(snapshot_dict, indent=2)
-        elif isinstance(content, list):
-            clean_list = [None if pd.isna(x) else x for x in content[:5]]
-            return json.dumps(clean_list, indent=2)
-        return str(None if pd.isna(content) else content)[:500]
+        return _process_collection(content)
     elif data_type == "text":
-        # Return first 500 characters for text
-        return str(None if pd.isna(content) else content)[:500] + ("..." if len(str(content)) > 500 else "")
+        text = str(None if pd.isna(content) else content)
+        return text[:500] + ("..." if len(text) > 500 else "")
     elif data_type == "image":
         content.file.seek(0)
         size = len(content.file.read())
         content.file.seek(0)
         return f"Image file: {content.filename}, Size: {size} bytes"
+    
     return str(None if pd.isna(content) else content)[:500]
 
 @dataclass
@@ -308,3 +296,21 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     }
     
     return context
+
+def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
+    """Process a DataFrame to make it JSON serializable by handling datetime, object types, and NA values."""
+    processed_df = df.copy()
+    
+    # Handle datetime columns
+    for col in processed_df.select_dtypes(include=['datetime64[ns]']).columns:
+        processed_df[col] = processed_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Handle object columns with numpy types
+    for col in processed_df.columns:
+        if processed_df[col].dtype == 'object':
+            processed_df[col] = processed_df[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
+    
+    # Replace NaN, NaT, etc with None
+    processed_df = processed_df.replace({pd.NaT: None, pd.NA: None, np.nan: None})
+    
+    return processed_df

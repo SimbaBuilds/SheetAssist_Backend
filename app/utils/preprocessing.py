@@ -10,7 +10,7 @@ from app.utils.file_management import temp_file_manager
 import fitz  # PyMuPDF
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
-from app.utils.data_processing import sanitize_error_message, get_data_snapshot
+from app.utils.data_processing import get_data_snapshot
 from fastapi import UploadFile
 from app.schemas import FileDataInfo, FileMetadata, InputUrl
 from typing import List
@@ -89,7 +89,7 @@ class FilePreprocessor:
         try:
             return pd.read_csv(file)
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
     @staticmethod
     def process_json(file: Union[BinaryIO, str]) -> str:
@@ -110,7 +110,7 @@ class FilePreprocessor:
                 data = json.load(file)
             return json.dumps(data)
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
     @staticmethod
     def process_text(file: Union[BinaryIO, str]) -> str:
@@ -146,7 +146,7 @@ class FilePreprocessor:
                 
             raise ValueError("Unable to decode file with any supported encoding")
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
     @staticmethod
     def process_docx(file: Union[BinaryIO, str]) -> str:
@@ -166,7 +166,7 @@ class FilePreprocessor:
                 doc = docx.Document(io.BytesIO(file.read()))
             return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
     async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
         """Process image files and extract content using vision processing"""
@@ -227,7 +227,7 @@ class FilePreprocessor:
             return vision_result["content"] if isinstance(vision_result, dict) else vision_result
 
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
 
     async def process_msft_excel_url(self, url, sheet_name: str = None) -> pd.DataFrame:
@@ -260,7 +260,7 @@ class FilePreprocessor:
             return await msft_integration.extract_msft_excel_data(url, sheet_name)
                 
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
     async def process_gsheet_url(self, url, sheet_name: str = None) -> pd.DataFrame:
         """
@@ -290,7 +290,7 @@ class FilePreprocessor:
             return await g_integration.extract_google_sheets_data(url, sheet_name)
                 
         except Exception as e:
-            raise ValueError(FilePreprocessor._sanitize_error(e))
+            raise ValueError(e)
 
     async def process_pdf(
         self, 
@@ -439,18 +439,6 @@ class FilePreprocessor:
             return await processor(file, sheet_name)
         return processor(file)
 
-    @staticmethod
-    def _sanitize_error(e: Exception) -> str:
-        """Sanitize error messages to prevent binary data leakage"""
-        try:
-            error_msg = str(e)
-            # If message contains binary data or is too long, return generic message
-            if not error_msg.isascii() or len(error_msg) > 200:
-                return f"Error processing file: {e.__class__.__name__}"
-            return error_msg.encode('ascii', 'ignore').decode('ascii')
-        except:
-            return "Error processing file"
-
     async def check_image_processing_limits(self, supabase: SupabaseClient, user_id: str, num_pages: int = 1) -> None:
         """
         Check if user has exceeded image processing limits
@@ -546,7 +534,7 @@ async def preprocess_files(
             logging.info(f"Successfully added processed data for URL: {input_url.url}")
             
         except Exception as e:
-            error_msg = sanitize_error_message(e)
+            error_msg = str(e)
             logging.error(f"Error processing URL {input_url.url}")
             raise ValueError(f"Error processing URL {input_url.url}")
     # Sort files_metadata to process CSV and XLSX files first
@@ -630,7 +618,7 @@ async def preprocess_files(
                 )
 
             except Exception as e:
-                error_msg = sanitize_error_message(e)
+                error_msg = str(e)
                 logging.error(f"Error processing file {metadata.name}: {error_msg}")
                 raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
 

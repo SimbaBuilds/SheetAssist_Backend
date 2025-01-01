@@ -1,6 +1,6 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
-from app.utils.data_processing import get_data_snapshot, compute_dataset_diff, DatasetDiff, prepare_analyzer_context
+from app.utils.data_processing import get_data_snapshot, prepare_analyzer_context, process_dataframe_for_json
 from typing import List, Tuple, Any, Optional
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
@@ -118,19 +118,8 @@ async def process_query_algo(
                             if isinstance(item, pd.DataFrame):
                                 this_context = {}
                                 diff_key = f"diff{i+1}_{j+1}"
-                                # Convert timestamps, NaT values, and other non-JSON serializable types
-                                processed_item = item.copy()
-                                # Handle datetime columns
-                                for col in processed_item.select_dtypes(include=['datetime64[ns]']).columns:
-                                    processed_item[col] = processed_item[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                                # Handle other non-JSON serializable types
-                                for col in processed_item.columns:
-                                    if processed_item[col].dtype == 'object':
-                                        # Convert numpy types to native Python types
-                                        processed_item[col] = processed_item[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
-                                # Replace NaN, NaT, etc with None
-                                processed_item = processed_item.replace({pd.NaT: None, pd.NA: None, np.nan: None})
-                                
+                                # Process DataFrame for JSON serialization
+                                processed_item = process_dataframe_for_json(item)
                                 this_context[diff_key] = prepare_analyzer_context(old_data[i].content, processed_item)
                                 logging.info(f"This context: {this_context}")
                                 full_diff_context += json.dumps(this_context)
