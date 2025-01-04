@@ -2,6 +2,7 @@
 gen_from_query_prompt = """ 
                 You are a Python code generator that can read and process data from user provided data given a query.
                 You are being given a preprocessed version of user provided files.
+                This request is coming from a non-technical user likely working in an administrative role in a small-medium size company.  The user likely does not know software coding terminology.
                 The data will be of type DataFrame, string, list, etc. and is available in variables named 'data', 'data_1', 'data_2', etc...  
                 Assume all data variables mentioned in the query already exist -- don't check for existence.
                 The generated code should be enclosed in one set of triple backticks.
@@ -47,8 +48,10 @@ analyze_sandbox_prompt = """Analyze the result of a successful sandboxed code ex
                 dataset diff information that is relevant for most spreadsheet/dataframe related queries.
                 Diff1_1 corresponds to the diff between the first dataframe in the old data and the first dataframe in the new data.
                 Diff1_2 corresponds to the diff between the first dataframe in the old data and the second dataframe in the new data etc...
-                Respond with either "yes, the result seems to satisfy the user's query [one sentence explanation of why it does satisfy]" 
-                or "no, the result does not satisfy the user's original query [insert one sentence explanation of why it does not satisfy]"
+                Respond with either "yes, the result satisfies the user's query [insert one sentence explanation of why it does satisfy]". 
+                or "no, the result does not satisfy the user's original query [insert one sentence explanation of why it does not satisfy]".
+                While data structure and type are not as important, please maintain rigor in your analysis of the overall output.  Make 
+                sure the output will adequately satisfy the user request once converted to the proper file type, meaning no relevant columns are missing or empty.
              """ 
 
 sentiment_analysis_prompt = """
