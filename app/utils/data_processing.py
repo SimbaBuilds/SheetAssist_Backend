@@ -97,22 +97,27 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     Compute comprehensive diff between old and new datasets with context.
     Handles dataframes with different shapes by comparing only common columns.
     """
+    logging.info(f"Starting dataset diff computation. Old shape: {old_df.shape}, New shape: {new_df.shape}")
+    
     # Process both dataframes to ensure JSON serializable and consistent handling
     old_df = process_dataframe_for_json(old_df.copy())
     new_df = process_dataframe_for_json(new_df.copy())
     
     # Handle NaN indices by filling them with a valid integer
-    if old_df.index.isna().any():
-        old_df = old_df.reset_index(drop=True)
-    if new_df.index.isna().any():
-        new_df = new_df.reset_index(drop=True)
+    if old_df.index.isna().any() or new_df.index.isna().any():
+        logging.info("Handling NaN indices by resetting index")
+        if old_df.index.isna().any():
+            old_df = old_df.reset_index(drop=True)
+        if new_df.index.isna().any():
+            new_df = new_df.reset_index(drop=True)
     
     # Now safely convert to int
     old_df.index = old_df.index.astype(int)
     new_df.index = new_df.index.astype(int)
     
-    # Ensure we only compare common columns
+    # Find common columns
     common_columns = list(set(old_df.columns) & set(new_df.columns))
+    logging.info(f"Found {len(common_columns)} common columns")
 
     if not common_columns:
         logging.warning("No common columns found between dataframes")
@@ -144,14 +149,25 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
 
     # Find modified and new rows using index comparison on common columns
     common_indices = old_df.index.intersection(new_df.index)
+    logging.info(f"Found {len(common_indices)} common indices between dataframes")
 
     if len(common_indices) > 0:
         old_subset = old_df.loc[common_indices, common_columns]
         new_subset = new_df.loc[common_indices, common_columns]
         
         # Compare dataframes element by element, handling NA values properly
-        modified_mask = ~(old_subset.fillna(pd.NA).equals(new_subset.fillna(pd.NA)))
-        modified_indices = common_indices[modified_mask]
+        if len(common_indices) == 1:
+            logging.info("Processing single row comparison")
+            # Compare all values in the row and create a boolean Series
+            comparison = (old_subset.fillna(pd.NA) == new_subset.fillna(pd.NA))
+            # Check if any column is different
+            has_differences = not comparison.all().all()  # .all() for both row and columns
+            modified_indices = common_indices if has_differences else pd.Index([])
+            logging.info(f"Single row comparison result: has_differences={has_differences}")
+        else:
+            logging.info("Processing multiple rows comparison")
+            are_equal = (old_subset.fillna(pd.NA) == new_subset.fillna(pd.NA)).all(axis=1)
+            modified_indices = common_indices[~are_equal]
     else:
         modified_indices = pd.Index([])
     
@@ -159,20 +175,21 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     added_indices = new_df.index.difference(old_df.index)
     deleted_indices = old_df.index.difference(new_df.index)
     
-    # Get context rows (surrounding rows for changes)
+    logging.info(f"Found {len(modified_indices)} modified rows, {len(added_indices)} added rows, "
+                f"and {len(deleted_indices)} deleted rows")
+
+    # Get context rows
     all_affected_indices = set(modified_indices) | set(added_indices) | set(deleted_indices)
     context_indices = set()
     for idx in all_affected_indices:
-        # Ensure integer operations for range bounds
         start = max(0, int(idx - context_radius))
         end = min(int(max(old_df.index.max(), new_df.index.max())), int(idx + context_radius + 1))
-        # Only add indices that exist in new_df
         valid_indices = [i for i in range(start, end) if i in new_df.index]
         context_indices.update(valid_indices)
     
-    # Convert context_indices to a list and ensure all indices exist in new_df
     valid_context_indices = list(context_indices & set(new_df.index))
-    
+    logging.info(f"Generated {len(valid_context_indices)} context rows")
+
     # Compute relevant statistics
     statistics = {
         'total_rows_old': len(old_df),
@@ -223,7 +240,6 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
         statistics=statistics,
         metadata=metadata
     )
-
 def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[str, Any]:
     """
     Prepare optimized context for the analyzer LLM, focusing on essential differences.

@@ -191,9 +191,14 @@ class FilePreprocessor:
                 except Exception:
                     raise ValueError("Unable to read image file")
 
+            # Create a temporary directory if output_path is None
+            if output_path is None:
+                temp_dir = temp_file_manager.get_temp_dir()
+                output_path = str(temp_dir / "temp_image.jpeg")
+
             # Convert PNG to JPEG if needed
             new_path = None
-            if img.format == 'PNG' and output_path:
+            if img.format == 'PNG':
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGB')
                 img.save(output_path, 'JPEG')
@@ -201,7 +206,7 @@ class FilePreprocessor:
                 image_path = new_path
             else:
                 # Save the original file if it wasn't converted
-                image_path = output_path or str(Path(output_path).parent / "original_image")
+                image_path = output_path
                 with open(image_path, 'wb') as f:
                     if isinstance(file, str):
                         with open(file, 'rb') as src:
