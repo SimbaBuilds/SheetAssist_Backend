@@ -240,6 +240,7 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
         statistics=statistics,
         metadata=metadata
     )
+
 def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict[str, Any]:
     """
     Prepare optimized context for the analyzer LLM, focusing on essential differences.

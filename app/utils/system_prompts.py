@@ -11,7 +11,7 @@ gen_from_query_prompt = """
                 Do not forget your imports.
                 Use the simplest method to return the desired value.                
                 Do not include print statements -- ensure the last line is the return value.
-                The return value can be of any type (DataFrame, string, number, etc.).
+                The return value can be either a dataframe or a string.
                 If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
                 Generate Python code for the given query and data.   
              """
@@ -24,7 +24,7 @@ gen_from_error_prompt = """
                 Each data variable may be of different types (DataFrame, string, list, etc.).
                 Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
                 Do not include print statements -- ensure the last line is the return value.
-                The return value can be of any type (DataFrame, string, number, etc.).
+                The return value can be either a dataframe or a string.
                 """
 
 gen_from_analysis_prompt = """
@@ -38,7 +38,7 @@ gen_from_analysis_prompt = """
                 Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  
                 -- create a new dataframe instead.
                 Do not include print statements -- ensure the last line is the return value.
-                The return value can be of any type (DataFrame, string, number, etc.).
+                The return value can be either a dataframe or a string.
                 """
 
 analyze_sandbox_prompt = """Analyze the result of a successful sandboxed code execution and determine if the result would satisfy the user's original query.

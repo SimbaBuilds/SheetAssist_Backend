@@ -108,9 +108,10 @@ async def process_query_algo(
             except Exception as e:
                 logging.error(f"Error creating FileDataInfo: {str(e)[:100]}...")
                 raise
+            
             # Prepare analyzer context
             full_diff_context = ""
-            if old_data and not old_data[0].content.empty and new_data:
+            if old_data and new_data:
                 for i in range(len(old_data)):
                     if isinstance(old_data[i].content, pd.DataFrame):
                         logging.info(f"Processing DataFrame from old_data[{i}]")

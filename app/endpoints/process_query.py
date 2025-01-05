@@ -70,7 +70,7 @@ async def process_query_entry_endpoint(
                     await upload_file.seek(0)
 
         #If destination url and no input url, add destination url and sheet name to input urls for processing context
-        if request_data.output_preferences.destination_url and not request_data.input_urls:
+        if request_data.output_preferences.destination_url and not request_data.input_urls and request_data.output_preferences.modify_existing:
             request_data.input_urls = [InputUrl(url=request_data.output_preferences.destination_url, sheet_name=request_data.output_preferences.sheet_name)]
         
         # Check if any PDF has more than CHUNK_SIZE pages
