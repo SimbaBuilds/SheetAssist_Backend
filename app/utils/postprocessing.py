@@ -344,15 +344,30 @@ async def handle_batch_destination_upload(
         
         url_lower = request.output_preferences.destination_url.lower()
         suggested_name = None
+
         # For first chunk with new sheet creation
         if is_first_chunk and not request.output_preferences.modify_existing:
+            
             print(f"Creating new sheet first chunk: {is_first_chunk} and preferences: {request.output_preferences.modify_existing}")
             provider, suggested_name = await llm_service.execute_with_fallback(
                 "file_namer",
                 request.query,
                 old_data
             )
-            supabase.table("batch_jobs").update({"output_preferences": {"sheet_name": suggested_name}}).eq("job_id", job_id).execute()
+            
+            # Get current job to preserve existing output_preferences
+            current_job = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
+            if not current_job.data:
+                raise HTTPException(status_code=404, detail="Job not found")
+            
+            # Merge the new sheet_name with existing preferences
+            current_preferences = current_job.data[0]["output_preferences"]
+            current_preferences["sheet_name"] = suggested_name
+            
+            # Update with merged preferences
+            supabase.table("batch_jobs").update({
+                "output_preferences": current_preferences
+            }).eq("job_id", job_id).execute()
 
             if "docs.google.com" in url_lower:
                 return await g_integration.append_to_new_google_sheet(
@@ -374,7 +389,7 @@ async def handle_batch_destination_upload(
             
         job = job_response.data[0]
     
-        if request.output_preferences.sheet_name:
+        if request.output_preferences.modify_existing:
             sheet_name = request.output_preferences.sheet_name
         else:
             sheet_name = job["output_preferences"]["sheet_name"]

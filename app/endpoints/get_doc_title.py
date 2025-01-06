@@ -361,7 +361,7 @@ async def get_document_title(
             return WorkbookResponse(
                 url=url.url,
                 success=False,
-                error="Google authentication required. Please connect your Google account."
+                error="Google authentication required. Please connect your Google account, accepting all permissions."
             )
 
         try:
@@ -370,13 +370,13 @@ async def get_document_title(
                 return WorkbookResponse(
                     url=url.url,
                     success=False,
-                    error="Document not found or not accessible. Please check the URL and your permissions."
+                    error="Document not found or not accessible. Please connect your Google account, accepting all permissions."
                 )
             if online_sheet is None:
                 return WorkbookResponse(
                     url=url.url,
                     success=False,
-                    error="Error accessing Google Sheets. Please reconnect your Google account."
+                    error="Error accessing Google Sheets. Please reconnect your Google account, accepting all permissions."
                 )
 
             return WorkbookResponse(
@@ -391,7 +391,7 @@ async def get_document_title(
             return WorkbookResponse(
                 url=url.url,
                 success=False,
-                error="Error accessing Google Sheets. Please reconnect your Google account."
+                error="Error accessing Google Sheets. Please reconnect your Google account, accepting all permissions."
             )
         
     # Handle Microsoft URLs

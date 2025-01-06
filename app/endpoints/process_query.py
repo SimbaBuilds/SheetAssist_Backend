@@ -280,7 +280,7 @@ async def process_query_standard_endpoint(
             return QueryResponse(
                 original_query=request_data.query,
                 status="error",
-                message="There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request.",
+                message="There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request or breaking it down into multiple requests.",
                 files=None,
                 num_images_processed=0,
                 error=result.error,
@@ -481,7 +481,7 @@ async def _process_batch_chunk(
             error_msg = f"Chunk processing error: {result.error}"
             supabase.table("batch_jobs").update({
                 "status": "error",
-                "message": "There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request.",
+                "message": "There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request or breaking it down into multiple requests",
                 "error_message": error_msg,
                 "completed_at": datetime.now(UTC).isoformat()
             }).eq("job_id", job_id).execute()

@@ -19,11 +19,14 @@ import base64
 from pathlib import Path
 import os
 import fitz
-
 from dotenv import load_dotenv
 
+
 # Add at the top of the file, after imports
-load_dotenv()
+load_dotenv(override=True)
+
+MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH"))
+MAX_VISION_OUTPUT_TOKENS = int(os.getenv("MAX_VISION_OUTPUT_TOKENS"))
 
 
 def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
@@ -115,7 +118,7 @@ class OpenaiVisionProcessor  :
                         ]
                     }
                 ],
-                max_tokens=2000
+                max_tokens=MAX_VISION_OUTPUT_TOKENS
             )
             print(f"\n ------- LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
             return {
@@ -193,7 +196,7 @@ class OpenaiVisionProcessor  :
                             ]
                         }
                     ],
-                    max_tokens=2000
+                    max_tokens=MAX_VISION_OUTPUT_TOKENS
                 )
                 i += 1
                 page_content = completion.choices[0].message.content
@@ -625,7 +628,7 @@ class LLMService:
             system_prompt=self._gen_from_query_prompt,
             user_content=user_content
         )
-        print(f"\n -------LLM called with available data: {data_description} and query: {query} \nCode generated from query: \n {response} ------- \n")
+        print(f"\n -------  gen_from_query called with available data: {data_description} and query: {query} \nCode generated from query: \n {response} ------- \n")
         return response
 
     async def _anthropic_gen_from_query(self, query: str, data: List[FileDataInfo]) -> str:
@@ -708,6 +711,8 @@ class LLMService:
     async def _openai_analyze_sandbox_result(self, result: SandboxResult, old_data: List[FileDataInfo],
                                            new_data: FileDataInfo, analyzer_context: str) -> str:
         old_data_snapshot = self._build_old_data_snapshot(old_data)
+        if len(analyzer_context) < 10:
+            analyzer_context = "No dataset diff information provided"
         user_content = f""" 
                 Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
                 Original Query:\n{result.original_query}\n
@@ -733,6 +738,8 @@ class LLMService:
     async def _anthropic_analyze_sandbox_result(self, result: SandboxResult, old_data: List[FileDataInfo],
                                               new_data: FileDataInfo, analyzer_context: str) -> str:
         old_data_snapshot = self._build_old_data_snapshot(old_data)
+        if len(analyzer_context) < 10:
+            analyzer_context = "No dataset diff information provided"
         user_content = f""" 
                 Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
                 Original Query:\n{result.original_query}\n
@@ -865,7 +872,7 @@ class LLMService:
         old_data_snapshot = ""
         for data in old_data:
             if isinstance(data.snapshot, str):
-                data_snapshot = data.snapshot[:500] + "...cont'd"
+                data_snapshot = data.snapshot[:MAX_CONTEXT_LENGTH] + "...cont'd"
             else:
                 data_snapshot = data.snapshot
             old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"

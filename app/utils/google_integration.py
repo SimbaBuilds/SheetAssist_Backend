@@ -34,7 +34,6 @@ class GoogleIntegration:
             token_uri='https://oauth2.googleapis.com/token',
             scopes =  [
     'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.file',
     'https://www.googleapis.com/auth/drive.readonly',
 ]
         )
@@ -155,8 +154,8 @@ class GoogleIntegration:
             print(f"New rows to append: {len(new_rows)}")
             
             if len(new_rows) == 0:
-                logging.info("No new rows to append, returning")
-                return True
+                logging.info("No new rows detected, processing all passed data")
+                new_rows = data  # Use all passed data instead of returning
             
             # Format the new data for sheets
             logging.info("Formatting data for Google Sheets")

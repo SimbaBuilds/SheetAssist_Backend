@@ -356,6 +356,7 @@ class FilePreprocessor:
             is_image_like_pdf = total_text_length < 10
 
             if not is_image_like_pdf:
+                print(f"Returning text content: {text_content[:1000]} cont'd...")
                 return text_content, "text", False
                         
             num_pages = page_range[1] - page_range[0]

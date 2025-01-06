@@ -5,6 +5,11 @@ from typing import Dict, Any
 from dataclasses import dataclass
 import logging
 import numpy as np
+from dotenv import load_dotenv
+import os
+
+load_dotenv(override=True)
+MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH"))
 
 def _process_dataframe(df: pd.DataFrame) -> str:
     """Helper function to process DataFrame and generate info string"""
@@ -26,7 +31,7 @@ def _process_collection(data: Any, limit: int = 5) -> str:
         clean_list = [None if isinstance(x, (pd.Series, pd.DataFrame)) else (None if pd.isna(x) else x) 
                      for x in data[:limit]]
         return json.dumps(clean_list, indent=2)
-    return str(None if pd.isna(data) else data)[:500]
+    return str(None if pd.isna(data) else data)[:MAX_CONTEXT_LENGTH]
 
 def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = False) -> str:
     """Generate appropriate snapshot based on data type"""
@@ -55,14 +60,14 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
         return _process_collection(content)
     elif data_type == "text":
         text = str(None if pd.isna(content) else content)
-        return text[:500] + ("..." if len(text) > 500 else "")
+        return text[:MAX_CONTEXT_LENGTH] + ("..." if len(text) > MAX_CONTEXT_LENGTH else "")
     elif data_type == "image":
         content.file.seek(0)
         size = len(content.file.read())
         content.file.seek(0)
         return f"Image file: {content.filename}, Size: {size} bytes"
     
-    return str(None if pd.isna(content) else content)[:500]
+    return str(None if pd.isna(content) else content)[:MAX_CONTEXT_LENGTH]
 
 def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
     """Process a DataFrame to make it JSON serializable by handling datetime, object types, and NA values."""
