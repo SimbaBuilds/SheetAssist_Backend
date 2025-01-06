@@ -12,6 +12,7 @@ from typing import Annotated
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
 import logging
+from googleapiclient.errors import HttpError
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -237,6 +238,10 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
 
         except Exception as api_error:
             logger.error(f"API error while accessing file: {str(api_error)}")
+            # Check for 404 error specifically
+            if isinstance(api_error, HttpError) and api_error.resp.status == 404:
+                logger.warning("File not found or not accessible")
+                return "not_found"
             # Handle specific Google API errors
             if 'invalid_grant' in str(api_error):
                 logger.warning("Invalid grant error, attempting token refresh")
@@ -254,11 +259,13 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
                     drive_service = build('drive', 'v3', credentials=creds)
                     file = drive_service.files().get(fileId=file_id, fields='name').execute()
                     return file.get('name')
-            raise  # Re-raise if it's not an invalid_grant error or if retry failed
+            return None  # Return None instead of raising the error
 
     except Exception as e:
         logger.error(f"Error fetching Google doc title: {str(e)}")
-        return None  # Return None instead of the error string to maintain consistency
+        if str(e).startswith("<HttpError 404"):
+            return "not_found"
+        return None
 
 async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet| None:
     """Get document title using Microsoft Graph API"""
@@ -358,7 +365,13 @@ async def get_document_title(
             )
 
         try:
-            online_sheet = await get_google_title( url.url, google_token, supabase)
+            online_sheet = await get_google_title(url.url, google_token, supabase)
+            if online_sheet == "not_found":
+                return WorkbookResponse(
+                    url=url.url,
+                    success=False,
+                    error="Document not found or not accessible. Please check the URL and your permissions."
+                )
             if online_sheet is None:
                 return WorkbookResponse(
                     url=url.url,

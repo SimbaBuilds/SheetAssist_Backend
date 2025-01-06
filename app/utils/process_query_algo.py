@@ -190,28 +190,17 @@ async def process_query_algo(
                 result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
                 error_attempts += 1
                 if error_attempts == int(os.getenv("ERROR_ATTEMPTS")):
-                    result.error = "Failed to interpret query. Please try rephrasing your request."
+                    result.error = "Error attempts exhausted."
                     return result      
                     
             analysis_attempts += 1
             print("Analysis attempt:", analysis_attempts)
             if analysis_attempts == int(os.getenv("ANALYSIS_ATTEMPTS")):
-                result.error = "Failed to interpret query. Please try rephrasing your request."
+                result.error = "Analysis attempts exhausted."
                 return result
 
         return result
         
-    except ConnectionError as e:
-        detailed_error = f'Connection Error: {str(e)}'
-        result = SandboxResult(
-            original_query=query,
-            print_output="",
-            code="",
-            error=detailed_error,
-            return_value=None,
-            timed_out=False
-        )
-        return result
     except Exception as e:
         detailed_error = f'LLM interpretation failed: {str(e)}\nType: {type(e).__name__}'
         result = SandboxResult(

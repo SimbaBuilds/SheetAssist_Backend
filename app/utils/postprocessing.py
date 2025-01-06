@@ -324,7 +324,8 @@ async def handle_batch_destination_upload(
     supabase: SupabaseClient,
     user_id: str,
     llm_service: LLMService,
-    is_first_chunk: bool
+    is_first_chunk: bool,
+    job_id: str
 ) -> bool:
     """Handle destination upload for batch processing"""
     try:
@@ -345,12 +346,14 @@ async def handle_batch_destination_upload(
         suggested_name = None
         # For first chunk with new sheet creation
         if is_first_chunk and not request.output_preferences.modify_existing:
+            print(f"Creating new sheet first chunk: {is_first_chunk} and preferences: {request.output_preferences.modify_existing}")
             provider, suggested_name = await llm_service.execute_with_fallback(
                 "file_namer",
                 request.query,
                 old_data
             )
-            
+            supabase.table("batch_jobs").update({"output_preferences": {"sheet_name": suggested_name}}).eq("job_id", job_id).execute()
+
             if "docs.google.com" in url_lower:
                 return await g_integration.append_to_new_google_sheet(
                     processed_data,
@@ -364,40 +367,33 @@ async def handle_batch_destination_upload(
                     suggested_name
                 )
         
-        # For first chunk with new sheet creation
-        if not is_first_chunk and not request.output_preferences.modify_existing:
-            provider, suggested_name = await llm_service.execute_with_fallback(
-                "file_namer",
-                request.query,
-                old_data
-            )
+        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
             
-            if "docs.google.com" in url_lower:
-                return await g_integration.append_to_new_google_sheet(
-                    processed_data,
-                    request.output_preferences.destination_url,
-                    suggested_name
-                )
-            elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
-                return await msft_integration.append_to_new_office_sheet(
-                    processed_data,
-                    request.output_preferences.destination_url,
-                    suggested_name
-                )
-        
-        
+        job = job_response.data[0]
+    
+        if request.output_preferences.sheet_name:
+            sheet_name = request.output_preferences.sheet_name
+        else:
+            sheet_name = job["output_preferences"]["sheet_name"]
+      
+
         # For subsequent chunks or when modifying existing
         if "docs.google.com" in url_lower:
+            print(f"Appending to existing sheet.  First chunk: {is_first_chunk} Sheet Name: {sheet_name}")
             return await g_integration.append_to_current_google_sheet(
                 processed_data,
                 request.output_preferences.destination_url,
-                request.output_preferences.sheet_name
+                sheet_name
             )
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+            print(f"Appending to existing sheet.  First chunk: {is_first_chunk} Sheet Name: {sheet_name}")
             return await msft_integration.append_to_current_office_sheet(
                 processed_data,
                 request.output_preferences.destination_url,
-                request.output_preferences.sheet_name
+                sheet_name
             )
             
         raise ValueError(f"Unsupported destination sheet type: {request.output_preferences.destination_url}")
@@ -416,7 +412,7 @@ async def handle_batch_chunk_result(
     session_dir: str,
     current_chunk: int,
     total_chunks: int,
-    num_images_processed: int
+    num_images_processed: int,
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """Handle the result of a batch chunk processing."""
     try:
@@ -443,6 +439,14 @@ async def handle_batch_chunk_result(
             type(processed_data).__name__
         )
 
+        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+            
+        job = job_response.data[0]
+        
+        
         # Prepare base update data
         update_data = {
             "current_chunk": current_chunk + 1,
@@ -504,7 +508,8 @@ async def handle_batch_chunk_result(
                     supabase,
                     user_id,
                     llm_service,
-                    is_first_chunk
+                    is_first_chunk,
+                    job_id
                 )
 
                 # Mark as completed if last chunk

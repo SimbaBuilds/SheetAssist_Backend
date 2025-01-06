@@ -220,8 +220,6 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
             'end_row': max(all_affected_indices) if all_affected_indices else None,
         },
         'change_patterns': {
-            'is_append_only': bool(len(added_indices) > 0 and len(modified_indices) == 0 and len(deleted_indices) == 0),
-            'is_modify_only': bool(len(added_indices) == 0 and len(modified_indices) > 0 and len(deleted_indices) == 0),
             'is_schema_change': bool(len(set(new_df.columns) ^ set(old_df.columns)) > 0),
             'common_columns': common_columns,
             'affected_columns': list(set(
@@ -319,9 +317,7 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
                 'old': {'rows': len(old_df), 'columns': len(old_df.columns)},
                 'new': {'rows': len(new_df), 'columns': len(new_df.columns)}
             },
-            'is_schema_change': diff.metadata['change_patterns']['is_schema_change'],
-            'is_append_only': diff.metadata['change_patterns']['is_append_only'],
-            'is_modify_only': diff.metadata['change_patterns']['is_modify_only']
+            'is_schema_change': diff.metadata['change_patterns']['is_schema_change']
         }
     }
     

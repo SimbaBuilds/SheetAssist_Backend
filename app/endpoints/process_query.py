@@ -25,7 +25,7 @@ import io
 # Add at the top of the file, after imports
 
 
-load_dotenv()
+load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ async def process_query_entry_endpoint(
             # Calculate page ranges for each file
             page_chunks = []
             CHUNK_SIZE = int(os.getenv("CHUNK_SIZE")) 
+            logger.info(f"CHUNK_SIZE: {CHUNK_SIZE}")
             
             for file_meta in (request_data.files_metadata or []):
                 if file_meta.page_count:
@@ -389,7 +390,7 @@ async def _process_batch_chunk(
     """Internal function to process a single batch chunk without route dependencies."""
     try:
         # Get job data and validate chunk
-        logger.info(f"\n\n------- Processing chunk: {current_chunk + 1} -----------\n")
+        logger.info(f"\n\n------- Processing chunk: {current_chunk + 1} (Index: {current_chunk}) -----------\n")
         
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
         if not job_response.data or len(job_response.data) == 0:
