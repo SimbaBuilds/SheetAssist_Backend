@@ -87,7 +87,7 @@ async def process_query_algo(
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
             error_attempts += 1
             if error_attempts == 6:
-
+                result.error = "Error attempts exhausted."
                 return result
             
         # Analysis and improvement loop
