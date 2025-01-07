@@ -80,8 +80,8 @@ async def process_query_entry_endpoint(
             logger.info(f"file_meta: {file_meta.page_count}")
             if file_meta.page_count and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
                 if files_data[i]['content_type'] == "application/pdf":
-                    machine_readable = pdf_classifier(files_data[i]['content'])
-                    if not machine_readable:
+                    is_image_like_pdf = pdf_classifier(files_data[i]['content'])
+                    if is_image_like_pdf:
                         need_to_batch = True
                         logger.info(f"----- Need_to_batch: {need_to_batch} -----")
                         break

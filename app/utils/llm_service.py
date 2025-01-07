@@ -174,18 +174,18 @@ class OpenaiVisionProcessor  :
                             "role": "user",
                             "content": [
                                 {
-                                    "type": "text",
-                                    "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
-                                    Extract only the relevant information from the image based on the query and data.
-                                    If formatting in the image provides information, indicate as much in your response 
-                                    (e.g. large text at the top of the image: title: [large text], 
-                                    tabular data: table: [tabular data], etc...).
-                                    Query and input data snapshot below in triple backticks.
-                                    ```Query: {query} 
-                                    Input Data Snapshot: 
-                                    {input_data_snapshot}
-                                    ```
-                                    """
+                                "type": "text",
+                                "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
+                                Extract only the relevant information from the image based on the query and data.
+                                If formatting in the image provides information, indicate as much in your response 
+                                (e.g. large text at the top of the image: title: [large text], 
+                                tabular data: table: [tabular data], etc...).
+                                Query and input data snapshot below in triple backticks.
+                                ```Query: {query} 
+                                Input Data Snapshot: 
+                                {input_data_snapshot}
+                                ```
+                                """
                                 },
                                 {
                                     "type": "image_url",
@@ -667,12 +667,13 @@ class LLMService:
                                    data: List[FileDataInfo], past_errors: List[str]) -> str:
         data_description = self._build_data_description(data)
         user_content = f"""Here is the original available data, user query, code, past errors, and new error
-                - try not to repeat any of the past errors in your new solution:
-                Available Data:\n{data_description}\n\n
-                Original Query:\n{result.original_query}\n\n
-                Code:\n{result.code}\n\n
-                Past Errors:\n{past_errors}\n\n
-                New Error:\n{result.error}"""
+        - try not to repeat any of the past errors in your new solution:
+        Available Data:\n{data_description}\n\n
+        Original Query:\n{result.original_query}\n\n
+        Code:\n{result.code}\n\n
+        Past Errors:\n{past_errors}\n\n
+        New Error:\n{result.error}
+        """
         
         response = await self._openai_generate_text(
             system_prompt=self._gen_from_error_prompt,
@@ -705,10 +706,11 @@ class LLMService:
                                       data: List[FileDataInfo], past_errors: List[str]) -> str:
         data_description = self._build_data_description(data)
         user_content = f"""Original Query:\n{result.original_query}\n
-                Available Data:\n{data_description}\n
-                Code:\n{result.code}\n
-                Analysis:\n{analysis_result}\n
-                Past Errors:\n{past_errors}"""
+        Available Data:\n{data_description}\n
+        Code:\n{result.code}\n
+        Analysis:\n{analysis_result}\n
+        Past Errors:\n{past_errors}
+        """
         
         return await self._openai_generate_text(
             system_prompt=self._gen_from_analysis_prompt,
@@ -722,7 +724,8 @@ class LLMService:
                 Available Data:\n{data_description}\n
                 Code:\n{result.code}\n
                 Analysis:\n{analysis_result}\n
-                Past Errors:\n{past_errors}"""
+                Past Errors:\n{past_errors}
+        """
         
         return await self._anthropic_generate_text(
             system_prompt=self._gen_from_analysis_prompt,
@@ -747,14 +750,13 @@ class LLMService:
             batch_info = f"\nUser files are being processed in batches. This is batch {batch_context['current']} of {batch_context['total']}"
         
         user_content = f""" 
-                Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
-                Original Query:\n{result.original_query}\n
-                Old Data Snapshots:\n{old_data_snapshot}\n
-                Error Free Code:\n{result.code}\n
-                Result Snapshot:\n{new_data.snapshot}\n
-                {batch_info}\n
-                Dataset Diff Information:\n{analyzer_context[:200]} cont'd...\n
-                """
+        Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
+        Original Query:\n{result.original_query}\n
+        Old Data Snapshots:\n{old_data_snapshot}\n
+        Result Snapshot:\n{new_data.snapshot}\n
+        {batch_info}\n
+        Dataset Diff Information:\n{analyzer_context}\n
+        """
 
         response = await self._openai_generate_text(
             system_prompt=self._analyze_sandbox_prompt,
@@ -781,14 +783,13 @@ class LLMService:
             batch_info = f"\nUser files are being processed in batches. This is batch {batch_context['current']} of {batch_context['total']}"
         
         user_content = f""" 
-                Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
-                Original Query:\n{result.original_query}\n
-                Old Data Snapshots:\n{old_data_snapshot}\n
-                Error Free Code:\n{result.code}\n
-                Result Snapshot:\n{new_data.snapshot}\n
-                {batch_info}\n
-                Dataset Diff Information:\n{analyzer_context[:200]} cont'd...\n
-                """
+        Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
+        Original Query:\n{result.original_query}\n
+        Old Data Snapshots:\n{old_data_snapshot}\n
+        Result Snapshot:\n{new_data.snapshot}\n
+        {batch_info}\n
+        Dataset Diff Information:\n{analyzer_context}\n
+        """
 
         response = await self._anthropic_generate_text(
             system_prompt=self._analyze_sandbox_prompt,
@@ -824,9 +825,9 @@ class LLMService:
         """Generate a filename using OpenAI"""
         data_description = self._build_data_description(data)
         user_content = f"""Based on the query and data below, suggest a filename. 
-                    Avoid technical language (i.e. dataframe, list, etc.)
-                    Query: {query}
-                    Available Data: {data_description}"""
+        Avoid technical language (i.e. dataframe, list, etc.)
+        Query: {query}
+        Available Data: {data_description}"""
         
         response = self.openai_client.chat.completions.create(
             model=os.getenv("OPENAI_SMALL_MODEL"),
@@ -844,9 +845,9 @@ class LLMService:
         """Generate a filename using Anthropic"""
         data_description = self._build_data_description(data)
         user_content = f"""Based on the query and data below, suggest a filename. 
-                    Avoid technical language (i.e. dataframe, list, etc.)
-                    Query: {query}
-                    Available Data: {data_description}"""
+        Avoid technical language (i.e. dataframe, list, etc.)
+        Query: {query}
+        Available Data: {data_description}"""
         
         # Updated to use claude-3-5-haiku-20241022
         response = self.anthropic_client.messages.create(

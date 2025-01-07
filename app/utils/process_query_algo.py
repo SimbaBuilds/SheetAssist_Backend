@@ -67,6 +67,7 @@ async def process_query_algo(
             batch_context=batch_context
         )
         unprocessed_llm_output = suggested_code 
+        print(f"\n\n----- Initial LLM output -----\n {unprocessed_llm_output}\n")
         cleaned_code = extract_code(suggested_code)
         result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
         print(f"\ncode executed with return value of type {type(result.return_value).__name__}\n")  
@@ -128,9 +129,7 @@ async def process_query_algo(
                                 # Process DataFrame for JSON serialization
                                 processed_item = process_dataframe_for_json(item)
                                 this_context[diff_key] = prepare_analyzer_context(old_data[i].content, processed_item)
-                                logging.info(f"This context: {this_context}")
                                 full_diff_context += json.dumps(this_context)
-                                logging.info(f"Full diff context: {full_diff_context[:100]}...cont'd")
             # Analyze results
             provider, analysis_result = await llm_service.execute_with_fallback(
                 "analyze_sandbox_result",

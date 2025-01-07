@@ -11,6 +11,7 @@ Context:
 Code generation instructions:
 - The generated code should be enclosed in one set of triple backticks.
 - Each data variable may be of different types (DataFrame, string, list, etc.).
+- If given a large amount of organized text data, if possible, use regular expressions on the namespace variables rather than attempting to rewrite the content and manually build dataframes.
 - Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
 - Do not forget your imports.
 - Use the simplest method to return the desired value.                
@@ -60,7 +61,9 @@ Context:
 ------
 Output Instructions:
 - While data structure and type are not as important, please maintain rigor in your analysis of the overall output.  Make sure the output will adequately satisfy the user request once converted to the proper file type, meaning no relevant columns are missing or empty.
-- Respond with either "yes, the result satisfies the user's query" OR "no, the result does not satisfy the user's original query" and provide a one sentence explanation of why the resultant dataframe or string would or would not satisfy the user query.
+- If it is not a batch process, make sure the output will fully complete the task specified by the user request (i.e. all pages and pages and files are processed)
+- Respond with either "yes, the result satisfies the user's query" OR "no, the result does not satisfy the user's original query" and provide a one sentence explanation of why the resultant dataframe or string does or does not satisfy the user query.
+- Only respond yes if all aspects of the user request are satisfied (or, if batch processing, the current batch is adequately processed)
 """ 
 
 sentiment_analysis_prompt = """

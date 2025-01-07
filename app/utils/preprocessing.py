@@ -397,7 +397,7 @@ class FilePreprocessor:
                 text_content += f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}"
 
             if not is_image_like_pdf:
-                print(f"Returning text content: {text_content[:1000]} cont'd...")
+                print(f"Returning text content with length: {len(text_content)} characters and snapshot:\n {text_content[:1000]} cont'd...\n")
                 return text_content, "text", False
                         
             num_pages = page_range[1] - page_range[0]
