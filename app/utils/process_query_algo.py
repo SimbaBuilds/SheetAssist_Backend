@@ -1,7 +1,7 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
 from app.utils.data_processing import get_data_snapshot, prepare_analyzer_context, process_dataframe_for_json
-from typing import List, Tuple, Any, Optional
+from typing import List, Tuple, Any, Optional, Dict
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
 import logging
@@ -36,6 +36,7 @@ async def process_query_algo(
     query: str, 
     sandbox: EnhancedPythonInterpreter,
     data: List[FileDataInfo] = None,
+    batch_context: Optional[Dict[str, int]] = None
 ) -> SandboxResult:
     
     
@@ -59,7 +60,12 @@ async def process_query_algo(
 
     try:
         # Initial code generation and execution
-        provider, suggested_code = await llm_service.execute_with_fallback("gen_from_query", query, data)
+        provider, suggested_code = await llm_service.execute_with_fallback(
+            "gen_from_query", 
+            query, 
+            data,
+            batch_context=batch_context
+        )
         unprocessed_llm_output = suggested_code 
         cleaned_code = extract_code(suggested_code)
         result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
@@ -131,7 +137,8 @@ async def process_query_algo(
                 result,
                 old_data,
                 new_data,
-                full_diff_context
+                full_diff_context,
+                batch_context=batch_context
             )
             
             provider, (success, analysis_result) = await llm_service.execute_with_fallback(

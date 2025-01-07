@@ -139,15 +139,12 @@ class GoogleIntegration:
             logging.info("Converting input data to DataFrame")
             if not isinstance(data, pd.DataFrame):
                 if isinstance(data, dict):
-                    logging.debug("Converting dict to DataFrame")
                     data = pd.DataFrame([data])
                 elif isinstance(data, list):
-                    logging.debug("Converting list to DataFrame") 
                     data = pd.DataFrame(data)
                 else:
-                    logging.debug("Converting single value to DataFrame")
                     data = pd.DataFrame([data])
-            
+            logging.info(f"Data shape: {data.shape}")
             # Get only the new rows (rows beyond existing count)
             new_rows = data.iloc[existing_row_count-1:]
             logging.info(f"New rows to append: {len(new_rows)}")

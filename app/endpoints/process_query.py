@@ -10,7 +10,7 @@ import logging
 from app.schemas import QueryRequest
 from app.utils.postprocessing import handle_destination_upload, handle_download, handle_batch_chunk_result
 from app.utils.data_processing import get_data_snapshot
-from app.utils.preprocessing import preprocess_files, determine_pdf_page_count
+from app.utils.preprocessing import preprocess_files, determine_pdf_page_count, pdf_classifier
 from fastapi import BackgroundTasks
 from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
@@ -74,15 +74,21 @@ async def process_query_entry_endpoint(
             request_data.input_urls = [InputUrl(url=request_data.output_preferences.destination_url, sheet_name=request_data.output_preferences.sheet_name)]
         
         # Check if any PDF has more than CHUNK_SIZE pages
-        has_large_pdf = False
+        need_to_batch = False
+        i = 0
         for file_meta in (request_data.files_metadata or []):
             logger.info(f"file_meta: {file_meta.page_count}")
             if file_meta.page_count and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
-                has_large_pdf = True
-                break
-                
+                if files_data[i]['content_type'] == "application/pdf":
+                    machine_readable = pdf_classifier(files_data[i]['content'])
+                    if not machine_readable:
+                        need_to_batch = True
+                        logger.info(f"----- Need_to_batch: {need_to_batch} -----")
+                        break
+            i += 1
+        
         # Decision routing based on page count
-        if has_large_pdf:
+        if need_to_batch:
             # Generate unique job ID
             logger.info(f"Large PDF detected")
             job_id = f"job_{user_id}_{int(time.time())}"
@@ -475,6 +481,7 @@ async def _process_batch_chunk(
             query=request_data.query,
             sandbox=sandbox,
             data=preprocessed_data,
+            batch_context={"current": current_chunk + 1, "total": len(page_chunks)}  # Add batch context here
         )
         
         if result.error:

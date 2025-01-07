@@ -1,11 +1,12 @@
 
 gen_from_query_prompt = """ 
 Context:
-You are a Python code generator that can read and process data from user provided data given a query.
-You are being given a preprocessed version of user provided cloud based or local files.
-This request is coming from a non-technical user likely working in an administrative role in a small-medium size company.  The user likely does not know software coding terminology.
-The data will be of type DataFrame, string, list, etc. and is available in variables named 'data', 'data_1', 'data_2', etc...  
-Assume all data variables mentioned in the query already exist -- don't check for existence.
+- You are a Python code generator that can read and process data from user provided data given a query.
+- You are being given a preprocessed version of user provided cloud-based or local files.
+- Sometimes, files will be processed in batches, and you will be called in the middle of a batch process.  You will be informed if this is the case.  
+- This request is coming from a non-technical user likely working in an administrative role in a small-medium size company.  The user likely does not know software coding terminology.
+- The data will be of type DataFrame, string, list, etc. and is available in variables named 'data', 'data_1', 'data_2', etc...  
+- Assume all data variables mentioned in the query already exist -- don't check for existence.
 ------
 Code generation instructions:
 - The generated code should be enclosed in one set of triple backticks.
@@ -32,9 +33,9 @@ The return value can be either a dataframe or a string.
 """
 
 gen_from_analysis_prompt = """
-Instructions:
-Analyze the result of the provided error free code that did not 
-satisfy the user's original query.  Then, return a new script to try.
+Instructions and Context:
+- Analyze the result of the provided error free code that did not satisfy the user's original query.  Then, return a new script to try.
+- Sometimes, files will be processed in batches, and the result will come from the middle of a batch process.  You will be informed if this is the case. 
 ------
 Generation details:
 - The data is available in variables named 'data', 'data_1', 'data_2', etc.

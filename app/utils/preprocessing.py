@@ -28,7 +28,49 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def pdf_classifier(file: Union[BinaryIO, str, bytes]) -> Tuple[bool, str]:
+    """Classify the type of PDF file"""
+    
+    # Create a temporary file if we received a file object
+    if not isinstance(file, str):
+        try:
+            # Read the entire content at once and store it
+            if hasattr(file, 'read'):
+                file.seek(0)  # Reset file position to start
+                content = file.read()
+                if not content:
+                    raise ValueError("Empty PDF file")
+            else:
+                content = file
+            
+            # Create a temporary file with the content
+            temp_path = temp_file_manager.save_temp_file(content, "temp.pdf")
+            pdf_path = str(temp_path)
+            
+        except Exception as e:
+            logging.error(f"Error reading PDF file: {str(e)}")
+            raise ValueError(f"Failed to read PDF file: {str(e)}")
+    else:
+        pdf_path = file
+    
+    doc = fitz.open(pdf_path)
+    
+    # Rest of the processing remains the same...
+    text_content = ""
+    total_text_length = 0
+    
+    start_page = 0
+    end_page = 5
 
+    for page_num in range(start_page, end_page):
+        page = doc[page_num]
+        page_text = page.get_text()
+        total_text_length += len(page_text.strip())
+        text_content += f"\n[Page {page_num + 1}]\n{page_text}"
+
+    is_image_like_pdf = total_text_length < 10
+    
+    return is_image_like_pdf
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -332,28 +374,27 @@ class FilePreprocessor:
             else:
                 pdf_path = file
 
-            # Now the file should be properly saved and readable
+            is_image_like_pdf = pdf_classifier(pdf_path)
+
             doc = fitz.open(pdf_path)
-            
-            # Rest of the processing remains the same...
-            text_content = ""
-            total_text_length = 0
+
             page_count = len(doc)
-            
+    
             if page_range:
                 start_page = page_range[0] if page_range else 0
                 end_page = min(page_range[1], page_count) if page_range else page_count
             else:
                 start_page = 0
                 end_page = page_count
+
+            text_content = ""
+            total_text_length = 0
             
             for page_num in range(start_page, end_page):
                 page = doc[page_num]
                 page_text = page.get_text()
                 total_text_length += len(page_text.strip())
-                text_content += f"\n[Page {page_num + 1}]\n{page_text}"
-
-            is_image_like_pdf = total_text_length < 10
+                text_content += f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}"
 
             if not is_image_like_pdf:
                 print(f"Returning text content: {text_content[:1000]} cont'd...")
@@ -364,8 +405,7 @@ class FilePreprocessor:
             if self.supabase and self.user_id:
                 await self.check_image_processing_limits(self.supabase, self.user_id, num_pages)
             
-            
-            # For unreadable PDFs, process with vision
+            # For non-machine readable PDFs, process with vision
             provider, vision_result = await self.llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
                 pdf_path=pdf_path,
@@ -377,6 +417,7 @@ class FilePreprocessor:
             if isinstance(vision_result, dict) and vision_result.get("status") == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
 
+            
             self.num_images_processed += (end_page - start_page)
 
             content = vision_result["content"] if isinstance(vision_result, dict) else vision_result

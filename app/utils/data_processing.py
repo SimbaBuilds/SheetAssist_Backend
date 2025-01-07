@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv(override=True)
-MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH"))
+MAX_SNAPSHOT_LENGTH = int(os.getenv("MAX_SNAPSHOT_LENGTH"))
 
 def _process_dataframe(df: pd.DataFrame) -> str:
     """Helper function to process DataFrame and generate info string"""
@@ -31,7 +31,7 @@ def _process_collection(data: Any, limit: int = 5) -> str:
         clean_list = [None if isinstance(x, (pd.Series, pd.DataFrame)) else (None if pd.isna(x) else x) 
                      for x in data[:limit]]
         return json.dumps(clean_list, indent=2)
-    return str(None if pd.isna(data) else data)[:MAX_CONTEXT_LENGTH]
+    return str(None if pd.isna(data) else data)[:MAX_SNAPSHOT_LENGTH]
 
 def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = False) -> str:
     """Generate appropriate snapshot based on data type"""
@@ -43,6 +43,8 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
         for item in content:
             if isinstance(item, pd.DataFrame):
                 snapshots.append(_process_dataframe(item))
+            elif isinstance(item, pd.Series):
+                snapshots.append(str(item))
             elif isinstance(item, (dict, list)):
                 snapshots.append(_process_collection(item))
             elif hasattr(item, 'file') and hasattr(item, 'filename'):
@@ -55,19 +57,23 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
         return "\n---\n".join(snapshots)
 
     if data_type == "DataFrame":
-        return _process_dataframe(content)
+        if isinstance(content, pd.DataFrame):
+            return _process_dataframe(content)
+        elif isinstance(content, pd.Series):
+            return str(content)
+        return str(content)
     elif data_type == "json":
         return _process_collection(content)
     elif data_type == "text":
         text = str(None if pd.isna(content) else content)
-        return text[:MAX_CONTEXT_LENGTH] + ("..." if len(text) > MAX_CONTEXT_LENGTH else "")
+        return text[:MAX_SNAPSHOT_LENGTH] + ("..." if len(text) > MAX_SNAPSHOT_LENGTH else "")
     elif data_type == "image":
         content.file.seek(0)
         size = len(content.file.read())
         content.file.seek(0)
         return f"Image file: {content.filename}, Size: {size} bytes"
     
-    return str(None if pd.isna(content) else content)[:MAX_CONTEXT_LENGTH]
+    return str(None if pd.isna(content) else content)[:MAX_SNAPSHOT_LENGTH]
 
 def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
     """Process a DataFrame to make it JSON serializable by handling datetime, object types, and NA values."""
@@ -79,7 +85,8 @@ def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
     
     # Handle object columns with numpy types
     for col in processed_df.columns:
-        if processed_df[col].dtype == 'object':
+        col_dtype = processed_df[col].dtype
+        if col_dtype == object or str(col_dtype) == 'object':
             processed_df[col] = processed_df[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
     
     # Replace NaN, NaT, etc with None
@@ -187,10 +194,18 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     all_affected_indices = set(modified_indices) | set(added_indices) | set(deleted_indices)
     context_indices = set()
     for idx in all_affected_indices:
-        start = max(0, int(idx - context_radius))
-        end = min(int(max(old_df.index.max(), new_df.index.max())), int(idx + context_radius + 1))
-        valid_indices = [i for i in range(start, end) if i in new_df.index]
-        context_indices.update(valid_indices)
+        # Convert index to int and handle NaN
+        try:
+            idx_int = int(idx)
+            start = max(0, idx_int - context_radius)
+            end = min(
+                int(max(old_df.index.max() or 0, new_df.index.max() or 0)), 
+                idx_int + context_radius + 1
+            )
+            valid_indices = [i for i in range(start, end) if i in new_df.index]
+            context_indices.update(valid_indices)
+        except (ValueError, TypeError):
+            continue  # Skip indices that can't be converted to int
     
     valid_context_indices = list(context_indices & set(new_df.index))
     logging.info(f"Generated {len(valid_context_indices)} context rows")
@@ -297,11 +312,9 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
             'before': [convert_dict_timestamps(row) for row in old_df.loc[diff.modified_rows.index[:3]].to_dict(orient='records')],
             'after': [convert_dict_timestamps(row) for row in diff.modified_rows.head(3).to_dict(orient='records')]
         }
-    logging.info(f"Changes: {changes}")
     
     if not diff.deleted_rows.empty:
         changes['deleted_rows'] = [convert_dict_timestamps(row) for row in diff.deleted_rows.head(3).to_dict(orient='records')]
-    logging.info(f"Changes: {changes}")
     
     context = {
         'output_sample': sample_output,

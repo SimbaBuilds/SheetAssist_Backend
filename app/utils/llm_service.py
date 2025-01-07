@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 # Add at the top of the file, after imports
 load_dotenv(override=True)
 
-MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH"))
+MAX_SNAPSHOT_LENGTH = int(os.getenv("MAX_SNAPSHOT_LENGTH"))
 MAX_VISION_OUTPUT_TOKENS = int(os.getenv("MAX_VISION_OUTPUT_TOKENS"))
 
 
@@ -620,26 +620,47 @@ class LLMService:
 
     
     
-    async def _openai_gen_from_query(self, query: str, data: List[FileDataInfo]) -> str:
+    async def _openai_gen_from_query(
+        self, 
+        query: str, 
+        data: List[FileDataInfo],
+        batch_context: Optional[Dict[str, int]] = None
+    ) -> str:
         data_description = self._build_data_description(data)
-        user_content = f"Available Data:\n{data_description}\n\nQuery:\n{query}"
+        
+        # Add batch context to prompt if available
+        batch_info = ""
+        if batch_context:
+            batch_info = f"\nUser files are being processed in batches.  This is batch {batch_context['current']} of {batch_context['total']}"
+        
+        user_content = f"Available Data:\n{data_description}\n\nQuery:\n{query}{batch_info}"
         
         response = await self._openai_generate_text(
             system_prompt=self._gen_from_query_prompt,
             user_content=user_content
         )
-        print(f"\n -------  gen_from_query called with available data: {data_description} and query: {query} \nCode generated from query: \n {response} ------- \n")
+        print(f"\n -------  gen_from_query called with user content:  ------- \n {user_content}")
         return response
 
-    async def _anthropic_gen_from_query(self, query: str, data: List[FileDataInfo]) -> str:
+    async def _anthropic_gen_from_query(
+        self, 
+        query: str, 
+        data: List[FileDataInfo],
+        batch_context: Optional[Dict[str, int]] = None
+    ) -> str:
         data_description = self._build_data_description(data)
-        user_content = f"Available Data:\n{data_description}\n\nQuery:\n{query}"
+        
+        # Add batch context to prompt if available
+        batch_info = ""
+        if batch_context:
+            batch_info = f"\nUser files are being processed in batches.  This is batch {batch_context['current']} of {batch_context['total']}"
+        
+        user_content = f"Available Data:\n{data_description}\n\nQuery:\n{query}{batch_info}"
         
         response = await self._anthropic_generate_text(
             system_prompt=self._gen_from_query_prompt,
             user_content=user_content
         )
-        print(f"\n -------LLM called with available data: {data_description} and query: {query} \nCode generated from query: \n {response} ------- \n")
         return response
 
     async def _openai_gen_from_error(self, result: SandboxResult, error_attempts: int, 
@@ -708,17 +729,30 @@ class LLMService:
             user_content=user_content
         )
 
-    async def _openai_analyze_sandbox_result(self, result: SandboxResult, old_data: List[FileDataInfo],
-                                           new_data: FileDataInfo, analyzer_context: str) -> str:
+    async def _openai_analyze_sandbox_result(
+        self, 
+        result: SandboxResult, 
+        old_data: List[FileDataInfo],
+        new_data: FileDataInfo, 
+        analyzer_context: str,
+        batch_context: Optional[Dict[str, int]] = None
+    ) -> str:
         old_data_snapshot = self._build_old_data_snapshot(old_data)
         if len(analyzer_context) < 10:
             analyzer_context = "No dataset diff information provided"
+
+        # Add batch context to prompt if available
+        batch_info = ""
+        if batch_context:
+            batch_info = f"\nUser files are being processed in batches. This is batch {batch_context['current']} of {batch_context['total']}"
+        
         user_content = f""" 
                 Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
                 Original Query:\n{result.original_query}\n
                 Old Data Snapshots:\n{old_data_snapshot}\n
                 Error Free Code:\n{result.code}\n
                 Result Snapshot:\n{new_data.snapshot}\n
+                {batch_info}\n
                 Dataset Diff Information:\n{analyzer_context[:200]} cont'd...\n
                 """
 
@@ -726,33 +760,41 @@ class LLMService:
             system_prompt=self._analyze_sandbox_prompt,
             user_content=user_content
         )
-        print(f"""\n\nSandbox result analyzer called with Query: {result.original_query}\n
-                Old Data Snapshots:\n{old_data_snapshot}\n
-                Error Free Code:\n{result.code}\n
-                Result Snapshot:\n{new_data.snapshot}\n
-                Dataset Diff Information:\n{analyzer_context} cont'd...\n\n
-                """
-        )
+        print(f"\n ------- analyze_sandbox_result called with user content: ------- \n {user_content}")
         return response
 
-    async def _anthropic_analyze_sandbox_result(self, result: SandboxResult, old_data: List[FileDataInfo],
-                                              new_data: FileDataInfo, analyzer_context: str) -> str:
+    async def _anthropic_analyze_sandbox_result(
+        self, 
+        result: SandboxResult, 
+        old_data: List[FileDataInfo],
+        new_data: FileDataInfo, 
+        analyzer_context: str,
+        batch_context: Optional[Dict[str, int]] = None
+    ) -> str:
         old_data_snapshot = self._build_old_data_snapshot(old_data)
         if len(analyzer_context) < 10:
             analyzer_context = "No dataset diff information provided"
+
+        # Add batch context to prompt if available
+        batch_info = ""
+        if batch_context:
+            batch_info = f"\nUser files are being processed in batches. This is batch {batch_context['current']} of {batch_context['total']}"
+        
         user_content = f""" 
                 Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
                 Original Query:\n{result.original_query}\n
                 Old Data Snapshots:\n{old_data_snapshot}\n
                 Error Free Code:\n{result.code}\n
                 Result Snapshot:\n{new_data.snapshot}\n
-                Dataset Diff Information:\n{analyzer_context} cont'd...\n
+                {batch_info}\n
+                Dataset Diff Information:\n{analyzer_context[:200]} cont'd...\n
                 """
 
-        return await self._anthropic_generate_text(
+        response = await self._anthropic_generate_text(
             system_prompt=self._analyze_sandbox_prompt,
             user_content=user_content
         )
+        return response
 
     async def _openai_sentiment_analysis(self, analysis_result: str) -> Tuple[bool, str]:
         response = await self._openai_generate_text(
@@ -872,7 +914,7 @@ class LLMService:
         old_data_snapshot = ""
         for data in old_data:
             if isinstance(data.snapshot, str):
-                data_snapshot = data.snapshot[:MAX_CONTEXT_LENGTH] + "...cont'd"
+                data_snapshot = data.snapshot[:MAX_SNAPSHOT_LENGTH] + "...cont'd"
             else:
                 data_snapshot = data.snapshot
             old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"
