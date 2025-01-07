@@ -350,7 +350,7 @@ async def process_query_standard_endpoint(
                 if request_data.output_preferences.modify_existing:
                     message = f"Data successfully uploaded to  {request_data.output_preferences.doc_name} - {request_data.output_preferences.sheet_name}."
                 else:
-                    message = f"Data successfully uploaded to new sheet in {request_data.output_preferences.destination_url}."
+                    message = f"Data successfully uploaded to new sheet in {request_data.output_preferences.doc_name}."
 
                 return QueryResponse(
                     original_query=request_data.query,
@@ -627,7 +627,7 @@ async def process_query_batch_endpoint(
             # Update progress including images processed
             processed_pages = min((chunk_index + 1) * int(os.getenv("CHUNK_SIZE")), job_data["total_pages"])
             supabase.table("batch_jobs").update({
-                "current_chunk": chunk_index + 1,
+                "current_chunk": min(chunk_index + 1, len(page_chunks) - 1),
                 "processed_pages": processed_pages,
                 "total_images_processed": total_images_processed,
                 "status": "processing" if chunk_index < len(page_chunks) - 1 else "completed",

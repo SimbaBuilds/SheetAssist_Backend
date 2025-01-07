@@ -60,9 +60,9 @@ Context:
 - If dataset diff information is provided, Diff1_1 corresponds to the diff between the first dataframe in the old data and the first dataframe in the new data.  Diff1_2 corresponds to the diff between the first dataframe in the old data and the second dataframe in the new data etc...
 ------
 Output Instructions:
-- While data structure and type are not as important, please maintain rigor in your analysis of the overall output.  Make sure the output will adequately satisfy the user request once converted to the proper file type, meaning no relevant columns are missing or empty.
-- If it is not a batch process, make sure the output will fully complete the task specified by the user request (i.e. all pages and pages and files are processed)
 - Respond with either "yes, the result satisfies the user's query" OR "no, the result does not satisfy the user's original query" and provide a one sentence explanation of why the resultant dataframe or string does or does not satisfy the user query.
+- While data structure and type are not as important, please maintain rigor in your analysis of the overall output.  Make sure the output will adequately satisfy the user request once converted to the proper file type, meaning no relevant columns are missing or empty.
+- If it is not a batch process, make sure the output will fully complete the task specified by the user request (i.e. all pages and pages and files are processed).  Pay close attention to the shape of the resultant dataframe.
 - Only respond yes if all aspects of the user request are satisfied (or, if batch processing, the current batch is adequately processed)
 """ 
 

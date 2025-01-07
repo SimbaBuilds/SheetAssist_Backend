@@ -36,11 +36,26 @@ def construct_status_response(job: dict) -> QueryResponse:
     """Helper function to construct status response"""
 
     current_status = job.get("status", "unknown")
-
     logger.info(f"Current chunk: {job.get('current_chunk')}, Total chunks: {len(job.get('page_chunks', []))}")
+    page_chunks = job.get('page_chunks', [])
+    current_chunk = int(job.get('current_chunk', 0))
+    file_id = page_chunks[current_chunk]['file_id']
+    start_page = int(page_chunks[current_chunk]['page_range'][0])
+    output_preferences = job.get('output_preferences')
+    if output_preferences.get('doc_name'):
+        doc_name = output_preferences.get('doc_name')
+        sheet_name = output_preferences.get('sheet_name')
+    else:
+        doc_name = None
+        sheet_name = None
+    
     
     if current_status == "completed":
-        if job["output_preferences"]["type"] == "online":
+        if output_preferences['type'] == 'online':
+            if output_preferences['modify_existing']:
+                message = f"Data successfully appended to {doc_name} - {sheet_name}."
+            else:
+                message = f"Data successfully uploaded to new sheet in {doc_name}."
             return QueryResponse(
                 result=TruncatedSandboxResult(
                     original_query=job["query"],
@@ -50,7 +65,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                     return_value_snapshot=job["result_snapshot"]
                 ),
                 status=current_status,
-                message="Processing completed",
+                message=message,
                 files=None,
                 num_images_processed=job["total_images_processed"],
                 total_pages=job.get("total_pages", 0)
@@ -89,27 +104,15 @@ def construct_status_response(job: dict) -> QueryResponse:
     else:  # processing or created
         message = job.get("message", "Processing in progress")
         
-        if job.get('page_chunks'):
-            page_chunks = job.get('page_chunks', [])
-            current_chunk = int(job.get('current_chunk', 0))
-            file_id = page_chunks[current_chunk]['file_id']
-            start_page = int(page_chunks[current_chunk]['page_range'][0])
-            output_preferences = job.get('output_preferences')
-            if output_preferences.get('doc_name'):
-                doc_name = output_preferences.get('doc_name')
-                sheet_name = output_preferences.get('sheet_name')
+        total_pages = page_chunks[current_chunk]['metadata']['page_count']
+        if output_preferences['type'] == 'online':
+            if output_preferences['modify_existing']:
+                message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and appended to {doc_name} - {sheet_name}."
             else:
-                doc_name = None
-                sheet_name = None
-            total_pages = page_chunks[current_chunk]['metadata']['page_count']
-            if output_preferences['type'] == 'online':
-                if output_preferences['modify_existing']:
-                    message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and appended to {doc_name} - {sheet_name}."
-                else:
-                    message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and added to new sheet in {doc_name}."
-            else: #download output
-                message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed."
-            
+                message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and added to new sheet in {doc_name}."
+        else: #download output
+            message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed."
+        
         return QueryResponse(
             result=None,
             status=current_status,

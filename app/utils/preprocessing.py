@@ -60,7 +60,7 @@ def pdf_classifier(file: Union[BinaryIO, str, bytes]) -> Tuple[bool, str]:
     total_text_length = 0
     
     start_page = 0
-    end_page = 5
+    end_page = min(5, len(doc))
 
     for page_num in range(start_page, end_page):
         page = doc[page_num]

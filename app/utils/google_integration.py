@@ -40,77 +40,21 @@ class GoogleIntegration:
 
     def _format_data_for_sheets(self, data: Any) -> List[List[str]]:
         """Helper function to format data for Google Sheets."""
-        def format_value(v: Any) -> str:
-            """Helper function to format individual values"""
-            # Handle None/null values
-            if v is None:
-                return ''
-            
-            # Handle lists and nested structures
-            if isinstance(v, (list, tuple)):
-                # Handle nested lists/dicts
-                formatted_items = []
-                for item in v:
-                    if isinstance(item, (dict, list, tuple)):
-                        formatted_items.append(str(item))  # Convert complex items to string
-                    else:
-                        formatted_items.append(format_value(item))  # Recursively format simple items
-                return ', '.join(formatted_items)
-            
-            # Handle dictionaries (common in LLM responses)
-            if isinstance(v, dict):
-                return '; '.join(f"{k}: {format_value(val)}" for k, val in v.items())
-            
-            # Handle pandas Series
-            if isinstance(v, pd.Series):
-                return format_value(v.iloc[0] if len(v) > 0 else '')
-            
-            # Handle various date formats
-            if isinstance(v, pd.Timestamp):
-                return v.strftime('%Y-%m-%d %H:%M:%S')
-            elif isinstance(v, (datetime, date)):
-                return v.strftime('%Y-%m-%d')
-            
-            # Handle boolean values
-            if isinstance(v, bool):
-                return str(v).lower()
-            
-            # Handle numeric values
-            if isinstance(v, (int, float)):
-                if pd.isna(v):
-                    return ''
-                return str(v)
-            
-            # Handle special float values
-            if pd.isna(v) or v == float('inf') or v == float('-inf'):
-                return ''
-            
-            # Handle very long strings (LLMs might generate these)
-            if isinstance(v, str) and len(v) > 32767:  # Excel cell character limit
-                return v[:32767]  # Truncate to Excel's limit
-            
-            return str(v)
-
         if isinstance(data, pd.DataFrame):
-            df_copy = data.copy()
-            # Handle datetime columns
-            for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
-                df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            # Replace NaN values with empty string
-            df_copy = df_copy.fillna('')
-            # Convert any remaining date objects
-            for col in df_copy.columns:
-                df_copy.loc[:, col] = df_copy[col].apply(format_value)
-            return df_copy.values.tolist()
-        elif isinstance(data, dict):
-            # Convert any Timestamp values to strings and handle NaN
-            processed_dict = {k: format_value(v) for k, v in data.items()}
-            return [[k, v] for k, v in processed_dict.items()]
+            # Ensure the DataFrame is properly converted to a 2D list
+            headers = [[str(col) for col in data.columns]]
+            # Convert all values to strings and handle None/NaN
+            values = [['' if pd.isna(x) else str(x) for x in row] for row in data.values]
+            return headers + values
+        
+        # Handle dict and list cases
+        if isinstance(data, dict):
+            return [[str(k), str(v) if not pd.isna(v) else ''] for k, v in data.items()]
         elif isinstance(data, list):
-            # Convert any Timestamp values in list to strings and handle NaN
-            return [[format_value(v)] for v in data]
-        else:
-            return [[format_value(data)]]
+            return [[str(v) if not pd.isna(v) else ''] for v in data]
+        
+        # Handle single value
+        return [[str(data) if not pd.isna(data) else '']]
 
     async def append_to_current_google_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Append data to Google Sheet, avoiding duplicates"""
@@ -149,16 +93,19 @@ class GoogleIntegration:
             new_rows = data.iloc[existing_row_count-1:]
             logging.info(f"New rows to append: {len(new_rows)}")
             print(f"New rows to append: {len(new_rows)}")
-            
+            all_new = False
             if len(new_rows) == 0:
                 logging.info("No new rows detected, processing all passed data")
+                all_new = True
                 new_rows = data  # Use all passed data instead of returning
             
             # Format the new data for sheets
             logging.info("Formatting data for Google Sheets")
             values = self._format_data_for_sheets(new_rows)
+            # Remove header row since we're appending to existing sheet
+            if not all_new:
+                values = values[1:] if values else []
             logging.info(f"Formatted {len(values)} rows")
-            logging.info(f"Formatted values: {values}")
             
             # Append the data
             body = {
@@ -222,10 +169,11 @@ class GoogleIntegration:
             
             # Format data for sheets using helper function
             values = self._format_data_for_sheets(data)
-            if isinstance(data, pd.DataFrame):
-                # Add column headers for DataFrame
-                values = [data.columns.tolist()] + values
             
+            # Ensure values is a 2D array of strings
+            if not values or not isinstance(values[0], list):
+                values = [[str(x) for x in values]]
+
             # Write data to new sheet
             body = {
                 'values': values
@@ -233,7 +181,7 @@ class GoogleIntegration:
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id,
                 range=f"{final_name}!A1",
-                valueInputOption='RAW',
+                valueInputOption='USER_ENTERED',  # Changed from 'RAW'
                 body=body
             ).execute()
             

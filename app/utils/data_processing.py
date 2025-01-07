@@ -17,6 +17,7 @@ def _process_dataframe(df: pd.DataFrame) -> str:
     df_info = f"DataFrame Info:\n"
     df_info += f"Shape: {df.shape}\n"
     df_info += f"Columns: {list(df.columns)}\n"
+    df_info += f"Data Types:\n{df.dtypes}\n"
     df_info += f"\nFirst 5 rows:\n{df.head(5).to_string()}"
     return df_info
 
@@ -114,13 +115,19 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
     old_df = process_dataframe_for_json(old_df.copy())
     new_df = process_dataframe_for_json(new_df.copy())
     
-    # Handle NaN indices by filling them with a valid integer
-    if old_df.index.isna().any() or new_df.index.isna().any():
-        logging.info("Handling NaN indices by resetting index")
-        if old_df.index.isna().any():
-            old_df = old_df.reset_index(drop=True)
-        if new_df.index.isna().any():
-            new_df = new_df.reset_index(drop=True)
+    # Reset index if it's not numeric to avoid conversion issues
+    if not (pd.api.types.is_numeric_dtype(old_df.index) and pd.api.types.is_numeric_dtype(new_df.index)):
+        logging.info("Non-numeric indices detected, resetting indices")
+        old_df = old_df.reset_index(drop=True)
+        new_df = new_df.reset_index(drop=True)
+    else:
+        # Handle NaN indices by filling them with a valid integer
+        if old_df.index.isna().any() or new_df.index.isna().any():
+            logging.info("Handling NaN indices by resetting index")
+            if old_df.index.isna().any():
+                old_df = old_df.reset_index(drop=True)
+            if new_df.index.isna().any():
+                new_df = new_df.reset_index(drop=True)
     
     # Now safely convert to int
     old_df.index = old_df.index.astype(int)
@@ -279,11 +286,21 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     
     
     def convert_dict_timestamps(d):
-        """Convert any timestamp values in a dictionary to strings"""
+        """Convert any timestamp values in a dictionary to strings and handle tuple keys"""
+        if not isinstance(d, dict):
+            logging.info(f"Not a dictionary")
+            return d
+        
+        result = {}
         for k, v in d.items():
+            # Convert tuple keys to strings
+            key = str(k) if isinstance(k, tuple) else k
+            # Handle timestamp values
             if isinstance(v, pd.Timestamp):
-                d[k] = v.strftime('%Y-%m-%d %H:%M:%S')
-        return d
+                result[key] = v.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                result[key] = v
+        return result
     
     # Create copies and replace NaT values with None before any processing
     old_df = convert_timestamps(old_df.copy().replace({pd.NaT: None}))
