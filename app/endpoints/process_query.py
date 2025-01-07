@@ -347,10 +347,15 @@ async def process_query_standard_endpoint(
                 # Only cleanup immediately for online type
                 temp_file_manager.cleanup_marked()
                 await check_client_connection(request)
+                if request_data.output_preferences.modify_existing:
+                    message = f"Data successfully uploaded to  {request_data.output_preferences.doc_name} - {request_data.output_preferences.sheet_name}."
+                else:
+                    message = f"Data successfully uploaded to new sheet in {request_data.output_preferences.destination_url}."
+
                 return QueryResponse(
                     original_query=request_data.query,
                     status="completed",
-                    message="Data successfully uploaded to destination",
+                    message=message,
                     files=None,
                     num_images_processed=num_images_processed
                 )

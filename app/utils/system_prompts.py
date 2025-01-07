@@ -17,7 +17,7 @@ Code generation instructions:
 - Use the simplest method to return the desired value.                
 - Do not include print statements -- ensure the last line is the return value or an assignment statement.
 - The return value can be either a dataframe or a string.
-- If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable(s). 
+- If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable. 
 ------
 Generate Python code for the given query and data.   
 """
