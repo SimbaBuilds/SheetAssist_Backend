@@ -235,17 +235,18 @@ class MicrosoftIntegration:
                     print(f"New rows to append: {len(new_rows)}")
                     print(f"First row of new data: {new_rows.iloc[0].to_dict() if len(new_rows) > 0 else 'No new rows'}\n")
                 
+                all_new = False
                 if len(new_rows) == 0:
                     logging.info("No new rows detected, processing all passed data")
+                    all_new = True
                     new_rows = data  # Use all passed data instead of returning
                 
                 # Format the new data for Excel - but skip the header row
-                formatted_data = self._format_data_for_excel(new_rows)
-                values = formatted_data[1:]  # Skip the header row
+                values = self._format_data_for_excel(new_rows)
                 
-                if len(values) == 0:
-                    logging.info("No data to append after formatting, returning")
-                    return True
+                if not all_new:
+                    values = values[1:]  # Skip the header row
+            
                 
                 # Write new data to worksheet
                 next_row = existing_row_count + 1
