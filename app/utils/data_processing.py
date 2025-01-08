@@ -18,7 +18,7 @@ def _process_dataframe(df: pd.DataFrame) -> str:
     df_info += f"Shape: {df.shape}\n"
     df_info += f"Columns: {list(df.columns)}\n"
     df_info += f"Data Types:\n{df.dtypes}\n"
-    df_info += f"\nFirst 5 rows:\n{df.head(5).to_string()}"
+    df_info += f"\nFirst 5 rows:\n{df.head(min(5, len(df)))}"
     return df_info
 
 def _process_collection(data: Any, limit: int = 5) -> str:

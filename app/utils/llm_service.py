@@ -750,13 +750,13 @@ class LLMService:
             batch_info = f"\nUser files are being processed in batches. This is batch {batch_context['current']} of {batch_context['total']}"
         
         user_content = f""" 
-        Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
-        Original Query:\n{result.original_query}\n
-        Old Data Snapshots:\n{old_data_snapshot}\n
-        Result Snapshot:\n{new_data.snapshot}\n
-        {batch_info}\n
-        Dataset Diff Information:\n{analyzer_context}\n
-        """
+    Here is the original user query, snapshots of input data, error free code, a snapshot of the result, and dataset diff information:
+    Original Query:\n{result.original_query}\n
+    Input Data Snapshots:\n{old_data_snapshot}\n
+    Result Snapshot:\n{new_data.snapshot}\n
+    {batch_info}\n
+    Dataset Diff Information:\n{analyzer_context}\n
+    """
 
         response = await self._openai_generate_text(
             system_prompt=self._analyze_sandbox_prompt,
@@ -783,13 +783,13 @@ class LLMService:
             batch_info = f"\nUser files are being processed in batches. This is batch {batch_context['current']} of {batch_context['total']}"
         
         user_content = f""" 
-        Here is the original user query, snapshots of old data, error free code, a snapshot of the result, and dataset diff information:
-        Original Query:\n{result.original_query}\n
-        Old Data Snapshots:\n{old_data_snapshot}\n
-        Result Snapshot:\n{new_data.snapshot}\n
-        {batch_info}\n
-        Dataset Diff Information:\n{analyzer_context}\n
-        """
+    Here is the original user query, snapshots of input data, error free code, a snapshot of the result, and dataset diff information:
+    Original Query:\n{result.original_query}\n
+    Input Data Snapshots:\n{old_data_snapshot}\n
+    Result Snapshot:\n{new_data.snapshot}\n
+    {batch_info}\n
+    Dataset Diff Information:\n{analyzer_context}\n
+    """
 
         response = await self._anthropic_generate_text(
             system_prompt=self._analyze_sandbox_prompt,
