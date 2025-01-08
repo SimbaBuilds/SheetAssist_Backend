@@ -6,17 +6,19 @@ import atexit
 from datetime import datetime, timedelta
 import logging
 from contextlib import asynccontextmanager
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class TempFileManager:
-    def __init__(self, base_dir: str = None, max_age_hours: int = 24):
+    def __init__(self, base_dir: str = None, max_age_hours: int = 24, cleanup_interval_hours: int = 1):
         """Initialize the temporary file manager
         
         Args:
             base_dir: Base directory for temp files. If None, uses system temp directory
             max_age_hours: Maximum age of temp files before cleanup (in hours)
+            cleanup_interval_hours: How often to run cleanup (in hours)
         """
         if base_dir:
             self.base_dir = Path(base_dir)
@@ -31,6 +33,8 @@ class TempFileManager:
         atexit.register(self.cleanup_old_files)
         
         self._pending_cleanup = set()
+        self.cleanup_interval = timedelta(hours=cleanup_interval_hours)
+        self._cleanup_task = None
     
     def get_temp_dir(self) -> Path:
         """Create a new temporary directory for the current session"""
@@ -115,6 +119,24 @@ class TempFileManager:
             except Exception as e:
                 logger.error(f"Error cleaning up marked path {path}: {str(e)}")
     
+    async def start_periodic_cleanup(self):
+        """Start periodic cleanup task"""
+        async def cleanup_loop():
+            while True:
+                self.cleanup_old_files()
+                await asyncio.sleep(self.cleanup_interval.total_seconds())
+
+        self._cleanup_task = asyncio.create_task(cleanup_loop())
+
+    async def stop_periodic_cleanup(self):
+        """Stop periodic cleanup task"""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_task = None
 
 # Global instance
 temp_file_manager = TempFileManager() 

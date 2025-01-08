@@ -36,7 +36,8 @@ def construct_status_response(job: dict) -> QueryResponse:
     """Helper function to construct status response"""
 
     current_status = job.get("status", "unknown")
-    logger.info(f"Current chunk: {job.get('current_chunk')}, Total chunks: {len(job.get('page_chunks', []))}")
+
+    logger.info(f"Current chunk: {int(job.get('current_chunk'))+1}, Total chunks: {len(job.get('page_chunks', []))}")
     page_chunks = job.get('page_chunks', [])
     current_chunk = int(job.get('current_chunk', 0))
     file_id = page_chunks[current_chunk]['file_id']

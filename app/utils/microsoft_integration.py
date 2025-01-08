@@ -85,79 +85,23 @@ class MicrosoftIntegration:
             'Content-Type': 'application/json'
         }
 
-    def _format_data_for_excel(self, data: Any) -> List[List[Any]]:
-        """Helper method to format data for Excel"""
-        def format_value(v: Any) -> str:
-            """Helper function to format individual values"""
-            # Handle None/null values
-            if v is None:
-                return ''
-            
-            # Handle lists and nested structures
-            if isinstance(v, (list, tuple)):
-                # Handle nested lists/dicts
-                formatted_items = []
-                for item in v:
-                    if isinstance(item, (dict, list, tuple)):
-                        formatted_items.append(str(item))  # Convert complex items to string
-                    else:
-                        formatted_items.append(format_value(item))  # Recursively format simple items
-                return ', '.join(formatted_items)
-            
-            # Handle dictionaries (common in LLM responses)
-            if isinstance(v, dict):
-                return '; '.join(f"{k}: {format_value(val)}" for k, val in v.items())
-            
-            # Handle pandas Series
-            if isinstance(v, pd.Series):
-                return format_value(v.iloc[0] if len(v) > 0 else '')
-            
-            # Handle various date formats
-            if isinstance(v, pd.Timestamp):
-                return v.strftime('%Y-%m-%d %H:%M:%S')
-            elif isinstance(v, (datetime, date)):
-                return v.strftime('%Y-%m-%d')
-            
-            # Handle boolean values
-            if isinstance(v, bool):
-                return str(v).lower()
-            
-            # Handle numeric values
-            if isinstance(v, (int, float)):
-                if pd.isna(v):
-                    return ''
-                return str(v)
-            
-            # Handle special float values
-            if pd.isna(v) or v == float('inf') or v == float('-inf'):
-                return ''
-            
-            # Handle very long strings (LLMs might generate these)
-            if isinstance(v, str) and len(v) > 32767:  # Excel cell character limit
-                return v[:32767]  # Truncate to Excel's limit
-            
-            return str(v)
-
+    def _format_data_for_excel(self, data: Any) -> List[List[str]]:
+        """Helper function to format data for Excel."""
         if isinstance(data, pd.DataFrame):
-            df_copy = data.copy()
-            # Handle datetime columns
-            for col in df_copy.select_dtypes(include=['datetime64[ns]']).columns:
-                df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            # Replace NaN values with empty string
-            df_copy = df_copy.fillna('')
-            # Convert any remaining date objects
-            for col in df_copy.columns:
-                df_copy.loc[:, col] = df_copy[col].apply(format_value)
-            return [df_copy.columns.tolist()] + df_copy.values.tolist()
-        elif isinstance(data, dict):
-            # Convert any Timestamp values to strings and handle NaN
-            processed_dict = {k: format_value(v) for k, v in data.items()}
-            return [[k, v] for k, v in processed_dict.items()]
+            # Ensure the DataFrame is properly converted to a 2D list
+            headers = [[str(col) for col in data.columns]]
+            # Convert all values to strings and handle None/NaN
+            values = [['' if pd.isna(x) else str(x) for x in row] for row in data.values]
+            return headers + values
+        
+        # Handle dict and list cases
+        if isinstance(data, dict):
+            return [[str(k), str(v) if not pd.isna(v) else ''] for k, v in data.items()]
         elif isinstance(data, list):
-            # Convert any Timestamp values in list to strings and handle NaN
-            return [[format_value(v)] for v in data]
-        else:
-            return [[format_value(data)]]
+            return [[str(v) if not pd.isna(v) else ''] for v in data]
+        
+        # Handle single value
+        return [[str(data) if not pd.isna(data) else '']]
 
     async def _get_one_drive_id(self) -> str:
         """Get the drive ID using the Graph API for personal OneDrive"""
