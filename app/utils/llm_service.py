@@ -27,7 +27,7 @@ load_dotenv(override=True)
 
 MAX_SNAPSHOT_LENGTH = int(os.getenv("MAX_SNAPSHOT_LENGTH"))
 MAX_VISION_OUTPUT_TOKENS = int(os.getenv("MAX_VISION_OUTPUT_TOKENS"))
-
+DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER")
 
 def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
     input_data_snapshot = ""
@@ -478,40 +478,31 @@ class LLMService:
 
 
     async def execute_with_fallback(self, operation: str, *args, **kwargs) -> Tuple[str, Any]:
+        
         try:
-            # Try OpenAI first
-            result = await self._execute_openai(operation, *args, **kwargs)
-            return "openai", result
-        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            # Specifically handle connection errors
-            logging.error(f"OpenAI connection error: {str(e)}")
-            try:
-                # Fallback to Anthropic
+            # Try default provider first
+            if DEFAULT_LLM_PROVIDER == "anthropic":
                 result = await self._execute_anthropic(operation, *args, **kwargs)
                 return "anthropic", result
-            except (httpx.ConnectError, httpx.ConnectTimeout) as e2:
-                # Both providers failed with connection errors
-                raise HTTPException(
-                    status_code=503,  # Service Unavailable
-                    detail="Unable to connect to AI providers"
-                )
-            except Exception as e2:
-                # Other Anthropic errors
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Both providers failed. OpenAI: Connection Error, Anthropic: {str(e2)}"
-                )
+            else:  # default to openai
+                result = await self._execute_openai(operation, *args, **kwargs)
+                return "openai", result
+            
         except Exception as e:
-            # Handle other OpenAI errors
-            logging.warning(f"OpenAI failed: {str(e)}. Falling back to Anthropic.")
+            # Handle other errors from default provider
+            logging.warning(f"{DEFAULT_LLM_PROVIDER} failed: {str(e)}. Falling back to alternate provider.")
             try:
-                # Fallback to Anthropic
-                result = await self._execute_anthropic(operation, *args, **kwargs)
-                return "anthropic", result
+                # Fallback to other provider
+                if DEFAULT_LLM_PROVIDER == "anthropic":
+                    result = await self._execute_openai(operation, *args, **kwargs)
+                    return "openai", result
+                else:
+                    result = await self._execute_anthropic(operation, *args, **kwargs)
+                    return "anthropic", result
             except Exception as e2:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Both providers failed. OpenAI: {str(e)}, Anthropic: {str(e2)}"
+                    detail=f"Both providers failed. {DEFAULT_LLM_PROVIDER}: {str(e)}, Fallback: {str(e2)}"
                 )
 
     async def _execute_openai(self, operation: str, *args, **kwargs):
