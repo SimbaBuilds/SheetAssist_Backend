@@ -205,10 +205,24 @@ class FilePreprocessor:
             if isinstance(file, str):
                 doc = docx.Document(file)
             else:
-                doc = docx.Document(io.BytesIO(file.read()))
+                # Handle FastAPI UploadFile or BytesIO
+                if hasattr(file, 'file'):
+                    file = file.file
+                
+                # Ensure we're at the start of the file
+                if hasattr(file, 'seek'):
+                    file.seek(0)
+                
+                # Read the content into a BytesIO object
+                content = file.read()
+                
+                # Create a fresh BytesIO object for docx.Document
+                docx_file = io.BytesIO(content)
+                doc = docx.Document(docx_file)
+                
             return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
         except Exception as e:
-            raise ValueError(e)
+            raise ValueError(f"Error processing DOCX file: {str(e)}")
 
     async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
         """Process image files and extract content using vision processing"""

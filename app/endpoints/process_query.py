@@ -298,18 +298,18 @@ async def process_query_standard_endpoint(
         # Handle output based on type
         if request_data.output_preferences.type == "download":
             try:
-                tmp_path, media_type = handle_download(result, request_data, preprocessed_data)
+                tmp_path, media_type = await handle_download(result, request_data, preprocessed_data)
+                
                 # Add cleanup task but DON'T execute immediately
                 background_tasks.add_task(temp_file_manager.cleanup_marked)
                 
                 # Update download URL to match client expectations
                 download_url = f"/download?file_path={tmp_path}"
                 
-                logger.info(f"num_images_processed: {num_images_processed}")
                 return QueryResponse(
                     original_query=request_data.query,
                     status="completed",
-                    message="Processing complete.  Your file should download automatically.",
+                    message="Processing complete. Your file should download automatically.",
                     files=[FileInfo(
                         file_path=str(tmp_path),
                         media_type=media_type,

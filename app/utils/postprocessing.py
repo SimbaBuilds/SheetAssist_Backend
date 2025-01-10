@@ -110,15 +110,17 @@ def prepare_dataframe(data: Any) -> pd.DataFrame:
     return df
 
 def prepare_text(data: Any) -> str:
+    """Prepare and standardize any data type into a text string"""
     
     if isinstance(data, tuple):
         print(f"\nData is of type {type(data).__name__}\n")
-        extracted_text = ""
         if isinstance(data[0], str):
             extracted_text = data[0]
+        elif isinstance(data[0], pd.DataFrame):
+            extracted_text = data[0].to_string()
         else:
-            extracted_text = str([data], columns=[f'Value_{i}' for i in range(len(data))])
-
+            # Convert tuple to string without trying to use columns parameter
+            extracted_text = str(list(data))
     elif isinstance(data, str):
         extracted_text = data
     else:
@@ -129,7 +131,8 @@ def prepare_text(data: Any) -> str:
 async def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create CSV file from prepared DataFrame"""
     provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.csv')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{filename}_{timestamp}.csv")
     
     # Prepare the DataFrame
     df = prepare_dataframe(new_data)
@@ -155,9 +158,9 @@ async def create_csv(new_data: Any, query: str, old_data: List[FileDataInfo], ll
 
 async def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create Excel file from various data types"""
-    
     provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.xlsx')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{filename}_{timestamp}.xlsx")
     df = prepare_dataframe(new_data)
     df.to_excel(tmp_path, index=False)
 
@@ -166,7 +169,8 @@ async def create_xlsx(new_data: Any, query: str, old_data: List[FileDataInfo], l
 async def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create PDF file from various data types"""
     provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.pdf')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{filename}_{timestamp}.pdf")
     doc = SimpleDocTemplate(tmp_path, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
@@ -210,7 +214,8 @@ async def create_pdf(new_data: Any, query: str, old_data: List[FileDataInfo], ll
 async def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create Word document from various data types"""
     provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.docx')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{filename}_{timestamp}.docx")
     doc = Document()
     
     extracted_text = prepare_text(new_data)
@@ -221,7 +226,8 @@ async def create_docx(new_data: Any, query: str, old_data: List[FileDataInfo], l
 async def create_txt(new_data: Any, query: str, old_data: List[FileDataInfo], llm_service: LLMService) -> str:
     """Create text file from various data types"""
     provider, filename = await llm_service.execute_with_fallback("file_namer", query, old_data)
-    tmp_path = tempfile.mktemp(prefix=f"{filename}_", suffix='.txt')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{filename}_{timestamp}.txt")
     extracted_text = prepare_text(new_data)
     with open(tmp_path, 'w', encoding='utf-8') as f:
         f.write(extracted_text)
