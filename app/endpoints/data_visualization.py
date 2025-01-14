@@ -67,31 +67,51 @@ async def create_visualization(
         # Create temporary directory for session
         session_dir = temp_file_manager.get_temp_dir()
 
-        # Preprocess files/urls to get dataframe
-        preprocessed_data, _ = await preprocess_files(
-            files=files,
-            files_metadata=request_data.files_metadata,
-            input_urls=request_data.input_urls,
-            query=request_data.options.custom_instructions,
-            session_dir=session_dir,
-            supabase=supabase,
-            user_id=user_id,
-            num_images_processed=0
-        )
+        try:
+            # Preprocess files/urls to get dataframe
+            preprocessed_data, _ = await preprocess_files(
+                files=files,
+                files_metadata=request_data.files_metadata,
+                input_urls=request_data.input_urls,
+                query=request_data.options.custom_instructions,
+                session_dir=session_dir,
+                supabase=supabase,
+                user_id=user_id,
+                num_images_processed=0
+            )
+        except ValueError as preprocess_error:
+            logger.error(f"Preprocessing error: {str(preprocess_error)}")
+            return VisualizationErrorResponse(
+                success=False,
+                error=str(preprocess_error),
+                message="Failed to preprocess input files",
+                image_data=None
+            )
+            
         await check_client_connection(request)
 
         # Initialize sandbox with increased timeout for visualization
         sandbox = EnhancedPythonInterpreter(timeout_seconds=120)
 
-        # Generate visualization
-        buf = await generate_visualization(
-            data=preprocessed_data,
-            color_palette=request_data.options.color_palette,
-            custom_instructions=request_data.options.custom_instructions,
-            sandbox=sandbox,
-            llm_service=llm_service,
-            request=request
-        )
+        try:
+            # Generate visualization
+            buf = await generate_visualization(
+                data=preprocessed_data,
+                color_palette=request_data.options.color_palette,
+                custom_instructions=request_data.options.custom_instructions,
+                sandbox=sandbox,
+                llm_service=llm_service,
+                request=request
+            )
+        except Exception as viz_error:
+            logger.error(f"Visualization generation error: {str(viz_error)}")
+            return VisualizationErrorResponse(
+                success=False,
+                error=str(viz_error),
+                message="Failed to generate visualization",
+                image_data=None
+            )
+
         await check_client_connection(request)
 
         # Get the buffer contents and encode as base64
@@ -117,14 +137,6 @@ async def create_visualization(
             message="Visualization generated successfully"
         )
 
-    except ValueError as e:
-        logger.error(f"Visualization error for user {user_id}: {str(e)}")
-        return VisualizationErrorResponse(
-            success=False,
-            error=str(e),
-            message="Error generating visualization",
-            image_data=None
-        )
     except Exception as e:
         error_msg = str(e)[:200] if str(e).isascii() else f"Error processing request: {e.__class__.__name__}"
         logger.error(f"Visualization error for user {user_id}: {error_msg}")
