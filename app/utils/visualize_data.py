@@ -1,3 +1,4 @@
+import os
 import matplotlib
 matplotlib.use('Agg')  # Set backend globally
 
@@ -79,7 +80,7 @@ async def generate_visualization(
             print(f"Error analysis {error_attempts}:")
             print(f"Error: {result.error}")
             past_errors.append(result.error)
-            if error_attempts > 6:
+            if error_attempts > int(os.getenv("ERROR_ATTEMPTS")):
                 raise ValueError("Failed to generate visualization after 6 attempts")
             provider, suggested_code = await llm_service.execute_with_fallback(
                 "gen_visualization",

@@ -884,6 +884,7 @@ class LLMService:
     ) -> str:
         """Generate visualization code using Anthropic."""
 
+        print(f"Anthropic called with past errors: {past_errors}")
 
         return await self._anthropic_generate_text(
             system_prompt=self._gen_visualization_prompt,

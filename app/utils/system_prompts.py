@@ -95,6 +95,8 @@ to create effective visualizations. Follow these requirements:
 7. Do not include import statements
 8. Assume data is in the 'data' variable
 9. Use descriptive titles and labels
+10. You are also given past errors if any.  Adjust your code accordingly to fix the errors.
+11. Make sure there is a legend to remove before trying to remove it.
 
 Below are your available imports, types, and tools:
 # Core Data & Visualization
