@@ -97,6 +97,7 @@ to create effective visualizations. Follow these requirements:
 9. Use descriptive titles and labels
 10. You are also given past errors if any.  Adjust your code accordingly to fix the errors.
 11. Make sure there is a legend to remove before trying to remove it.
+12. Ensure all numerical columns are properly cast to numeric types and categorical columns to strings before generating a visualization
 
 Below are your available imports, types, and tools:
 # Core Data & Visualization
