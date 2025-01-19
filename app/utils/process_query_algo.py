@@ -36,7 +36,8 @@ async def process_query_algo(
     query: str, 
     sandbox: EnhancedPythonInterpreter,
     data: List[FileDataInfo] = None,
-    batch_context: Optional[Dict[str, int]] = None
+    batch_context: Optional[Dict[str, int]] = None,
+    contains_image_or_like: bool = False
 ) -> SandboxResult:
     
     
@@ -64,7 +65,8 @@ async def process_query_algo(
             "gen_from_query", 
             query, 
             data,
-            batch_context=batch_context
+            batch_context=batch_context,
+            contains_image_or_like=contains_image_or_like
         )
         unprocessed_llm_output = suggested_code 
         print(f"\n\n----- Initial LLM output -----\n {unprocessed_llm_output}\n")
@@ -93,7 +95,7 @@ async def process_query_algo(
             print("New LLM output\n:", unprocessed_llm_output)
             result = sandbox.execute_code(query, cleaned_code, namespace=namespace)
             error_attempts += 1
-            if error_attempts == 6:
+            if error_attempts == int(os.getenv("ERROR_ATTEMPTS")):
                 result.error = "Error attempts exhausted."
                 return result
             

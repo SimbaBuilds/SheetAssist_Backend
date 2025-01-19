@@ -6,7 +6,7 @@ from anthropic import Anthropic
 import logging
 from app.schemas import SandboxResult, FileDataInfo
 import json
-from app.utils.system_prompts import gen_from_query_prompt, gen_from_error_prompt, gen_from_analysis_prompt, analyze_sandbox_prompt, sentiment_analysis_prompt, file_namer_prompt, gen_visualization_prompt
+from app.utils.system_prompts import gen_from_query_prompt, gen_from_query_prompt_image, gen_from_error_prompt, gen_from_analysis_prompt, analyze_sandbox_prompt, sentiment_analysis_prompt, file_namer_prompt, gen_visualization_prompt
 import httpx
 from PIL import Image
 import io
@@ -469,12 +469,14 @@ class LLMService:
 
         # Add system prompts as class attributes
         self._gen_from_query_prompt = gen_from_query_prompt
+        self._gen_from_query_prompt_image = gen_from_query_prompt_image
         self._gen_from_error_prompt = gen_from_error_prompt
         self._gen_from_analysis_prompt = gen_from_analysis_prompt
         self._analyze_sandbox_prompt = analyze_sandbox_prompt
         self._sentiment_analysis_prompt = sentiment_analysis_prompt
         self._file_namer_prompt = file_namer_prompt
         self._gen_visualization_prompt = gen_visualization_prompt
+
 
 
     async def execute_with_fallback(self, operation: str, *args, **kwargs) -> Tuple[str, Any]:
@@ -615,7 +617,8 @@ class LLMService:
         self, 
         query: str, 
         data: List[FileDataInfo],
-        batch_context: Optional[Dict[str, int]] = None
+        batch_context: Optional[Dict[str, int]] = None,
+        contains_image_or_like: bool = False
     ) -> str:
         data_description = self._build_data_description(data)
         
@@ -627,7 +630,7 @@ class LLMService:
         user_content = f"Available Data:\n{data_description}\n\nQuery:\n{query}{batch_info}"
         
         response = await self._openai_generate_text(
-            system_prompt=self._gen_from_query_prompt,
+            system_prompt=self._gen_from_query_prompt_image if contains_image_or_like else self._gen_from_query_prompt,
             user_content=user_content
         )
         print(f"\n -------  gen_from_query called with user content:  ------- \n {user_content}")
@@ -637,7 +640,8 @@ class LLMService:
         self, 
         query: str, 
         data: List[FileDataInfo],
-        batch_context: Optional[Dict[str, int]] = None
+        batch_context: Optional[Dict[str, int]] = None,
+        contains_image_or_like: bool = False
     ) -> str:
         data_description = self._build_data_description(data)
         
@@ -649,9 +653,10 @@ class LLMService:
         user_content = f"Available Data:\n{data_description}\n\nQuery:\n{query}{batch_info}"
         
         response = await self._anthropic_generate_text(
-            system_prompt=self._gen_from_query_prompt,
+            system_prompt=self._gen_from_query_prompt_image if contains_image_or_like else self._gen_from_query_prompt,
             user_content=user_content
         )
+        print(f"\n -------  gen_from_query called with user content:  ------- \n {user_content}")
         return response
 
     async def _openai_gen_from_error(self, result: SandboxResult, error_attempts: int, 
@@ -786,6 +791,7 @@ class LLMService:
             system_prompt=self._analyze_sandbox_prompt,
             user_content=user_content
         )
+        print(f"\n ------- analyze_sandbox_result called with user content: ------- \n {user_content}")
         return response
 
     async def _openai_sentiment_analysis(self, analysis_result: str) -> Tuple[bool, str]:

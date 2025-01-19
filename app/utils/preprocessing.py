@@ -21,6 +21,10 @@ from app.utils.llm_service import LLMService
 from app.utils.auth import SupabaseClient
 from fastapi import Request
 from PyPDF2 import PdfReader
+import os
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 
 # Add logging configuration
@@ -28,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def pdf_classifier(file: Union[BinaryIO, str, bytes]) -> Tuple[bool, str]:
+def pdf_classifier(file: Union[BinaryIO, str, bytes]) -> bool:
     """Classify the type of PDF file"""
     
     # Create a temporary file if we received a file object
@@ -413,12 +417,7 @@ class FilePreprocessor:
             if not is_image_like_pdf:
                 print(f"Returning text content with length: {len(text_content)} characters and snapshot:\n {text_content[:1000]} cont'd...\n")
                 return text_content, "text", False
-                        
-            num_pages = page_range[1] - page_range[0]
-            # Check limits before processing if PDF needs vision processing
-            if self.supabase and self.user_id:
-                await self.check_image_processing_limits(self.supabase, self.user_id, num_pages)
-            
+                                    
             # For non-machine readable PDFs, process with vision
             provider, vision_result = await self.llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
@@ -537,6 +536,9 @@ class FilePreprocessor:
         
         if overage_this_month >= overage_hard_limit:
             raise ValueError(f"Monthly overage limit reached")
+
+
+
 
 
 async def preprocess_files(
@@ -706,3 +708,44 @@ async def determine_pdf_page_count(file: UploadFile) -> int:
     except Exception as e:
         logger.error(f"Error determining PDF page count: {str(e)}")
         return 0
+
+
+async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_pages: int = 1) -> None:
+    """
+    Check if user has exceeded image processing limits
+    
+    Args:
+        supabase: Supabase client
+        user_id: User ID
+        num_pages: Number of pages/images to process (default 1)
+        
+    Raises:
+        ValueError: If user has exceeded limits with specific message
+    """
+    # Get user profile and usage
+    profile_response = supabase.table("user_profile").select("*").eq("id", user_id).execute()
+    usage_response = supabase.table("user_usage").select("*").eq("user_id", user_id).execute()
+    
+    if not profile_response.data or not usage_response.data:
+        raise ValueError("Could not fetch user data")
+    
+    profile = profile_response.data[0]
+    usage = usage_response.data[0]
+    
+    # Get plan limits
+    plan = profile.get("plan", "free")
+    image_limit = {"free": int(os.getenv("FREE_USER_LIMIT")), "pro": int(os.getenv("PRO_USER_LIMIT"))}.get(plan, 0)
+    
+    # Check image limit
+    current_images = usage.get("images_processed_this_month", 0)
+    if current_images + total_pages > image_limit:
+        if plan == "free":
+            raise ValueError(f"This request would put you over your monthly image limit.  You can upgrade to pro in the account page to continue.")
+        # Check overage limit
+        overage_this_month = usage.get("overage_this_month", 0)
+        overage_hard_limit = usage.get("overage_hard_limit", 0)
+        potential_overage = overage_this_month + total_pages * float(os.getenv("OVERAGE_PRICE"))
+        if potential_overage >= overage_hard_limit:
+            raise ValueError(f"This request would put you over your monthly overage limit.  You can increase your overage in your account page.")
+
+        

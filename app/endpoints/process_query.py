@@ -10,7 +10,7 @@ import logging
 from app.schemas import QueryRequest
 from app.utils.postprocessing import handle_destination_upload, handle_download, handle_batch_chunk_result
 from app.utils.data_processing import get_data_snapshot
-from app.utils.preprocessing import preprocess_files, determine_pdf_page_count, pdf_classifier
+from app.utils.preprocessing import preprocess_files, determine_pdf_page_count, pdf_classifier, check_limits_pre_batch
 from fastapi import BackgroundTasks
 from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
@@ -75,22 +75,47 @@ async def process_query_entry_endpoint(
         
         # Check if any PDF has more than CHUNK_SIZE pages
         need_to_batch = False
+        contains_image_or_like = False 
+        
+        i = 0
+        # Check for images to propagate flag to llm service for prompt selection
+        for file_meta in (request_data.files_metadata or []):
+            if files_data[i]['content_type'] == "image/jpeg" or files_data[i]['content_type'] == "image/png" or files_data[i]['content_type'] == "image/jpg":
+                contains_image_or_like = True
+            if files_data[i]['content_type'] == "application/pdf":
+                contains_image_or_like = pdf_classifier(files_data[i]['content'])
+
         i = 0
         for file_meta in (request_data.files_metadata or []):
             logger.info(f"file_meta: {file_meta.page_count}")
             if file_meta.page_count and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
                 if files_data[i]['content_type'] == "application/pdf":
                     is_image_like_pdf = pdf_classifier(files_data[i]['content'])
-                    if is_image_like_pdf:
-                        need_to_batch = True
+                    if is_image_like_pdf: 
+                        contains_image_or_like = True
+                    if is_image_like_pdf: #and greater than CHUNK_SIZE
+                        need_to_batch = True 
                         logger.info(f"----- Need_to_batch: {need_to_batch} -----")
                         break
             i += 1
         
+        logger.info(f"(01/19) contains_image_or_like: {contains_image_or_like}")
         # Decision routing based on page count
         if need_to_batch:
             # Generate unique job ID
             logger.info(f"Large PDF detected")
+            try:
+                await check_limits_pre_batch(supabase, user_id, total_pages)
+            except ValueError as e:
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="error",
+                    message=str(e),
+                    files=None,
+                    num_images_processed=0,
+                    error=str(e),
+                    total_pages=0
+                )
             job_id = f"job_{user_id}_{int(time.time())}"
             
             # Calculate page ranges for each file
@@ -154,7 +179,8 @@ async def process_query_entry_endpoint(
                 supabase=supabase,
                 request_data=request_data,
                 files=batch_files,  # Use the new file objects
-                job_id=job_id
+                job_id=job_id,
+                contains_image_or_like=contains_image_or_like
             )
             
             return QueryResponse(
@@ -172,7 +198,8 @@ async def process_query_entry_endpoint(
                 supabase=supabase,
                 request_data=request_data,
                 files=files,
-                background_tasks=background_tasks
+                background_tasks=background_tasks,
+                contains_image_or_like=contains_image_or_like
             )
             
     except Exception as e:
@@ -213,7 +240,8 @@ async def process_query_standard_endpoint(
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)],
     request_data: QueryRequest,
     files: List[UploadFile] = File(default=[]),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    contains_image_or_like: bool = False
 ) -> QueryResponse:
 
 
@@ -276,6 +304,7 @@ async def process_query_standard_endpoint(
             query=request_data.query,
             sandbox=sandbox,
             data=preprocessed_data,
+            contains_image_or_like=contains_image_or_like
         )
         await check_client_connection(request)
         logger.info(f"result: {result}")
@@ -396,7 +425,8 @@ async def _process_batch_chunk(
     job_id: str,
     session_dir: str,
     current_chunk: Optional[int] = None,
-    previous_chunk_return_value: Optional[tuple] = None
+    previous_chunk_return_value: Optional[tuple] = None,
+    contains_image_or_like: bool = False
 ) -> ChunkResponse:
     """Internal function to process a single batch chunk without route dependencies."""
     try:
@@ -486,7 +516,8 @@ async def _process_batch_chunk(
             query=request_data.query,
             sandbox=sandbox,
             data=preprocessed_data,
-            batch_context={"current": current_chunk + 1, "total": len(page_chunks)}  # Add batch context here
+            batch_context={"current": current_chunk + 1, "total": len(page_chunks)},
+            contains_image_or_like=contains_image_or_like
         )
         
         if result.error:
@@ -560,6 +591,7 @@ async def process_query_batch_endpoint(
     request_data: QueryRequest,
     job_id: str,
     files: List[UploadFile] = File(default=[]),
+    contains_image_or_like: bool = False
 ) -> QueryResponse:
     """Handles batch processing of large document sets synchronously."""
     if not user_id:
@@ -615,7 +647,8 @@ async def process_query_batch_endpoint(
                 job_id=job_id,
                 session_dir=session_dir,
                 current_chunk=chunk_index,
-                previous_chunk_return_value=previous_chunk_return_value
+                previous_chunk_return_value=previous_chunk_return_value,
+                contains_image_or_like=contains_image_or_like
             )
 
             # Store the return value for the next chunk
