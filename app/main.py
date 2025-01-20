@@ -20,13 +20,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Configure CORS with specific origins
+origins = [
+    "https://aidocassist.com",
+    "https://www.aidocassist.com",
+    "https://api.aidocassist.com",
+    "https://localhost:3000",
+    "http://localhost:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Specify domains if needed
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
+
+@app.get("/")
+async def root():
+    return {"message": "SS Assist API"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 app.include_router(process_query.router)
 app.include_router(download.router)

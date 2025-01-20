@@ -745,6 +745,8 @@ async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_p
         overage_this_month = usage.get("overage_this_month", 0)
         overage_hard_limit = usage.get("overage_hard_limit", 0)
         potential_overage = overage_this_month + total_pages * float(os.getenv("OVERAGE_PRICE"))
+        print(f"potential_overage: {potential_overage}")
+        print(f"overage_hard_limit: {overage_hard_limit}")
         if potential_overage >= overage_hard_limit:
             raise ValueError(f"This request would put you over your monthly overage limit.  You can increase your overage in your account page.")
 
