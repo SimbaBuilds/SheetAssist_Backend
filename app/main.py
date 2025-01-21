@@ -9,6 +9,8 @@ import uvicorn
 from app.endpoints import process_query, download, get_doc_title, data_visualization
 from app.utils.file_management import temp_file_manager
 from contextlib import asynccontextmanager
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,6 +21,8 @@ async def lifespan(app: FastAPI):
     await temp_file_manager.stop_periodic_cleanup()
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(HTTPSRedirectMiddleware)
 
 # Configure CORS with specific origins
 origins = [
@@ -33,7 +37,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,

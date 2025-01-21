@@ -33,3 +33,4 @@ matplotlib
 seaborn
 fastapi-cache2
 redis
+gunicorn
