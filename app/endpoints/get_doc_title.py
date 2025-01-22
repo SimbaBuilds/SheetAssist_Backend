@@ -13,6 +13,7 @@ from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
 import logging
 from googleapiclient.errors import HttpError
+import asyncio
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -279,19 +280,48 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
 
     # Extract item ID from URL
     item_id = None
-    if 'id=' in url:
-        # Handle OneDrive URLs
+    logger.info(f"Attempting to extract item ID from URL: {url}")
+    
+    if 'resid=' in url:
+        # Handle Office 365/OneDrive URLs
+        resid = url.split('resid=')[1].split('&')[0]
+        # For OneDrive, we need to encode the resid differently
+        if 'onedrive.live.com' in url:
+            # Extract the personal identifier if present
+            personal_id = None
+            if '/personal/' in url:
+                personal_id = url.split('/personal/')[1].split('/')[0]
+                logger.info(f"Extracted personal ID: {personal_id}")
+            
+            # Use the driveId/items/resid format for OneDrive
+            if personal_id:
+                item_id = resid
+                # Try the /me/drive endpoint first
+                graph_endpoint = os.getenv('MS_GRAPH_ENDPOINT', 'https://graph.microsoft.com')
+                api_url = f"{graph_endpoint}/v1.0/me/drive"
+            else:
+                item_id = resid
+        else:
+            item_id = resid
+    elif 'id=' in url:
+        # Handle other OneDrive URLs
         item_id = url.split('id=')[1].split('&')[0]
     elif '://' in url:
         # Handle SharePoint URLs
         path_parts = url.split('://')[-1].split('/')
         for i, part in enumerate(path_parts):
-            if part in ['view.aspx', 'edit.aspx']:
+            if part.lower() in ['view.aspx', 'edit.aspx']:
                 item_id = path_parts[i-1]
+                break
+            # Look for a GUID pattern
+            elif len(part) > 30 and ('-' in part or '.' in part):
+                item_id = part
                 break
 
     if not item_id:
         raise ValueError(f"Could not extract item ID from URL: {url}")
+    
+    logger.info(f"Extracted item ID: {item_id}")
 
     # First attempt with current token
     headers = {
@@ -300,8 +330,38 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
     }
     
     graph_endpoint = os.getenv('MS_GRAPH_ENDPOINT', 'https://graph.microsoft.com')
-    api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}"
+    
+    # Log token info (safely)
+    logger.info(f"Token type: {token_info.token_type}")
+    logger.info(f"Token scopes: {token_info.scope}")
+    logger.info(f"Environment variables: MS_GRAPH_ENDPOINT={graph_endpoint}")
+    
+    # For OneDrive personal, try to get the drive info first
+    if 'onedrive.live.com' in url:
+        logger.info("OneDrive personal URL detected, getting drive info first")
+        drive_url = f"{graph_endpoint}/v1.0/me/drive"
+        logger.info(f"Request headers for drive info: {headers}")
+        drive_response = requests.get(drive_url, headers=headers)
+        logger.info(f"Drive info response status: {drive_response.status_code}")
+        logger.info(f"Drive info response headers: {dict(drive_response.headers)}")
+        logger.info(f"Drive info response: {drive_response.text}")
+        
+        if drive_response.status_code == 200:
+            # For personal OneDrive, always use /me/drive/items format
+            item_id = item_id.lower()  # Ensure consistent casing
+            api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}"
+            logger.info(f"Using personal OneDrive URL: {api_url}")
+        else:
+            # Fallback to /me/drive/items format
+            api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}"
+    else:
+        api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}"
+    
+    logger.info(f"Making Microsoft Graph API request to: {api_url}")
+    logger.info(f"Using item_id: {item_id}")
     response = requests.get(api_url, headers=headers)
+    logger.info(f"Microsoft Graph API response status: {response.status_code}")
+    logger.info(f"Microsoft Graph API response: {response.text}")
     
     # If unauthorized, try refreshing token and retry
     if response.status_code == 401:
@@ -325,19 +385,46 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
     file_name = file_data.get('name')
 
     # If it's an Excel file, get the active sheet name
+    sheet_names = []
     if file_data.get('file', {}).get('mimeType') == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
         workbook_api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}/workbook/worksheets"
-        workbook_response = requests.get(workbook_api_url, headers=headers)
-        try:
-            workbook_response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            raise Exception(f"Failed to fetch worksheet information: {str(e)}")
+        max_retries = 3
+        retry_count = 0
+        retry_delay = 1  # Start with 1 second delay
         
-        sheets_data = workbook_response.json()
+        while retry_count < max_retries:
+            try:
+                logger.info(f"Attempting to fetch worksheets (attempt {retry_count + 1}/{max_retries})")
+                workbook_response = requests.get(workbook_api_url, headers=headers)
+                
+                # If we get a 503, wait and retry
+                if workbook_response.status_code == 503:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        logger.warning(f"Received 503 error, retrying in {retry_delay} seconds...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                
+                workbook_response.raise_for_status()
+                sheets_data = workbook_response.json()
+                for sheet in sheets_data.get('value', []):
+                    sheet_names.append(sheet['name'])
+                break  # Success, exit the retry loop
+                
+            except requests.exceptions.HTTPError as e:
+                if workbook_response.status_code == 503 and retry_count < max_retries - 1:
+                    continue  # Try again if we have retries left
+                logger.error(f"Failed to fetch worksheet information after {retry_count + 1} attempts: {str(e)}")
+                # Don't raise an exception, just log the error and continue with empty sheet names
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error fetching worksheets: {str(e)}")
+                break
         
-    sheet_names = []
-    for sheet in sheets_data.get('value', []):
-        sheet_names.append(sheet['name'])
+        if not sheet_names:
+            logger.warning("Could not fetch worksheet names, continuing with file name only")
+    
     if "." in file_name:
         file_name = file_name.split(".")[0]
     
@@ -423,7 +510,7 @@ async def get_document_title(
             return WorkbookResponse(
                 url=url.url,
                 success=False,
-                error=e
+                error=str(e)
             )
     else:
         return WorkbookResponse(
