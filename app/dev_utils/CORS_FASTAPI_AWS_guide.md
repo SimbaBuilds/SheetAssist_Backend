@@ -1,5 +1,5 @@
-	1a.Troubleshoot this environment first by checking logs and verifying the service is actually up on port 8000
-	1b.	SSH Key or User Data: If you added SSH after creating the environment, the new instance might be stuck or failing to apply user-data properly.
-	2.	Gunicorn/App Crash: The instance may not be running the app at all. Check logs under /var/log/web.stdout.log or /var/log/eb-engine.log to confirm Gunicorn/uvicorn is actually starting.
-	3.	Security Group/Port: Ensure your ALB target group can reach port 8000 and that the instance SG isn’t blocking.
-	4.	Redirect Process Health: You have a separate redirect process on port 80. If it fails its health checks or never signals, it can degrade the entire environment. You can remove or relax health checks on the redirect process if it only serves 301/302.
+Plan:
+1. use a load balanced environment
+2. make sure the app redirects to https -- I already have an ssl certificate:
+   - SSL: identifier: ca368661-cb87-41fd-8cb1-ec0f0744dec7 arn: arn:aws:acm:us-east-1:307946648330:certificate/ca368661-cb87-41fd-8cb1-ec0f0744dec7
+3. I have a Dockerfile so no need for Procfile

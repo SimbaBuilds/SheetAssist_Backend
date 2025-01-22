@@ -25,9 +25,10 @@ from dotenv import load_dotenv
 # Add at the top of the file, after imports
 load_dotenv(override=True)
 
-MAX_SNAPSHOT_LENGTH = int(os.getenv("MAX_SNAPSHOT_LENGTH"))
-MAX_VISION_OUTPUT_TOKENS = int(os.getenv("MAX_VISION_OUTPUT_TOKENS"))
-DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER")
+# Default values for environment variables
+MAX_SNAPSHOT_LENGTH = int(os.getenv("MAX_SNAPSHOT_LENGTH", "2000"))
+MAX_VISION_OUTPUT_TOKENS = int(os.getenv("MAX_VISION_OUTPUT_TOKENS", "3000"))
+DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
 
 def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
     input_data_snapshot = ""
@@ -483,7 +484,7 @@ class LLMService:
         
         try:
             # Try default provider first
-            if DEFAULT_LLM_PROVIDER == "anthropic":
+            if os.getenv("DEFAULT_LLM_PROVIDER") == "anthropic":
                 result = await self._execute_anthropic(operation, *args, **kwargs)
                 return "anthropic", result
             else:  # default to openai
@@ -919,6 +920,7 @@ class LLMService:
             old_data_snapshot += f"Original file name: {data.original_file_name}\nData type: {data.data_type}\nData Snapshot:\n{data_snapshot}\n\n"
         return old_data_snapshot
 
+   
    
     def _build_gen_vis_user_content(self, data_snapshot: str, color_palette: str, custom_instructions: Optional[str], past_errors: List[str]) -> str:
         return f"""Data Snapshot:

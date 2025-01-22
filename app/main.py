@@ -1,28 +1,50 @@
 import sys
 import os
+import traceback
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import logging
 from app.endpoints import process_query, download, get_doc_title, data_visualization
 from app.utils.file_management import temp_file_manager
 from contextlib import asynccontextmanager
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    logger.info("Application startup")
     await temp_file_manager.start_periodic_cleanup()
     yield
     # Shutdown
+    logger.info("Application shutdown")
     await temp_file_manager.stop_periodic_cleanup()
 
 app = FastAPI(lifespan=lifespan)
 
-app.add_middleware(HTTPSRedirectMiddleware)
+@app.middleware("http")
+async def error_logging_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        logger.error(f"Request failed: {request.url}")
+        logger.error(f"Error details: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
 
 # Configure CORS with specific origins
 origins = [
@@ -31,21 +53,23 @@ origins = [
     "https://api.aidocassist.com",
     "https://localhost:3000",
     "http://localhost:8000",
+    "http://fastapienv3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com",
+    "https://fastapienv3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com",
+    "http://fastapienv04c3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com",
+    "https://fastapienv04c3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=3600,
+    allow_methods=["*"],
+    allow_headers=["*"]
 )
 
 @app.get("/")
 async def root():
-    return {"message": "SS Assist API"}
+    return {"message": "FastAPI Config Test - Success!"}
 
 @app.get("/health")
 async def health_check():
