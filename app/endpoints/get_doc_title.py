@@ -267,79 +267,82 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
             return "not_found"
         return None
 
-async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet| None:
+async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet:
     """Get document title using Microsoft Graph API"""
-    try:
-        # Check if token is expired
-        expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
-        if expires_at <= datetime.now(timezone.utc):
-            logger.warning("Microsoft token is expired, attempting refresh")
-            token_info = await refresh_microsoft_token(token_info, supabase)
-            if not token_info:
-                logger.error("Failed to refresh Microsoft token")
-                return None
+    # Check if token is expired
+    expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
+    if expires_at <= datetime.now(timezone.utc):
+        logger.warning("Microsoft token is expired, attempting refresh")
+        token_info = await refresh_microsoft_token(token_info, supabase)
+        if not token_info:
+            raise Exception("Failed to refresh Microsoft token")
 
-        # Extract item ID from URL
-        item_id = None
-        if 'id=' in url:
-            # Handle OneDrive URLs
-            item_id = url.split('id=')[1].split('&')[0]
-        elif '://' in url:
-            # Handle SharePoint URLs
-            path_parts = url.split('://')[-1].split('/')
-            for i, part in enumerate(path_parts):
-                if part in ['view.aspx', 'edit.aspx']:
-                    item_id = path_parts[i-1]
-                    break
+    # Extract item ID from URL
+    item_id = None
+    if 'id=' in url:
+        # Handle OneDrive URLs
+        item_id = url.split('id=')[1].split('&')[0]
+    elif '://' in url:
+        # Handle SharePoint URLs
+        path_parts = url.split('://')[-1].split('/')
+        for i, part in enumerate(path_parts):
+            if part in ['view.aspx', 'edit.aspx']:
+                item_id = path_parts[i-1]
+                break
 
-        if not item_id:
-            logger.error(f"Could not extract item ID from URL: {url}")
-            return None
+    if not item_id:
+        raise ValueError(f"Could not extract item ID from URL: {url}")
 
-        # First attempt with current token
-        headers = {
-            'Authorization': f"{token_info.token_type} {token_info.access_token}",
-            'Content-Type': 'application/json'
-        }
-        
-        api_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}"
-        response = requests.get(api_url, headers=headers)
-        
-        # If unauthorized, try refreshing token and retry
-        if response.status_code == 401:
-            logger.warning("Received 401 error, attempting token refresh")
-            token_info = await refresh_microsoft_token(token_info, supabase)
-            if not token_info:
-                logger.error("Failed to refresh Microsoft token after 401")
-                return None
-                
-            # Retry with new token
-            headers['Authorization'] = f"{token_info.token_type} {token_info.access_token}"
-            response = requests.get(api_url, headers=headers)
-        
-        response.raise_for_status()
-        file_data = response.json()
-        file_name = file_data.get('name')
-
-        # If it's an Excel file, get the active sheet name
-        if file_data.get('file', {}).get('mimeType') == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-            workbook_api_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}/workbook/worksheets"
-            workbook_response = requests.get(workbook_api_url, headers=headers)
-            workbook_response.raise_for_status()
-            sheets_data = workbook_response.json()
+    # First attempt with current token
+    headers = {
+        'Authorization': f"{token_info.token_type} {token_info.access_token}",
+        'Content-Type': 'application/json'
+    }
+    
+    graph_endpoint = os.getenv('MS_GRAPH_ENDPOINT', 'https://graph.microsoft.com')
+    api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}"
+    response = requests.get(api_url, headers=headers)
+    
+    # If unauthorized, try refreshing token and retry
+    if response.status_code == 401:
+        logger.warning("Received 401 error, attempting token refresh")
+        token_info = await refresh_microsoft_token(token_info, supabase)
+        if not token_info:
+            raise Exception("Failed to refresh Microsoft token after 401")
             
-        sheet_names = []
-        for sheet in sheets_data.get('value', []):
-            sheet_names.append(sheet['name'])
-        if "." in file_name:
-            file_name = file_name.split(".")[0]
-        
-        sheet_md = OnlineSheet(doc_name=file_name, provider='microsoft', sheet_names=sheet_names) 
-        return sheet_md
+        # Retry with new token
+        headers['Authorization'] = f"{token_info.token_type} {token_info.access_token}"
+        response = requests.get(api_url, headers=headers)
+    
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if response.status_code == 404:
+            raise Exception("Document not found or not accessible")
+        raise Exception(f"HTTP error occurred: {str(e)}")
 
-    except Exception as e:
-        logger.error(f"Error fetching Microsoft doc title: {str(e)}")
-        return None
+    file_data = response.json()
+    file_name = file_data.get('name')
+
+    # If it's an Excel file, get the active sheet name
+    if file_data.get('file', {}).get('mimeType') == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+        workbook_api_url = f"{graph_endpoint}/v1.0/me/drive/items/{item_id}/workbook/worksheets"
+        workbook_response = requests.get(workbook_api_url, headers=headers)
+        try:
+            workbook_response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise Exception(f"Failed to fetch worksheet information: {str(e)}")
+        
+        sheets_data = workbook_response.json()
+        
+    sheet_names = []
+    for sheet in sheets_data.get('value', []):
+        sheet_names.append(sheet['name'])
+    if "." in file_name:
+        file_name = file_name.split(".")[0]
+    
+    sheet_md = OnlineSheet(doc_name=file_name, provider='microsoft', sheet_names=sheet_names) 
+    return sheet_md
 
 @router.post("/get_document_title", response_model=WorkbookResponse)
 async def get_document_title(
@@ -405,8 +408,8 @@ async def get_document_title(
                 error="Microsoft authentication required. Please connect your Microsoft account."
             )
 
-        online_sheet = await get_microsoft_title(url.url, microsoft_token, supabase)
-        if online_sheet is not None:
+        try:
+            online_sheet = await get_microsoft_title(url.url, microsoft_token, supabase)
             logger.info(f"Retrieved title: {online_sheet.doc_name} sheets: {online_sheet.sheet_names}")
             return WorkbookResponse(
                 url=url.url,
@@ -415,12 +418,12 @@ async def get_document_title(
                 sheet_names=online_sheet.sheet_names,
                 success=True
             )
-        else:
-            logger.error(f"Failed to retrieve title for Microsoft document: {url.url}")
+        except Exception as e:
+            logger.error(f"Error fetching Microsoft doc title: {str(e)}")
             return WorkbookResponse(
                 url=url.url,
                 success=False,
-                error="Error accessing Excel Online. Please reconnect your Microsoft account."
+                error=e
             )
     else:
         return WorkbookResponse(
