@@ -510,7 +510,7 @@ async def get_document_title(
             return WorkbookResponse(
                 url=url.url,
                 success=False,
-                error=str(e)
+                error="Microsoft authentication required. Please connect your Microsoft account."
             )
     else:
         return WorkbookResponse(

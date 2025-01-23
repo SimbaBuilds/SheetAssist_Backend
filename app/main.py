@@ -51,12 +51,9 @@ origins = [
     "https://aidocassist.com",
     "https://www.aidocassist.com",
     "https://api.aidocassist.com",
+    "http://api.aidocassist.com",
     "https://localhost:3000",
-    "http://localhost:8000",
-    "http://fastapienv3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com",
-    "https://fastapienv3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com",
-    "http://fastapienv04c3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com",
-    "https://fastapienv04c3.eba-mnjyzw3d.us-east-1.elasticbeanstalk.com"
+    "http://localhost:8000"
 ]
 
 app.add_middleware(
