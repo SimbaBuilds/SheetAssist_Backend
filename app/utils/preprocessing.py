@@ -12,7 +12,7 @@ from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
 from app.utils.data_processing import get_data_snapshot
 from fastapi import UploadFile
-from app.schemas import FileDataInfo, FileMetadata, InputUrl
+from app.schemas import FileDataInfo, FileUploadMetadata, InputUrl
 from typing import List
 import logging
 from app.utils.google_integration import GoogleIntegration
@@ -543,7 +543,7 @@ class FilePreprocessor:
 
 async def preprocess_files(
     files: List[UploadFile],
-    files_metadata: List[FileMetadata],
+    files_metadata: List[FileUploadMetadata],
     input_urls: List[InputUrl],
     query: str,
     session_dir,

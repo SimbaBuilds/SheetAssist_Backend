@@ -13,7 +13,7 @@ from app.utils.connection_and_status import check_client_connection
 from app.utils.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
 from app.utils.s3_file_management import temp_file_manager
-from app.schemas import FileMetadata, InputUrl
+from app.schemas import FileUploadMetadata, InputUrl
 import os
 import base64
 
@@ -28,7 +28,7 @@ class VisualizationOptions(BaseModel):
     custom_instructions: Optional[str] = None
 
 class DataVisualizationRequest(BaseModel):
-    files_metadata: Optional[List[FileMetadata]] = None
+    files_metadata: Optional[List[FileUploadMetadata]] = None
     input_urls: Optional[List[InputUrl]] = None
     options: VisualizationOptions
 

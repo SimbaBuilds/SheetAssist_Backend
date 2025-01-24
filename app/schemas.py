@@ -14,7 +14,7 @@ class OutputPreferences(BaseModel):
 
 
 
-class FileMetadata(BaseModel):
+class FileUploadMetadata(BaseModel):
     """Metadata about an uploaded file from frontend"""
     name: str
     type: str  # MIME type
@@ -23,13 +23,15 @@ class FileMetadata(BaseModel):
     index: int
     file_id: Optional[str] = None  # Needed for batch processing file identification
     page_count: Optional[int] = None  # Number of pages in document
+    s3Key: Optional[str] = None
+    s3Url: Optional[str] = None
 
 
 class BatchProcessingFileInfo(BaseModel):
     """Information about a file during processing"""
     file_id: str
     page_range: tuple[int, int]
-    metadata: FileMetadata
+    metadata: FileUploadMetadata
     
     class Config:
         arbitrary_types_allowed = True  # For tuple type
@@ -43,7 +45,7 @@ class InputUrl(BaseModel):
 
 class QueryRequest(BaseModel):
     input_urls: Optional[List[InputUrl]] = []
-    files_metadata: Optional[List[FileMetadata]] = []
+    files_metadata: Optional[List[FileUploadMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional
 

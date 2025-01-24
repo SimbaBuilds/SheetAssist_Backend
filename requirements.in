@@ -34,3 +34,5 @@ seaborn
 fastapi-cache2
 redis
 gunicorn
+smart_open
+boto3

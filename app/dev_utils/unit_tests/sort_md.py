@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 
-class FileMetadata(BaseModel):
+class FileUploadMetadata(BaseModel):
     """Metadata about an uploaded file from frontend"""
     name: str
     type: str  # MIME type
@@ -12,10 +12,10 @@ class FileMetadata(BaseModel):
 
 # Test data
 files_metadata = [
-    FileMetadata(name="file1.xlsx", type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extension="xlsx", size=100, index=0),
-    FileMetadata(name="file2.csv", type="text/csv", extension="csv", size=200, index=1),
-    FileMetadata(name="file3.txt", type="text/plain", extension="txt", size=300, index=2),
-    FileMetadata(name="file4.pdf", type="application/pdf", extension="pdf", size=400, index=3)
+    FileUploadMetadata(name="file1.xlsx", type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extension="xlsx", size=100, index=0),
+    FileUploadMetadata(name="file2.csv", type="text/csv", extension="csv", size=200, index=1),
+    FileUploadMetadata(name="file3.txt", type="text/plain", extension="txt", size=300, index=2),
+    FileUploadMetadata(name="file4.pdf", type="application/pdf", extension="pdf", size=400, index=3)
 ]
 
 
@@ -30,9 +30,9 @@ def test_file_metadata_sorting():
         
         # Test case 3: CSV first, then non-priority files
         [
-            FileMetadata(name="csv_file.csv", type="text/csv", extension="csv", size=200, index=0),
-            FileMetadata(name="text_file.txt", type="text/plain", extension="txt", size=300, index=1),
-            FileMetadata(name="pdf_file.pdf", type="application/pdf", extension="pdf", size=400, index=2),
+            FileUploadMetadata(name="csv_file.csv", type="text/csv", extension="csv", size=200, index=0),
+            FileUploadMetadata(name="text_file.txt", type="text/plain", extension="txt", size=300, index=1),
+            FileUploadMetadata(name="pdf_file.pdf", type="application/pdf", extension="pdf", size=400, index=2),
         ]
     ]
     

@@ -49,43 +49,46 @@ Transitioning from local file storage to S3-based storage to handle large files 
 
 4. **Security Implementation**
    - Server-side encryption (SSE-S3)
-   - Pre-signed URLs for direct client access
+   - Next.js front end will pass S3 file keys for large (>100KB) files instead of actual file like objects 
    - Strict bucket policies
    - Session-based access control
 
 5. **Migration Strategy**
-   - Full immediate migration
+   - Implement S3 operations in Next.js server components
+   - Use existing server-side environment setup
    - Simultaneous update of all dependent modules
    - Rollback capability included
    - No backwards compatibility needed
 
-### Functionality Note: This backend python project receives front end payloads that involve user requests, uploaded files, and online spreadhseet url information.  This data is preprocessed via Python and multimodal large language models, passed to an LLM operating in a sandbox code execution environment, and postprocessed.  Postprocessing either involves appending the result to a user's online spreadsheet or serving the new data for download.  Keep this functionality in mind during your implementation. 
 
 ### Implementation Steps
 
-1. **S3 Bucket Setup**
-   - Create S3 bucket for temporary files
-   - Configure CORS for direct uploads
-   - Set up lifecycle rules for automatic cleanup
-   - Configure bucket policies for security
+Functionality Note: This backend python project receives front end payloads that involve user requests, uploaded files, and online spreadhseet url information.  This data is preprocessed via Python and multimodal large language models, passed to an LLM operating in a sandbox code execution environment, and postprocessed.  Postprocessing either involves appending the result to a user's online spreadsheet or serving the new data for download.  Keep this functionality in mind during your implementation. 
 
-2. **Code Migration: Integrate with s3_file_actions.py**
+1. **S3 Bucket Setup**
+   - [ ] Create S3 bucket for temporary files
+   - [ ] Configure CORS for direct uploads
+   - [ ] Set up lifecycle rules for automatic cleanup
+   - [ ] Configure bucket policies for security
+
+2. **Logic Update**
+   - [ ] The FilesUploadMetadata object passed to the entry endpoint now has attributes s3_key and s3_url if the itme is an s3 file.  Indexing has been maintained from the front end so file like objects will still have the same index as their associated metadata, but S3 files will have an index that is not associated with a file like object -- instead the s3 key and s3 url will be populated.  Adjust logic in process_query endpoint and preprocessor to account for this new s3 non-S3 differentiation in the payload passed to the entry endpoint.
+
+
+3. **Code Migration 1: Integrate with s3_file_actions.py**
    - [x] Create `s3_file_actions.py` for streaming operations
    - [ ] Modify process_query.py endpoints to use S3
    - [ ] Modify data_visualization.py endpoints to use S3
    - [ ] Update preprocessing.py to use S3 streams
    - [ ] Update llm_service.py to use S3 streams
-   - [ ] Update postprocessing.py for S3 output handling
-   - [ ] Update download.py for S3 output handling
 
-2. **Code Migration 2: Integrate with s3_file_management.py**
+4. **Code Migration 2: Integrate with s3_file_management.py**
    - [x] Create `s3_file_management.py` for temp file management
    - [ ] Modify process_query.py endpoints 
    - [ ] Modify data_visualization.py endpoint
    - [ ] Update preprocessing.py 
    - [ ] Update llm_service.py 
-   - [ ] Update postprocessing.py 
-   - [ ] Update download.py
+
 
 
 

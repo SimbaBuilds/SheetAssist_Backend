@@ -77,7 +77,7 @@ Critical Schemas:
 
 class QueryRequest(BaseModel):
     input_urls: Optional[List[InputUrl]] = []
-    files_metadata: Optional[List[FileMetadata]] = []
+    files_metadata: Optional[List[FileUploadMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional
 
