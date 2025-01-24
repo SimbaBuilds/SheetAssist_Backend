@@ -356,3 +356,24 @@ def prepare_analyzer_context(old_df: pd.DataFrame, new_df: pd.DataFrame) -> Dict
     }
     
     return context
+
+
+
+def extract_code(suggested_code: str) -> str:
+    # Extract code enclosed in triple backticks
+    code_start = suggested_code.find('```') + 3
+    code_end = suggested_code.rfind('```')
+    extracted_code = suggested_code[code_start:code_end].strip()
+    
+    # Remove language identifier if present
+    if extracted_code.startswith('python'):
+        extracted_code = extracted_code[6:].strip()
+    
+    # Remove import statements and plt.show()
+    cleaned_code = '\n'.join(
+        line for line in extracted_code.split('\n')
+        if not line.strip().startswith('import') and 
+        not line.strip().startswith('from') and
+        not line.strip() == 'plt.show()'
+    )
+    return cleaned_code

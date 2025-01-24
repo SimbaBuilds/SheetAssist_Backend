@@ -12,7 +12,7 @@ from app.utils.llm_service import LLMService
 from app.utils.connection_and_status import check_client_connection
 from app.utils.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
-from app.utils.file_management import temp_file_manager
+from app.utils.s3_file_management import temp_file_manager
 from app.schemas import FileMetadata, InputUrl
 import os
 import base64

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends   
 from fastapi.responses import FileResponse
 import os
-from app.utils.file_management import temp_file_manager
+from app.utils.s3_file_management import temp_file_manager
 from typing import Annotated
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client

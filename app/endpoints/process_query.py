@@ -4,7 +4,7 @@ from app.utils.process_query_algo import process_query_algo
 from app.utils.sandbox import EnhancedPythonInterpreter
 from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, ChunkResponse, FileDataInfo
 import json
-from app.utils.file_management import temp_file_manager
+from app.utils.s3_file_management import temp_file_manager
 import os
 import logging
 from app.schemas import QueryRequest
@@ -491,7 +491,7 @@ async def _process_batch_chunk(
 
             raise ValueError(error_msg)
 
-        #append previous chunk to input data if it exists and output type is download (online sheet output appends each batch, persisting results)
+        #append previous chunk to input data if it exists and output type is download (online sheet output appends each batch, persisting past results automatically)
         if previous_chunk_return_value and request_data.output_preferences.type == "download":
             job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
             if not job_response.data:

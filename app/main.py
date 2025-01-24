@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 from app.endpoints import process_query, download, get_doc_title, data_visualization
-from app.utils.file_management import temp_file_manager
+from app.utils.s3_file_management import temp_file_manager
 from contextlib import asynccontextmanager
 
 # Configure logging

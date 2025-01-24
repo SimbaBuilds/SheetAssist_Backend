@@ -50,7 +50,7 @@ class QueryRequest(BaseModel):
 
 class FileDataInfo(BaseModel):
     """Pydantic model for storing information about data being processed"""
-    content: Optional[Any] = None
+    content: Optional[Any] = None #string or dataframe
     snapshot: Optional[str] = None
     data_type: Optional[str] = None
     original_file_name: Optional[str] = None

@@ -1,6 +1,6 @@
 from app.schemas import SandboxResult, FileDataInfo
 from app.utils.llm_service import LLMService
-from app.utils.data_processing import get_data_snapshot, prepare_analyzer_context, process_dataframe_for_json
+from app.utils.data_processing import get_data_snapshot, prepare_analyzer_context, process_dataframe_for_json, extract_code
 from typing import List, Tuple, Any, Optional, Dict
 from app.utils.sandbox import EnhancedPythonInterpreter
 import pandas as pd
@@ -8,28 +8,7 @@ import logging
 import os
 import json
 from fastapi import Request
-import numpy as np
-from app.utils.connection_and_status import check_client_connection
 
-
-def extract_code(suggested_code: str) -> str:
-    # Extract code enclosed in triple backticks
-    code_start = suggested_code.find('```') + 3
-    code_end = suggested_code.rfind('```')
-    extracted_code = suggested_code[code_start:code_end].strip()
-    
-    # Remove language identifier if present
-    if extracted_code.startswith('python'):
-        extracted_code = extracted_code[6:].strip()
-    
-    # Remove import statements and plt.show()
-    cleaned_code = '\n'.join(
-        line for line in extracted_code.split('\n')
-        if not line.strip().startswith('import') and 
-        not line.strip().startswith('from') and
-        not line.strip() == 'plt.show()'
-    )
-    return cleaned_code
 
 async def process_query_algo(
     request: Request,

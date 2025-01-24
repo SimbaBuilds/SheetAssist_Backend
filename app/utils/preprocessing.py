@@ -6,7 +6,7 @@ import docx
 import requests
 from PIL import Image
 import io
-from app.utils.file_management import temp_file_manager
+from app.utils.s3_file_management import temp_file_manager
 import fitz  # PyMuPDF
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
