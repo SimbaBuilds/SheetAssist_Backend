@@ -36,3 +36,4 @@ redis
 gunicorn
 smart_open
 boto3
+tenacity>=8.2.0

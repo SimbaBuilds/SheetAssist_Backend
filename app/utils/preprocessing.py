@@ -1,13 +1,13 @@
 import pandas as pd
 import json
-from typing import Union, BinaryIO, Tuple, Optional
+from typing import Union, BinaryIO, Tuple, Optional, AsyncGenerator
 from pathlib import Path
 import docx
 import requests
 from PIL import Image
 import io
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import S3FileManager
+from app.utils.s3_file_actions import S3FileManager, S3OperationError
 import fitz  # PyMuPDF
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
@@ -25,6 +25,7 @@ from PyPDF2 import PdfReader
 import os
 from dotenv import load_dotenv
 import aiohttp
+import asyncio
 
 load_dotenv(override=True)
 
@@ -35,25 +36,59 @@ logger = logging.getLogger(__name__)
 # Initialize S3 managers
 s3_file_manager = S3FileManager()
 
-async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> BinaryIO:
-    """Get file content from various sources including S3"""
-    if isinstance(file, FileUploadMetadata) and file.s3Key:
-        # Get file from S3
-        return await s3_file_manager.get_streaming_body(file.s3Key)
-    elif isinstance(file, (str, bytes)):
-        return io.BytesIO(file if isinstance(file, bytes) else file.encode())
-    elif hasattr(file, 'read'):
-        if hasattr(file, 'seek'):
-            file.seek(0)
-        return file
-    else:
+async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> Union[BinaryIO, AsyncGenerator[bytes, None]]:
+    """Get file content from various sources including S3, with streaming support for large files"""
+    try:
+        if isinstance(file, FileUploadMetadata):
+            if file.s3Key:
+                # For large files in S3, return a streaming generator
+                if await s3_file_manager.get_file_size(file.s3Key) >= s3_file_manager.SMALL_FILE_THRESHOLD:
+                    return s3_file_manager.stream_download(file.s3Key)
+                # For small files in S3, get the whole content
+                return await s3_file_manager.get_streaming_body(file.s3Key)
+            
+        elif isinstance(file, (str, bytes)):
+            return io.BytesIO(file if isinstance(file, bytes) else file.encode())
+            
+        elif hasattr(file, 'read'):
+            # Check if it's a file-like object with size information
+            try:
+                if hasattr(file, 'seek'):
+                    file.seek(0)
+                size = os.fstat(file.fileno()).st_size if hasattr(file, 'fileno') else None
+                if size and size >= s3_file_manager.SMALL_FILE_THRESHOLD:
+                    # For large files, stream in chunks
+                    async def chunk_generator():
+                        while True:
+                            chunk = await asyncio.to_thread(file.read, s3_file_manager.CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            yield chunk
+                    return chunk_generator()
+            except (OSError, AttributeError):
+                pass
+            
+            # Default to returning the file object directly
+            return file
+            
         raise ValueError("Unsupported file type or source")
+    except Exception as e:
+        logger.error(f"Error in get_file_content: {str(e)}")
+        raise
 
 async def pdf_classifier(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> bool:
-    """Classify the type of PDF file"""
+    """Classify the type of PDF file with streaming support"""
     try:
-        # Get file content
+        # Get file content with potential streaming
         file_content = await get_file_content(file)
+        
+        # Handle streaming content
+        if isinstance(file_content, AsyncGenerator):
+            temp_file = SpooledTemporaryFile(max_size=10*1024*1024)  # 10MB max in memory
+            async for chunk in file_content:
+                temp_file.write(chunk)
+            temp_file.seek(0)
+            file_content = temp_file
         
         # Create a temporary file
         temp_path = await temp_file_manager.save_temp_file(file_content, "temp.pdf")
@@ -64,6 +99,7 @@ async def pdf_classifier(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) 
             text_content = ""
             total_text_length = 0
             
+            # Only process first few pages for classification
             start_page = 0
             end_page = min(5, len(doc))
 
@@ -71,15 +107,17 @@ async def pdf_classifier(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) 
                 page = doc[page_num]
                 page_text = page.get_text()
                 total_text_length += len(page_text.strip())
-                text_content += f"\n[Page {page_num + 1}]\n{page_text}"
-
-            is_image_like_pdf = total_text_length < 10
-            return is_image_like_pdf
+                if total_text_length > 0:  # Early exit if we find text
+                    return False
+            
+            return True  # If we haven't found text, it's image-like
             
         finally:
             # Clean up
             temp_file_manager.mark_for_cleanup(temp_path)
             await temp_file_manager.cleanup_marked()
+            if isinstance(file_content, SpooledTemporaryFile):
+                file_content.close()
             
     except Exception as e:
         logger.error(f"Error in PDF classification: {str(e)}")
@@ -306,69 +344,122 @@ class FilePreprocessor:
         page_range: Optional[tuple[int, int]] = None,
     ) -> Tuple[str, str, bool]:
         """Process PDF files and extract content"""
+        doc = None
+        temp_path = None
         try:
             # Get file content
             file_content = await get_file_content(file)
             
-            # Save to temporary file
+            # For S3 files that are large, use streaming
+            if isinstance(file, FileUploadMetadata) and file.s3Key and \
+               await s3_file_manager.get_file_size(file.s3Key) >= s3_file_manager.SMALL_FILE_THRESHOLD:
+                
+                # First try to process with PyMuPDF for text
+                temp_file = io.BytesIO()
+                async for chunk in s3_file_manager.stream_download(file.s3Key):
+                    temp_file.write(chunk)
+                temp_file.seek(0)
+                
+                try:
+                    doc = fitz.open(stream=temp_file)
+                    page_count = len(doc)
+                    
+                    if page_range:
+                        start_page = page_range[0] if page_range else 0
+                        end_page = min(page_range[1], page_count) if page_range else page_count
+                    else:
+                        start_page = 0
+                        end_page = page_count
+
+                    text_content = ""
+                    total_text_length = 0
+                    
+                    for page_num in range(start_page, end_page):
+                        page = doc[page_num]
+                        page_text = page.get_text()
+                        total_text_length += len(page_text.strip())
+                        text_content += f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}"
+
+                    # If we got meaningful text content, return it
+                    if total_text_length > 10:  # Same threshold as pdf_classifier
+                        return text_content, "text", False
+                        
+                except Exception as e:
+                    logging.error(f"Error reading PDF with PyMuPDF: {str(e)}")
+                finally:
+                    if doc:
+                        doc.close()
+                    temp_file.close()
+                
+                # If we reach here, process with vision
+                if self.supabase and self.user_id:
+                    await self.check_image_processing_limits(self.supabase, self.user_id)
+                
+                # Pass the S3 key directly to vision processor
+                provider, vision_result = await self.llm_service.execute_with_fallback(
+                    "process_pdf_with_vision",
+                    s3_key=file.s3Key,  # Pass S3 key instead of file path
+                    query=query,
+                    input_data=input_data,
+                    page_range=page_range,
+                    use_s3=True  # Flag to indicate S3 usage
+                )
+
+                if isinstance(vision_result, dict) and vision_result.get("status") == "error":
+                    raise ValueError(f"Vision API error: {vision_result['error']}")
+                
+                self.num_images_processed += (end_page - start_page)
+                content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
+                return content, "vision_extracted", True
+            
+            # For small files or non-S3 files, use existing logic
             temp_path = await temp_file_manager.save_temp_file(file_content, "temp.pdf")
             
+            # First try to process with Python PDF libraries
             try:
-                # Check if PDF is image-like
-                is_image_like = await pdf_classifier(temp_path)
+                doc = fitz.open(temp_path)
+                page_count = len(doc)
                 
-                if is_image_like:
-                    # Process as image
-                    if self.supabase and self.user_id:
-                        await self.check_image_processing_limits(self.supabase, self.user_id)
-                    
-                except Exception as e:
-                    logging.error(f"Error reading PDF file: {str(e)}")
-                    raise ValueError(f"Failed to read PDF file: {str(e)}")
-            else:
-                pdf_path = file
+                if page_range:
+                    start_page = page_range[0] if page_range else 0
+                    end_page = min(page_range[1], page_count) if page_range else page_count
+                else:
+                    start_page = 0
+                    end_page = page_count
 
-            is_image_like_pdf = pdf_classifier(pdf_path)
+                text_content = ""
+                total_text_length = 0
+                
+                for page_num in range(start_page, end_page):
+                    page = doc[page_num]
+                    page_text = page.get_text()
+                    total_text_length += len(page_text.strip())
+                    text_content += f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}"
 
-            doc = fitz.open(pdf_path)
+                # If we got meaningful text content, return it
+                if total_text_length > 10:  # Same threshold as pdf_classifier
+                    return text_content, "text", False
 
-            page_count = len(doc)
-    
-            if page_range:
-                start_page = page_range[0] if page_range else 0
-                end_page = min(page_range[1], page_count) if page_range else page_count
-            else:
-                start_page = 0
-                end_page = page_count
-
-            text_content = ""
-            total_text_length = 0
+            except Exception as e:
+                logging.error(f"Error reading PDF with Python libraries: {str(e)}")
             
-            for page_num in range(start_page, end_page):
-                page = doc[page_num]
-                page_text = page.get_text()
-                total_text_length += len(page_text.strip())
-                text_content += f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}"
-
-            if not is_image_like_pdf:
-                print(f"Returning text content with length: {len(text_content)} characters and snapshot:\n {text_content[:1000]} cont'd...\n")
-                return text_content, "text", False
-                                    
-            # For non-machine readable PDFs, process with vision
+            # If we reach here, process with vision
+            if self.supabase and self.user_id:
+                await self.check_image_processing_limits(self.supabase, self.user_id)
+            
             provider, vision_result = await self.llm_service.execute_with_fallback(
                 "process_pdf_with_vision",
-                pdf_path=pdf_path,
+                pdf_path=temp_path,
                 query=query,
                 input_data=input_data,
-                page_range=page_range
+                page_range=page_range,
+                use_s3=False
             )
 
             if isinstance(vision_result, dict) and vision_result.get("status") == "error":
                 raise ValueError(f"Vision API error: {vision_result['error']}")
-
             
             self.num_images_processed += (end_page - start_page)
-
             content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
             return content, "vision_extracted", True
 
@@ -385,7 +476,8 @@ class FilePreprocessor:
                     pass
             if temp_path:
                 try:
-                    temp_path.unlink()
+                    temp_file_manager.mark_for_cleanup(temp_path)
+                    await temp_file_manager.cleanup_marked()
                 except:
                     pass
 
