@@ -5,6 +5,7 @@ from app.utils.sandbox import EnhancedPythonInterpreter
 from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, ChunkResponse, FileDataInfo
 import json
 from app.utils.s3_file_management import temp_file_manager
+from app.utils.s3_file_actions import S3FileManager
 import os
 import logging
 from app.schemas import QueryRequest
@@ -30,8 +31,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
+s3_file_manager = S3FileManager()
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_entry_endpoint(
@@ -50,24 +50,38 @@ async def process_query_entry_endpoint(
         
         # Store file contents in memory before background processing
         files_data = []
-        for file in files:
-            content = await file.read()
-            await file.seek(0)  # Reset for immediate use if needed
-            files_data.append({
-                'content': content,
-                'filename': file.filename,
-                'content_type': file.content_type
-            })
+        for i, file_meta in enumerate(request_data.files_metadata):
+            if file_meta.s3Key:
+                # Handle S3 files
+                try:
+                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                    files_data.append({
+                        'content': file_content.read(),
+                        'filename': file_meta.name,
+                        'content_type': file_meta.type
+                    })
+                except Exception as e:
+                    logger.error(f"Error reading S3 file {file_meta.name}: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"Error reading S3 file: {str(e)}")
+            else:
+                # Handle regular files
+                file = files[file_meta.index]
+                content = await file.read()
+                await file.seek(0)
+                files_data.append({
+                    'content': content,
+                    'filename': file.filename,
+                    'content_type': file.content_type
+                })
         
         total_pages = 0
-        # Update page counts using the original files
-        if request_data.files_metadata:
-            for file_meta, upload_file in zip(request_data.files_metadata, files):
-                if not file_meta.page_count:
-                    page_count = await determine_pdf_page_count(upload_file)
-                    file_meta.page_count = page_count
-                    total_pages += file_meta.page_count
-                    await upload_file.seek(0)
+        # Update page counts
+        for file_meta in request_data.files_metadata:
+            if not file_meta.page_count and file_meta.type == 'application/pdf':
+                file_content = io.BytesIO(files_data[i]['content'])
+                pdf_reader = PdfReader(file_content)
+                file_meta.page_count = len(pdf_reader.pages)
+                total_pages += file_meta.page_count
 
         #If destination url and no input url, add destination url and sheet name to input urls for processing context
         if request_data.output_preferences.destination_url and not request_data.input_urls and request_data.output_preferences.modify_existing:
@@ -77,33 +91,22 @@ async def process_query_entry_endpoint(
         need_to_batch = False
         contains_image_or_like = False 
         
-        i = 0
         # Check for images to propagate flag to llm service for prompt selection
-        for file_meta in (request_data.files_metadata or []):
-            if files_data[i]['content_type'] == "image/jpeg" or files_data[i]['content_type'] == "image/png" or files_data[i]['content_type'] == "image/jpg":
+        for file_data in files_data:
+            if file_data['content_type'].startswith('image/'):
                 contains_image_or_like = True
-            if files_data[i]['content_type'] == "application/pdf":
-                contains_image_or_like = pdf_classifier(files_data[i]['content'])
-
-        i = 0
-        for file_meta in (request_data.files_metadata or []):
-            logger.info(f"file_meta: {file_meta.page_count}")
-            if file_meta.page_count and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
-                if files_data[i]['content_type'] == "application/pdf":
-                    is_image_like_pdf = pdf_classifier(files_data[i]['content'])
-                    if is_image_like_pdf: 
-                        contains_image_or_like = True
-                    if is_image_like_pdf: #and greater than CHUNK_SIZE
-                        need_to_batch = True 
-                        logger.info(f"----- Need_to_batch: {need_to_batch} -----")
-                        break
-            i += 1
+            elif file_data['content_type'] == 'application/pdf':
+                is_image_like = await pdf_classifier(io.BytesIO(file_data['content']))
+                contains_image_or_like = contains_image_or_like or is_image_like
+                if is_image_like and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
+                    need_to_batch = True
+                    break
         
-        logger.info(f"(01/19) contains_image_or_like: {contains_image_or_like}")
+        logger.info(f"contains_image_or_like: {contains_image_or_like}")
+        
         # Decision routing based on page count
         if need_to_batch:
-            # Generate unique job ID
-            logger.info(f"Large PDF detected")
+            logger.info("Large PDF detected")
             try:
                 await check_limits_pre_batch(supabase, user_id, total_pages)
             except ValueError as e:
@@ -116,6 +119,8 @@ async def process_query_entry_endpoint(
                     error=str(e),
                     total_pages=0
                 )
+                
+            # Generate unique job ID
             job_id = f"job_{user_id}_{int(time.time())}"
             
             # Calculate page ranges for each file
@@ -123,7 +128,7 @@ async def process_query_entry_endpoint(
             CHUNK_SIZE = int(os.getenv("CHUNK_SIZE")) 
             logger.info(f"CHUNK_SIZE: {CHUNK_SIZE}")
             
-            for file_meta in (request_data.files_metadata or []):
+            for file_meta in request_data.files_metadata:
                 if file_meta.page_count:
                     start_page = 0
                     while start_page < file_meta.page_count:
@@ -137,7 +142,7 @@ async def process_query_entry_endpoint(
                         )
                         start_page += CHUNK_SIZE
             
-            # Initialize job in database with chunks information
+            # Initialize job in database
             response = supabase.table("batch_jobs").insert({
                 "job_id": job_id,
                 "user_id": user_id,
@@ -157,17 +162,14 @@ async def process_query_entry_endpoint(
                 "query": request_data.query,
             }).execute()
             
-            # Add logging before background task
-            logger.info(f"Before background task - Files state: {[f.file._file.closed for f in files]}")
-            
             # Create new UploadFile objects for the background task
             batch_files = []
-            for file in files_data:
-                file_obj = io.BytesIO(file['content'])
+            for file_data in files_data:
+                file_obj = io.BytesIO(file_data['content'])
                 upload_file = UploadFile(
                     file=file_obj,
-                    filename=file['filename'],
-                    headers={'content-type': file['content_type']}
+                    filename=file_data['filename'],
+                    headers={'content-type': file_data['content_type']}
                 )
                 batch_files.append(upload_file)
 
@@ -178,7 +180,7 @@ async def process_query_entry_endpoint(
                 user_id=user_id,
                 supabase=supabase,
                 request_data=request_data,
-                files=batch_files,  # Use the new file objects
+                files=batch_files,
                 job_id=job_id,
                 contains_image_or_like=contains_image_or_like
             )
@@ -243,33 +245,57 @@ async def process_query_standard_endpoint(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     contains_image_or_like: bool = False
 ) -> QueryResponse:
-
-
-
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
         
-    num_images_processed = 0
-
-    logger.info( f"process_query_standard_endpoint called")
-
-
+    await check_client_connection(request)
+    
     try:
-        logger.info( f"sheet: {request_data.output_preferences.destination_url}")
-        logger.info( f"sheet: {request_data.output_preferences.sheet_name}")
-        logger.info(f"Processing query for user {user_id} with {len(request_data.files_metadata or [])} files")
-        # Initial connection check
-        await check_client_connection(request)
-
-        load_dotenv(override=True)
-
+        # Create session directory
         session_dir = temp_file_manager.get_temp_dir()
         logger.info("Calling preprocess_files")
         num_images_processed = 0
 
+        # Store file contents in memory
+        files_data = []
+        for i, file_meta in enumerate(request_data.files_metadata):
+            try:
+                if file_meta.s3Key:
+                    # Handle S3 files
+                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                    files_data.append({
+                        'content': file_content.read(),
+                        'filename': file_meta.name,
+                        'content_type': file_meta.type
+                    })
+                else:
+                    # Handle regular files
+                    file = files[file_meta.index]
+                    content = await file.read()
+                    await file.seek(0)
+                    files_data.append({
+                        'content': content,
+                        'filename': file.filename,
+                        'content_type': file.content_type
+                    })
+            except Exception as e:
+                logger.error(f"Error reading file {file_meta.name}: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+
+        # Create new UploadFile objects for preprocessing
+        upload_files = []
+        for file_data in files_data:
+            file_obj = io.BytesIO(file_data['content'])
+            upload_file = UploadFile(
+                file=file_obj,
+                filename=file_data['filename'],
+                headers={'content-type': file_data['content_type']}
+            )
+            upload_files.append(upload_file)
+
         try:
             preprocessed_data, num_images_processed = await preprocess_files(
-                files=files,
+                files=upload_files,
                 files_metadata=request_data.files_metadata,
                 input_urls=request_data.input_urls,
                 query=request_data.query,
@@ -285,17 +311,13 @@ async def process_query_standard_endpoint(
                 return QueryResponse(
                     original_query=request_data.query,
                     status="error",
-                    message = "Limit reached.  Please check usage in your account settings.",
+                    message="Limit reached. Please check usage in your account settings.",
                     files=None,
                     num_images_processed=0,
                     error=error_msg,
                     total_pages=0
                 )
             raise  # Re-raise other ValueError exceptions
-
-
-        except Exception as e:
-            raise ValueError(e)
 
         # Process the query with the processed data
         sandbox = EnhancedPythonInterpreter()
@@ -315,7 +337,7 @@ async def process_query_standard_endpoint(
             return QueryResponse(
                 original_query=request_data.query,
                 status="error",
-                message="There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request or breaking it down into multiple requests.",
+                message="There was an error processing your request. This application may not have the ability to complete your request. You can also try rephrasing your request or breaking it down into multiple requests.",
                 files=None,
                 num_images_processed=0,
                 error=result.error,
@@ -377,7 +399,7 @@ async def process_query_standard_endpoint(
                 temp_file_manager.cleanup_marked()
                 await check_client_connection(request)
                 if request_data.output_preferences.modify_existing:
-                    message = f"Data successfully uploaded to  {request_data.output_preferences.doc_name} - {request_data.output_preferences.sheet_name}."
+                    message = f"Data successfully uploaded to {request_data.output_preferences.doc_name} - {request_data.output_preferences.sheet_name}."
                 else:
                     message = f"Data successfully uploaded to new sheet in {request_data.output_preferences.doc_name}."
 
@@ -455,10 +477,28 @@ async def _process_batch_chunk(
             "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
         }).eq("job_id", job_id).execute()
 
+        # Create new UploadFile objects for preprocessing
+        upload_files = []
+        for file in files:
+            if hasattr(file, 'file'):
+                content = await file.read()
+                await file.seek(0)
+            else:
+                content = file.read()
+                file.seek(0)
+            
+            file_obj = io.BytesIO(content)
+            upload_file = UploadFile(
+                file=file_obj,
+                filename=file.filename if hasattr(file, 'filename') else 'file',
+                headers={'content-type': file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'}
+            )
+            upload_files.append(upload_file)
+
         # Process chunk
         try:
             preprocessed_data, num_images_processed = await preprocess_files(
-                files=files,
+                files=upload_files,
                 files_metadata=[current_processing_info.metadata],
                 input_urls=request_data.input_urls,
                 query=request_data.query,
@@ -561,7 +601,7 @@ async def _process_batch_chunk(
             status=status,
             message=f"Batch {current_chunk + 1}/{len(page_chunks)} processed successfully",
             files=None,
-            num_images_processed=num_images_processed,  # Include in response
+            num_images_processed=num_images_processed,
             job_id=job_id
         )
 
@@ -604,14 +644,29 @@ async def process_query_batch_endpoint(
 
         # Store file contents for processing
         files_data = []
-        for file in files:
-            content = await file.read()
-            await file.seek(0)
-            files_data.append({
-                'content': content,
-                'filename': file.filename,
-                'content_type': file.content_type
-            })
+        for i, file_meta in enumerate(request_data.files_metadata):
+            try:
+                if file_meta.s3Key:
+                    # Handle S3 files
+                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                    files_data.append({
+                        'content': file_content.read(),
+                        'filename': file_meta.name,
+                        'content_type': file_meta.type
+                    })
+                else:
+                    # Handle regular files
+                    file = files[file_meta.index]
+                    content = await file.read()
+                    await file.seek(0)
+                    files_data.append({
+                        'content': content,
+                        'filename': file.filename,
+                        'content_type': file.content_type
+                    })
+            except Exception as e:
+                logger.error(f"Error reading file {file_meta.name}: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
         
         # Get job data
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
@@ -632,8 +687,8 @@ async def process_query_batch_endpoint(
             for file_data in files_data:
                 file_obj = io.BytesIO(file_data['content'])
                 upload_file = UploadFile(
-                    filename=file_data['filename'],
                     file=file_obj,
+                    filename=file_data['filename'],
                     headers={'content-type': file_data['content_type']}
                 )
                 chunk_files.append(upload_file)

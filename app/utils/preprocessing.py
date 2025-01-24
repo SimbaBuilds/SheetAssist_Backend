@@ -7,6 +7,7 @@ import requests
 from PIL import Image
 import io
 from app.utils.s3_file_management import temp_file_manager
+from app.utils.s3_file_actions import S3FileManager
 import fitz  # PyMuPDF
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
@@ -23,58 +24,66 @@ from fastapi import Request
 from PyPDF2 import PdfReader
 import os
 from dotenv import load_dotenv
+import aiohttp
 
 load_dotenv(override=True)
-
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize S3 managers
+s3_file_manager = S3FileManager()
 
-def pdf_classifier(file: Union[BinaryIO, str, bytes]) -> bool:
-    """Classify the type of PDF file"""
-    
-    # Create a temporary file if we received a file object
-    if not isinstance(file, str):
-        try:
-            # Read the entire content at once and store it
-            if hasattr(file, 'read'):
-                file.seek(0)  # Reset file position to start
-                content = file.read()
-                if not content:
-                    raise ValueError("Empty PDF file")
-            else:
-                content = file
-            
-            # Create a temporary file with the content
-            temp_path = temp_file_manager.save_temp_file(content, "temp.pdf")
-            pdf_path = str(temp_path)
-            
-        except Exception as e:
-            logging.error(f"Error reading PDF file: {str(e)}")
-            raise ValueError(f"Failed to read PDF file: {str(e)}")
+async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> BinaryIO:
+    """Get file content from various sources including S3"""
+    if isinstance(file, FileUploadMetadata) and file.s3Key:
+        # Get file from S3
+        return await s3_file_manager.get_streaming_body(file.s3Key)
+    elif isinstance(file, (str, bytes)):
+        return io.BytesIO(file if isinstance(file, bytes) else file.encode())
+    elif hasattr(file, 'read'):
+        if hasattr(file, 'seek'):
+            file.seek(0)
+        return file
     else:
-        pdf_path = file
-    
-    doc = fitz.open(pdf_path)
-    
-    # Rest of the processing remains the same...
-    text_content = ""
-    total_text_length = 0
-    
-    start_page = 0
-    end_page = min(5, len(doc))
+        raise ValueError("Unsupported file type or source")
 
-    for page_num in range(start_page, end_page):
-        page = doc[page_num]
-        page_text = page.get_text()
-        total_text_length += len(page_text.strip())
-        text_content += f"\n[Page {page_num + 1}]\n{page_text}"
+async def pdf_classifier(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> bool:
+    """Classify the type of PDF file"""
+    try:
+        # Get file content
+        file_content = await get_file_content(file)
+        
+        # Create a temporary file
+        temp_path = await temp_file_manager.save_temp_file(file_content, "temp.pdf")
+        
+        try:
+            doc = fitz.open(temp_path)
+            
+            text_content = ""
+            total_text_length = 0
+            
+            start_page = 0
+            end_page = min(5, len(doc))
 
-    is_image_like_pdf = total_text_length < 10
-    
-    return is_image_like_pdf
+            for page_num in range(start_page, end_page):
+                page = doc[page_num]
+                page_text = page.get_text()
+                total_text_length += len(page_text.strip())
+                text_content += f"\n[Page {page_num + 1}]\n{page_text}"
+
+            is_image_like_pdf = total_text_length < 10
+            return is_image_like_pdf
+            
+        finally:
+            # Clean up
+            temp_file_manager.mark_for_cleanup(temp_path)
+            await temp_file_manager.cleanup_marked()
+            
+    except Exception as e:
+        logger.error(f"Error in PDF classification: {str(e)}")
+        raise ValueError(f"Failed to classify PDF: {str(e)}")
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -92,193 +101,124 @@ class FilePreprocessor:
             self.microsoft_integration = MicrosoftIntegration(supabase, user_id)
 
     @staticmethod
-    def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO]) -> pd.DataFrame:
-        """
-        Process Excel files (.xlsx) and convert to pandas DataFrame
-        
-        Args:
-            file: File object (SpooledTemporaryFile, BytesIO) or path to Excel file
-            
-        Returns:
-            pd.DataFrame: Processed data as DataFrame
-        """
+    async def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO, FileUploadMetadata]) -> pd.DataFrame:
+        """Process Excel files (.xlsx) and convert to pandas DataFrame"""
         try:
-            print("Attempting to process excel file")
-            # For file paths
-            if isinstance(file, (str, Path)):
-                return pd.read_excel(file)
-            
-            # For file objects (BytesIO, SpooledTemporaryFile)
-            if hasattr(file, 'seek'):
-                file.seek(0)
-                # Create a BytesIO object from the file content
-                content = file.read()
-                if isinstance(content, str):
-                    raise ValueError("File content must be bytes")
-                return pd.read_excel(io.BytesIO(content))
-            
-            raise ValueError("Unsupported file object type")
+            file_content = await get_file_content(file)
+            return pd.read_excel(file_content)
         except Exception as e:
             raise ValueError(f"Error processing Excel file: {str(e)}")
 
     @staticmethod
-    def process_csv(file: Union[BinaryIO, str]) -> pd.DataFrame:
-        """
-        Process CSV files and convert to pandas DataFrame
-        
-        Args:
-            file: File object or path to CSV file
-            
-        Returns:
-            pd.DataFrame: Processed data as DataFrame
-        """
+    async def process_csv(file: Union[BinaryIO, str, FileUploadMetadata]) -> pd.DataFrame:
+        """Process CSV files and convert to pandas DataFrame"""
         try:
-            return pd.read_csv(file)
+            file_content = await get_file_content(file)
+            return pd.read_csv(file_content)
         except Exception as e:
-            raise ValueError(e)
+            raise ValueError(f"Error processing CSV file: {str(e)}")
 
     @staticmethod
-    def process_json(file: Union[BinaryIO, str]) -> str:
-        """
-        Process JSON files and convert to string
-        
-        Args:
-            file: File object or path to JSON file
-            
-        Returns:
-            str: JSON content as string
-        """
+    async def process_json(file: Union[BinaryIO, str, FileUploadMetadata]) -> str:
+        """Process JSON files and convert to string"""
         try:
-            if isinstance(file, str):
-                with open(file, 'r') as f:
-                    data = json.load(f)
+            file_content = await get_file_content(file)
+            if isinstance(file_content, (str, bytes)):
+                data = json.loads(file_content)
             else:
-                data = json.load(file)
+                data = json.load(file_content)
             return json.dumps(data)
         except Exception as e:
-            raise ValueError(e)
+            raise ValueError(f"Error processing JSON file: {str(e)}")
 
     @staticmethod
-    def process_text(file: Union[BinaryIO, str]) -> str:
-        """
-        Process text files (.txt) and convert to string
-        
-        Args:
-            file: File object or path to text file
-            
-        Returns:
-            str: File content as string
-        """
+    async def process_text(file: Union[BinaryIO, str, FileUploadMetadata]) -> str:
+        """Process text files (.txt) and convert to string"""
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         
         try:
-            if isinstance(file, str):
-                for encoding in encodings:
-                    try:
-                        with open(file, 'r', encoding=encoding) as f:
-                            return f.read()
-                    except UnicodeDecodeError:
-                        continue
-            else:
-                content = file.read()
-                for encoding in encodings:
-                    try:
-                        return content.decode(encoding)
-                    except UnicodeDecodeError:
-                        continue
+            file_content = await get_file_content(file)
+            content = file_content.read() if hasattr(file_content, 'read') else file_content
+            
+            if isinstance(content, str):
+                return content
                 
-                # If all encodings fail, try with error handling
-                return content.decode('utf-8', errors='replace')
-                
-            raise ValueError("Unable to decode file with any supported encoding")
+            for encoding in encodings:
+                try:
+                    return content.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+            
+            # If all encodings fail, try with error handling
+            return content.decode('utf-8', errors='replace')
         except Exception as e:
-            raise ValueError(e)
+            raise ValueError(f"Error processing text file: {str(e)}")
 
     @staticmethod
-    def process_docx(file: Union[BinaryIO, str]) -> str:
-        """
-        Process Word documents (.docx) and convert to string
-        
-        Args:
-            file: File object or path to Word document
-            
-        Returns:
-            str: Document content as string
-        """
+    async def process_docx(file: Union[BinaryIO, str, FileUploadMetadata]) -> str:
+        """Process Word documents (.docx) and convert to string"""
         try:
-            if isinstance(file, str):
-                doc = docx.Document(file)
+            file_content = await get_file_content(file)
+            
+            # Create a fresh BytesIO object for docx.Document
+            if hasattr(file_content, 'read'):
+                content = file_content.read()
             else:
-                # Handle FastAPI UploadFile or BytesIO
-                if hasattr(file, 'file'):
-                    file = file.file
+                content = file_content
                 
-                # Ensure we're at the start of the file
-                if hasattr(file, 'seek'):
-                    file.seek(0)
-                
-                # Read the content into a BytesIO object
-                content = file.read()
-                
-                # Create a fresh BytesIO object for docx.Document
-                docx_file = io.BytesIO(content)
-                doc = docx.Document(docx_file)
-                
+            docx_file = io.BytesIO(content)
+            doc = docx.Document(docx_file)
             return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
         except Exception as e:
             raise ValueError(f"Error processing DOCX file: {str(e)}")
 
-    async def process_image(self, file: Union[BinaryIO, str], output_path: str = None, query: str = None, input_data: List[FileDataInfo] = None) -> Tuple[str, str]:
+    async def process_image(
+        self, 
+        file: Union[BinaryIO, str, FileUploadMetadata], 
+        output_path: str = None,
+        query: str = None,
+        input_data: List[FileDataInfo] = None
+    ) -> Tuple[str, str]:
         """Process image files and extract content using vision processing"""
         try:
             # Check limits before processing
             if self.supabase and self.user_id:
                 await self.check_image_processing_limits(self.supabase, self.user_id)
             
-            # Process the image file
-            if isinstance(file, str):
-                img = Image.open(file)
-                image_path = file
-            else:
-                try:
-                    if hasattr(file, 'read'):
-                        content = file.read()
-                        if not isinstance(content, bytes):
-                            raise ValueError("Invalid image content")
-                        img = Image.open(io.BytesIO(content))
-                    else:
-                        img = Image.open(file)
-                except Exception:
-                    raise ValueError("Unable to read image file")
-
+            # Get file content
+            file_content = await get_file_content(file)
+            
             # Create a temporary directory if output_path is None
             if output_path is None:
                 temp_dir = temp_file_manager.get_temp_dir()
                 output_path = str(temp_dir / "temp_image.jpeg")
-
+            
+            # Process the image
+            if hasattr(file_content, 'read'):
+                content = file_content.read()
+                img = Image.open(io.BytesIO(content))
+            else:
+                img = Image.open(file_content)
+            
             # Convert PNG to JPEG if needed
-            new_path = None
             if img.format == 'PNG':
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGB')
                 img.save(output_path, 'JPEG')
-                new_path = output_path
-                image_path = new_path
             else:
-                # Save the original file if it wasn't converted
-                image_path = output_path
-                with open(image_path, 'wb') as f:
-                    if isinstance(file, str):
-                        with open(file, 'rb') as src:
+                # Save the original file
+                with open(output_path, 'wb') as f:
+                    if isinstance(file_content, str):
+                        with open(file_content, 'rb') as src:
                             f.write(src.read())
                     else:
-                        file.seek(0)
-                        f.write(file.read())
-
+                        file_content.seek(0)
+                        f.write(file_content.read())
+            
             # Process with vision using LLM service
             provider, vision_result = await self.llm_service.execute_with_fallback(
                 "process_image_with_vision",
-                image_path=image_path,
+                image_path=output_path,
                 query=query,
                 input_data=input_data
             )
@@ -289,7 +229,7 @@ class FilePreprocessor:
             # Increment the image counter
             self.num_images_processed += 1
 
-            return vision_result["content"] if isinstance(vision_result, dict) else vision_result
+            return vision_result["content"] if isinstance(vision_result, dict) else vision_result, output_path
 
         except Exception as e:
             raise ValueError(e)
@@ -359,32 +299,28 @@ class FilePreprocessor:
 
     async def process_pdf(
         self, 
-        file: Union[BinaryIO, str], 
-        output_path: str = None, 
-        query: str = None, 
+        file: Union[BinaryIO, str, FileUploadMetadata], 
+        output_path: str = None,
+        query: str = None,
         input_data: List[FileDataInfo] = None,
         page_range: Optional[tuple[int, int]] = None,
     ) -> Tuple[str, str, bool]:
-        """Process PDF files and convert to string if readable, otherwise handle with vision"""
-        doc = None
-        temp_path = None
+        """Process PDF files and extract content"""
         try:
-
-            # Create a temporary file if we received a file object
-            if not isinstance(file, str):
-                try:
-                    # Read the entire content at once and store it
-                    if hasattr(file, 'read'):
-                        file.seek(0)  # Reset file position to start
-                        content = file.read()
-                        if not content:
-                            raise ValueError("Empty PDF file")
-                    else:
-                        content = file
-                    
-                    # Create a temporary file with the content
-                    temp_path = temp_file_manager.save_temp_file(content, "temp.pdf")
-                    pdf_path = str(temp_path)
+            # Get file content
+            file_content = await get_file_content(file)
+            
+            # Save to temporary file
+            temp_path = await temp_file_manager.save_temp_file(file_content, "temp.pdf")
+            
+            try:
+                # Check if PDF is image-like
+                is_image_like = await pdf_classifier(temp_path)
+                
+                if is_image_like:
+                    # Process as image
+                    if self.supabase and self.user_id:
+                        await self.check_image_processing_limits(self.supabase, self.user_id)
                     
                 except Exception as e:
                     logging.error(f"Error reading PDF file: {str(e)}")
@@ -688,10 +624,7 @@ async def preprocess_files(
     return processed_data, preprocessor.num_images_processed
 
 async def determine_pdf_page_count(file: UploadFile) -> int:
-    """
-    Determines the page count of a PDF file.
-    Returns 0 if the file is not a PDF.
-    """
+    """Determines the page count of a PDF file"""
     if not file.content_type == "application/pdf":
         return 0
         
@@ -708,7 +641,6 @@ async def determine_pdf_page_count(file: UploadFile) -> int:
     except Exception as e:
         logger.error(f"Error determining PDF page count: {str(e)}")
         return 0
-
 
 async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_pages: int = 1) -> None:
     """

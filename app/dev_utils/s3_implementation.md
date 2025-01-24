@@ -1,7 +1,7 @@
 ## S3 Implementation - Transitioning from Local File Storage to Amazon S3
 
 ### Overview
-Transitioning from local file storage to S3-based storage to handle large files (up to 350MB) efficiently using streaming approaches.
+Transitioning from local file storage to S3-based storage to handle large files (up to 350MB) efficiently using streaming approaches.  Greater than 100KB files will not be passed directly to this back end anymore.  Instead, their s3 keys and urls will be present in the attributes of the items in the list of FileUploadMetadata objects.
 
 ### Core Components
 
@@ -26,6 +26,19 @@ Transitioning from local file storage to S3-based storage to handle large files 
      - `get_streaming_body`: Get streaming access to S3 files
      - `stream_download`: Stream files from S3
      - `get_file_range`: Get specific byte ranges for large files
+
+3. **New FileUploadMetadata Schema**
+        class FileUploadMetadata(BaseModel):
+        """Metadata about an uploaded file from frontend"""
+        name: str
+        type: str  # MIME type
+        extension: str
+        size: int
+        index: int
+        file_id: Optional[str] = None  
+        page_count: Optional[int] = None  
+        s3Key: Optional[str] = None #newly added
+        s3Url: Optional[str] = None #newly added
 
 ### Implementation Notes
 
@@ -72,7 +85,7 @@ Functionality Note: This backend python project receives front end payloads that
    - [ ] Configure bucket policies for security
 
 2. **Logic Update**
-   - [ ] The FilesUploadMetadata object passed to the entry endpoint now has attributes s3_key and s3_url if the itme is an s3 file.  Indexing has been maintained from the front end so file like objects will still have the same index as their associated metadata, but S3 files will have an index that is not associated with a file like object -- instead the s3 key and s3 url will be populated.  Adjust logic in process_query endpoint and preprocessor to account for this new s3 non-S3 differentiation in the payload passed to the entry endpoint.
+   - [ ] The FileUploadMetadata object passed to the entry endpoint now has attributes s3_key and s3_url if the file is an s3 file(>100KB).  Indexing has been maintained from the front end so file like objects will still have the same index as their associated metadata, but S3 files will have an index that is not associated with a file like object -- instead the s3 key and s3 url in that metadata list item will be populated.  Adjust logic in process_query endpoint and preprocessor accordingly, including changing function arguments and parameters if necessary.
 
 
 3. **Code Migration 1: Integrate with s3_file_actions.py**

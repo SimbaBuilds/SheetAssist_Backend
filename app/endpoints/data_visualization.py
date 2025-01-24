@@ -13,15 +13,18 @@ from app.utils.connection_and_status import check_client_connection
 from app.utils.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
 from app.utils.s3_file_management import temp_file_manager
+from app.utils.s3_file_actions import S3FileManager
 from app.schemas import FileUploadMetadata, InputUrl
 import os
 import base64
+import io
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+s3_file_manager = S3FileManager()
 
 class VisualizationOptions(BaseModel):
     color_palette: str
@@ -37,6 +40,8 @@ class VisualizationSuccessResponse(BaseModel):
     image_data: str = None # base64 encoded image
     generated_image_name: str = None
     message: str = "Visualization generated successfully"
+    s3_key: Optional[str] = None
+    s3_url: Optional[str] = None
 
 class VisualizationErrorResponse(BaseModel):
     success: bool = False
@@ -58,7 +63,6 @@ async def create_visualization(
     try:
         # Parse request data
         request_data = DataVisualizationRequest(**json.loads(json_data))
-        logger.info(f"Request data: {request_data}")
         logger.info(f"Processing visualization for user {user_id}")
         
         # Initial connection check
@@ -67,10 +71,51 @@ async def create_visualization(
         # Create temporary directory for session
         session_dir = temp_file_manager.get_temp_dir()
 
+        # Store file contents in memory
+        files_data = []
+        for i, file_meta in enumerate(request_data.files_metadata or []):
+            try:
+                if file_meta.s3Key:
+                    # Handle S3 files
+                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                    files_data.append({
+                        'content': file_content.read(),
+                        'filename': file_meta.name,
+                        'content_type': file_meta.type
+                    })
+                else:
+                    # Handle regular files
+                    file = files[file_meta.index]
+                    content = await file.read()
+                    await file.seek(0)
+                    files_data.append({
+                        'content': content,
+                        'filename': file.filename,
+                        'content_type': file.content_type
+                    })
+            except Exception as e:
+                logger.error(f"Error reading file {file_meta.name}: {str(e)}")
+                return VisualizationErrorResponse(
+                    success=False,
+                    error=str(e),
+                    message=f"Failed to read file {file_meta.name}"
+                )
+
+        # Create new UploadFile objects for preprocessing
+        upload_files = []
+        for file_data in files_data:
+            file_obj = io.BytesIO(file_data['content'])
+            upload_file = UploadFile(
+                file=file_obj,
+                filename=file_data['filename'],
+                headers={'content-type': file_data['content_type']}
+            )
+            upload_files.append(upload_file)
+
         try:
             # Preprocess files/urls to get dataframe
             preprocessed_data, _ = await preprocess_files(
-                files=files,
+                files=upload_files,
                 files_metadata=request_data.files_metadata,
                 input_urls=request_data.input_urls,
                 query=request_data.options.custom_instructions,
@@ -84,8 +129,7 @@ async def create_visualization(
             return VisualizationErrorResponse(
                 success=False,
                 error=str(preprocess_error),
-                message="Failed to preprocess input files",
-                image_data=None
+                message="Failed to preprocess input files"
             )
             
         await check_client_connection(request)
@@ -108,8 +152,7 @@ async def create_visualization(
             return VisualizationErrorResponse(
                 success=False,
                 error=str(viz_error),
-                message="Failed to generate visualization",
-                image_data=None
+                message="Failed to generate visualization"
             )
 
         await check_client_connection(request)
@@ -125,16 +168,34 @@ async def create_visualization(
         )
         generated_image_name = f"{generated_image_name[1]}.png"  # Add .png extension to the generated name
 
-        # Save the image to a temporary file
-        temp_image_path = os.path.join(session_dir, generated_image_name)
-        with open(temp_image_path, "wb") as f:
-            f.write(buf.getvalue())
+        # Save to S3 if the image is large
+        s3_key = None
+        s3_url = None
+        if len(image_data) > 100 * 1024:  # If larger than 100KB
+            try:
+                s3_key = f"visualizations/{user_id}/{generated_image_name}"
+                await s3_file_manager.stream_upload(io.BytesIO(buf.getvalue()), s3_key)
+                s3_url = s3_file_manager.get_presigned_url(s3_key)
+                image_data = None  # Don't send the base64 data if we have S3
+            except Exception as s3_error:
+                logger.error(f"S3 upload error: {str(s3_error)}")
+                # Continue with base64 if S3 upload fails
+                s3_key = None
+                s3_url = None
+
+        # Save locally only if not in S3
+        if not s3_key:
+            temp_image_path = os.path.join(session_dir, generated_image_name)
+            with open(temp_image_path, "wb") as f:
+                f.write(buf.getvalue())
 
         return VisualizationSuccessResponse(
             success=True,
             image_data=image_data,
             generated_image_name=generated_image_name,
-            message="Visualization generated successfully"
+            message="Visualization generated successfully",
+            s3_key=s3_key,
+            s3_url=s3_url
         )
 
     except Exception as e:
@@ -143,6 +204,5 @@ async def create_visualization(
         return VisualizationErrorResponse(
             success=False,
             error=error_msg,
-            message="An unexpected error occurred while creating the visualization",
-            image_data=None
+            message="An unexpected error occurred while creating the visualization"
         )
