@@ -1,6 +1,4 @@
-from fastapi import HTTPException
-from typing import Tuple, Any, Dict, List, Optional
-from functools import lru_cache
+from typing import Tuple, Any, Dict, List, Optional, Union, BinaryIO, AsyncGenerator
 from openai import OpenAI
 from anthropic import Anthropic
 import logging
@@ -10,7 +8,6 @@ from app.utils.system_prompts import gen_from_query_prompt, gen_from_query_promp
 import httpx
 from PIL import Image
 import io
-from typing import Dict, List, Union, Tuple
 import httpx
 from openai import OpenAI
 from app.schemas import FileDataInfo
@@ -19,18 +16,22 @@ import base64
 from pathlib import Path
 import os
 import fitz
-from dotenv import load_dotenv
 import asyncio
-from app.utils.s3_file_actions import s3_file_manager
+from app.utils.s3_file_actions import s3_file_actions
+from app.utils.s3_file_management import temp_file_manager
+import gc
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-# Add at the top of the file, after imports
-load_dotenv(override=True)
+
 
 # Default values for environment variables
 MAX_SNAPSHOT_LENGTH = int(os.getenv("MAX_SNAPSHOT_LENGTH", "2000"))
 MAX_VISION_OUTPUT_TOKENS = int(os.getenv("MAX_VISION_OUTPUT_TOKENS", "3000"))
 DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
+
 
 def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
     input_data_snapshot = ""
@@ -40,55 +41,266 @@ def build_input_data_snapshot(input_data: List[FileDataInfo]) -> str:
     return input_data_snapshot
 
 
-class OpenaiVisionProcessor  :
-    def __init__(self, openai_client: OpenAI = None):
+class BaseVisionProcessor:
+    """Base class for vision processing with common PDF handling logic"""
+    
+    async def process_pdf_with_vision(
+        self, 
+        pdf_path: str = None,
+        s3_key: str = None,
+        query: str = None, 
+        input_data: List[FileDataInfo] = None,
+        page_range: Optional[tuple[int, int]] = None,
+        use_s3: bool = False,
+        stream: BinaryIO = None
+    ) -> Dict[str, str]:
+        """Process PDF with Vision API - common logic for both providers"""
+        try:
+            if use_s3 and s3_key:
+                return await self._process_s3_pdf(s3_key, query, input_data, page_range)
+            elif stream:
+                return await self._process_stream_pdf(stream, query, input_data, page_range)
+            elif pdf_path:
+                return await self._process_local_pdf(pdf_path, query, input_data, page_range)
+            else:
+                raise ValueError("Either pdf_path, s3_key, or stream must be provided")
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
 
-        self.client = openai_client 
+    async def _process_s3_pdf(self, s3_key: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]]) -> Dict[str, str]:
+        """Process PDF stored in S3 one page at a time"""
+        all_page_content = []
+        input_data_snapshot = build_input_data_snapshot(input_data)
+        stream = None
+        doc = None
+        
+        try:
+            # Get S3 object stream
+            response = await asyncio.to_thread(
+                s3_file_actions.s3_client.get_object,
+                Bucket=s3_file_actions.bucket,
+                Key=s3_key
+            )
+            stream = response['Body']
+            
+            # Open PDF stream without loading entire file
+            doc = fitz.open(stream=stream, filetype="pdf")
+            total_pages = len(doc)
+            
+            # Determine page range
+            start_page = int(page_range[0]) if page_range else 0
+            end_page = min(int(page_range[1]), total_pages) if page_range else total_pages
+            
+            for page_num in range(start_page, end_page):
+                try:
+                    # Load and process one page at a time
+                    page = doc.load_page(page_num)
+                    pix = page.get_pixmap()
+                    img_bytes = pix.tobytes()
+                    b64_page = base64.b64encode(img_bytes).decode()
+                    
+                    # Process with provider-specific vision API
+                    page_content = await self._process_single_page(
+                        b64_page,
+                        query,
+                        input_data_snapshot,
+                        page_num + 1,
+                        total_pages
+                    )
+                    
+                    all_page_content.append(f"[Page {page_num + 1} of {total_pages}]\n{page_content}")
+                    
+                finally:
+                    # Clean up page resources immediately
+                    if pix:
+                        pix = None
+                    if page:
+                        page = None
+                    # Force garbage collection after each page
+                    gc.collect()
+                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+            
+            return {
+                "status": "completed",
+                "content": "\n\n".join(all_page_content)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to process PDF from S3: {str(e)}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+        finally:
+            # Clean up all resources
+            if doc:
+                doc.close()
+            if stream:
+                await asyncio.to_thread(stream.close)
+
+    async def _process_local_pdf(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]]) -> Dict[str, str]:
+        """Process local PDF file one page at a time"""
+        if not os.path.exists(pdf_path):
+            raise ValueError(f"PDF file not found at path: {pdf_path}")
+            
+        stream = None
+        doc = None
+        all_page_content = []
+        
+        input_data_snapshot = build_input_data_snapshot(input_data)
+        
+        try:
+            # Open file as stream
+            stream = open(pdf_path, 'rb')
+            doc = fitz.open(stream=stream, filetype="pdf")
+            
+            # Determine page range
+            start_page = int(page_range[0]) if page_range else 0
+            end_page = min(int(page_range[1]), len(doc)) if page_range else len(doc)
+            
+            for page_num in range(start_page, end_page):
+                try:
+                    # Load and process one page at a time
+                    page = doc.load_page(page_num)
+                    pix = page.get_pixmap()
+                    img_bytes = pix.tobytes()
+                    b64_page = base64.b64encode(img_bytes).decode()
+                    
+                    # Process with provider-specific vision API
+                    page_content = await self._process_single_page(
+                        b64_page,
+                        query,
+                        input_data_snapshot,
+                        page_num + 1,
+                        len(doc)
+                    )
+                    
+                    all_page_content.append(f"[Page {page_num + 1} of {len(doc)}]\n{page_content}")
+                    
+                finally:
+                    # Clean up page resources immediately
+                    if pix:
+                        pix = None
+                    if page:
+                        page = None
+                    # Force garbage collection after each page
+                    gc.collect()
+                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+        
+        finally:
+            # Clean up all resources
+            if doc:
+                doc.close()
+            if stream:
+                stream.close()
+        
+        return {
+            "status": "completed",
+            "content": "\n\n".join(all_page_content)
+        }
+
+    async def _process_stream_pdf(self, stream: BinaryIO, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]]) -> Dict[str, str]:
+        """Process PDF from a stream one page at a time"""
+        all_page_content = []
+        input_data_snapshot = build_input_data_snapshot(input_data)
+        doc = None
+        
+        try:
+            # Open PDF stream without loading entire file
+            doc = fitz.open(stream=stream, filetype="pdf")
+            total_pages = len(doc)
+            
+            # Determine page range
+            start_page = int(page_range[0]) if page_range else 0
+            end_page = min(int(page_range[1]), total_pages) if page_range else total_pages
+            
+            for page_num in range(start_page, end_page):
+                try:
+                    # Load and process one page at a time
+                    page = doc.load_page(page_num)
+                    pix = page.get_pixmap()
+                    img_bytes = pix.tobytes()
+                    b64_page = base64.b64encode(img_bytes).decode()
+                    
+                    # Process with provider-specific vision API
+                    page_content = await self._process_single_page(
+                        b64_page,
+                        query,
+                        input_data_snapshot,
+                        page_num + 1,
+                        total_pages
+                    )
+                    
+                    all_page_content.append(f"[Page {page_num + 1} of {total_pages}]\n{page_content}")
+                    
+                finally:
+                    # Clean up page resources immediately
+                    if pix:
+                        pix = None
+                    if page:
+                        page = None
+                    # Force garbage collection after each page
+                    gc.collect()
+                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+            
+            return {
+                "status": "completed",
+                "content": "\n\n".join(all_page_content)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to process PDF from stream: {str(e)}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+        finally:
+            # Clean up doc but don't close stream (caller's responsibility)
+            if doc:
+                doc.close()
+
+    async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
+        """Process a single page - to be implemented by provider-specific classes"""
+        raise NotImplementedError
+
+
+class OpenaiVisionProcessor(BaseVisionProcessor):
+    def __init__(self, openai_client: OpenAI = None):
+        self.client = openai_client
 
     def image_to_base64(self, image_path: str) -> str:
         """Convert image file to base64 string"""
         with open(image_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
-    def pdf_page_to_base64(self, pdf_path: str, page_num: int = 0) -> str:
-        """Convert a PDF page to base64 string
-        
-        Args:
-            pdf_path: Path to the PDF file
-            page_num: Page number to convert (0-based)
-            
-        Returns:
-            str: Base64 encoded string of the PDF page as JPEG
-        """
+    async def process_image_with_vision(
+        self, 
+        image_path: str = None,
+        s3_key: str = None,
+        query: str = None, 
+        input_data: List[FileDataInfo] = None,
+        use_s3: bool = False
+    ) -> dict:
+        """Process image with GPT-4 Vision API"""
         try:
-            doc = fitz.open(pdf_path)
-            page = doc[page_num]
-            
-            # Get the page's pixmap (image)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
-            
-            # Convert pixmap to PIL Image
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
-            # Convert PIL Image to base64
-            buffered = io.BytesIO()
-            img.save(buffered, format="JPEG", quality=95)
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
-            
-            doc.close()
-            return img_base64
-            
-        except Exception as e:
-            raise ValueError(f"Error converting PDF page to base64: {str(e)}")
-
-    async def process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> dict:
-        """Process image with GPT-4o Vision API"""
-        try:
-            # Check if image_path exists
-            if not os.path.exists(image_path):
-                raise ValueError(f"Image file not found at path: {image_path}")
-                
-            b64_image = self.image_to_base64(image_path)
+            if use_s3 and s3_key:
+                # Get metadata to get content length
+                metadata = await temp_file_manager.get_file_metadata(s3_key)
+                if not metadata:
+                    raise ValueError(f"Could not get metadata for S3 key: {s3_key}")
+                content_length = int(metadata.get('ContentLength', 0))
+                # Get entire file content
+                image_data = await s3_file_actions.get_file_range(s3_key, 0, content_length - 1)
+                b64_image = base64.b64encode(image_data).decode()
+            else:
+                # Check if image_path exists
+                if not os.path.exists(image_path):
+                    raise ValueError(f"Image file not found at path: {image_path}")
+                    
+                b64_image = self.image_to_base64(image_path)
             
             input_data_snapshot = build_input_data_snapshot(input_data)
             
@@ -141,205 +353,115 @@ class OpenaiVisionProcessor  :
                 "error": str(e)
             }
 
-    async def process_pdf_with_vision(
-        self, 
-        pdf_path: str = None,
-        s3_key: str = None,
-        query: str = None, 
-        input_data: List[FileDataInfo] = None,
-        page_range: Optional[tuple[int, int]] = None,
-        use_s3: bool = False
-    ) -> Dict[str, str]:
-        """Process PDF with GPT-4 Vision API"""
+    async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
         try:
-            if use_s3 and s3_key:
-                # Stream pages from S3
-                all_page_content = []
-                input_data_snapshot = build_input_data_snapshot(input_data)
+            # Convert base64 to image bytes
+            image_bytes = base64.b64decode(b64_page)
+            
+            # Create PIL Image from bytes
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                # Convert to RGB if necessary
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
                 
-                async for page_data in s3_file_manager.stream_pdf_by_page(s3_key, 
-                    start_page=page_range[0] if page_range else None,
-                    end_page=page_range[1] if page_range else None):
-                    
-                    # Convert page data to base64
-                    b64_page = base64.b64encode(page_data['content']).decode()
-                    
-                    # Process with vision API
-                    completion = await asyncio.to_thread(
-                        self.client.chat.completions.create,
-                        model=os.getenv("OPENAI_MAIN_MODEL"),
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
-                                        Extract only the relevant information from the image based on the query and data.
-                                        If formatting in the image provides information, indicate as much in your response 
-                                        (e.g. large text at the top of the image: title: [large text], 
-                                        tabular data: table: [tabular data], etc...).
-                                        Query and input data snapshot below in triple backticks.
-                                        ```Query: {query} 
-                                        Input Data Snapshot: 
-                                        {input_data_snapshot}
-                                        ```
-                                        """
-                                    },
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:image/jpeg;base64,{b64_page}"
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        max_tokens=MAX_VISION_OUTPUT_TOKENS
-                    )
-                    
-                    page_content = completion.choices[0].message.content
-                    print(f"""\n -------LLM called with query: {query} on page: {page_data['page_number']} of {page_data['total_pages']} ------- \n\n
-                    Input data snapshot:\n {input_data_snapshot}
-                    Page Content:\n {page_content}\n
-                    """)
-                    
-                    all_page_content.append(f"[Page {page_data['page_number']} of {page_data['total_pages']}]\n{page_content}")
-                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+                # Save as JPEG to a new bytes buffer
+                jpeg_buffer = io.BytesIO()
+                img.save(jpeg_buffer, format='JPEG', quality=95)
+                jpeg_buffer.seek(0)
                 
-                return {
-                    "status": "completed",
-                    "content": "\n\n".join(all_page_content)
-                }
-                
-            else:
-                # Use existing local file processing
-                if not os.path.exists(pdf_path):
-                    raise ValueError(f"PDF file not found at path: {pdf_path}")
-                    
-                doc = fitz.open(pdf_path)
-                all_page_content = []
-                
-                input_data_snapshot = build_input_data_snapshot(input_data)
-                
-                # Determine page range
-                start_page = int(page_range[0]) if page_range else 0
-                end_page = min(int(page_range[1]), len(doc)) if page_range else len(doc)
-                
-                for page_num in range(start_page, end_page):
-                    b64_page = self.pdf_page_to_base64(pdf_path, page_num)
-                    
-                    completion = await asyncio.to_thread(
-                        self.client.chat.completions.create,
-                        model=os.getenv("OPENAI_MAIN_MODEL"),
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
-                                        Extract only the relevant information from the image based on the query and data.
-                                        If formatting in the image provides information, indicate as much in your response 
-                                        (e.g. large text at the top of the image: title: [large text], 
-                                        tabular data: table: [tabular data], etc...).
-                                        Query and input data snapshot below in triple backticks.
-                                        ```Query: {query} 
-                                        Input Data Snapshot: 
-                                        {input_data_snapshot}
-                                        ```
-                                        """
-                                    },
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:image/jpeg;base64,{b64_page}"
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        max_tokens=MAX_VISION_OUTPUT_TOKENS
-                    )
-                    
-                    page_content = completion.choices[0].message.content
-                    print(f"""\n -------LLM called with query: {query} on page: {page_num + 1} of {end_page - start_page} ------- \n\n
-                    Input data snapshot:\n {input_data_snapshot}
-                    Page Content:\n {page_content}\n
-                    """)
-                    
-                    all_page_content.append(f"[Page {page_num + 1} of {len(doc)}]\n{page_content}")
-                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
-                
-                doc.close()
-                
-                return {
-                    "status": "completed",
-                    "content": "\n\n".join(all_page_content)
-                }
+                # Convert JPEG bytes to base64
+                jpeg_b64 = base64.b64encode(jpeg_buffer.getvalue()).decode('utf-8')
 
+            completion = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=os.getenv("OPENAI_MAIN_MODEL"),
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
+                                Extract only the relevant information from the image based on the query and data.
+                                If formatting in the image provides information, indicate as much in your response 
+                                (e.g. large text at the top of the image: title: [large text], 
+                                tabular data: table: [tabular data], etc...).
+                                Query and input data snapshot below in triple backticks.
+                                ```Query: {query} 
+                                Input Data Snapshot: 
+                                {input_data_snapshot}
+                                ```
+                                """
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{jpeg_b64}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=MAX_VISION_OUTPUT_TOKENS
+            )
+            
+            page_content = completion.choices[0].message.content
+            print(f"""\n -------LLM called with query: {query} on page: {page_number} of {total_pages} ------- \n\n
+            Input data snapshot:\n {input_data_snapshot}
+            Page Content:\n {page_content}\n
+            """)
+            
+            return page_content
+            
         except Exception as e:
-            return {
-                "status": "error",
-                "error": str(e)
-            }
+            logging.error(f"Error processing PDF page with vision: {str(e)}")
+            raise ValueError(f"Failed to process PDF page: {str(e)}")
 
 
-class AnthropicVisionProcessor  :
+class AnthropicVisionProcessor(BaseVisionProcessor):
     def __init__(self, anthropic_client: Anthropic = None):
-
-        self.client = anthropic_client 
+        self.client = anthropic_client
 
     def image_to_base64(self, image_path: str) -> str:
         """Convert image file to base64 string"""
         with open(image_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
-    def pdf_page_to_base64(self, pdf_path: str, page_num: int = 0) -> str:
-        """Convert a PDF page to base64 string
-        
-        Args:
-            pdf_path: Path to the PDF file
-            page_num: Page number to convert (0-based)
-            
-        Returns:
-            str: Base64 encoded string of the PDF page as JPEG
-        """
-        try:
-            doc = fitz.open(pdf_path)
-            page = doc[page_num]
-            
-            # Get the page's pixmap (image)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
-            
-            # Convert pixmap to PIL Image
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
-            # Convert PIL Image to base64
-            buffered = io.BytesIO()
-            img.save(buffered, format="JPEG", quality=95)
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
-            
-            doc.close()
-            return img_base64
-            
-        except Exception as e:
-            raise ValueError(f"Error converting PDF page to base64: {str(e)}")
-
-    async def process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> dict:
+    async def process_image_with_vision(
+        self, 
+        image_path: str = None,
+        s3_key: str = None,
+        query: str = None, 
+        input_data: List[FileDataInfo] = None,
+        use_s3: bool = False
+    ) -> dict:
         """Process image with Claude 3 Vision API"""
         try:
-            # Check if image_path exists
-            if not os.path.exists(image_path):
-                raise ValueError(f"Image file not found at path: {image_path}")
+            if use_s3 and s3_key:
+                # Get metadata to get content length
+                metadata = await temp_file_manager.get_file_metadata(s3_key)
+                if not metadata:
+                    raise ValueError(f"Could not get metadata for S3 key: {s3_key}")
+                content_length = int(metadata.get('ContentLength', 0))
+                # Get entire file content
+                image_data = await s3_file_actions.get_file_range(s3_key, 0, content_length - 1)
+                image_data_b64 = base64.b64encode(image_data).decode("utf-8")
+                # Determine media type from S3 key
+                media_type = f"image/{Path(s3_key).suffix[1:].lower()}"
+                if media_type == "image/jpg":
+                    media_type = "image/jpeg"
+            else:
+                # Check if image_path exists
+                if not os.path.exists(image_path):
+                    raise ValueError(f"Image file not found at path: {image_path}")
+                    
+                with open(image_path, "rb") as image_file:
+                    image_data_b64 = base64.b64encode(image_file.read()).decode("utf-8")
                 
-            with open(image_path, "rb") as image_file:
-                image_data = base64.b64encode(image_file.read()).decode("utf-8")
-            
-            # Determine media type based on file extension
-            media_type = f"image/{Path(image_path).suffix[1:].lower()}"
-            if media_type == "image/jpg":
-                media_type = "image/jpeg"
+                # Determine media type based on file extension
+                media_type = f"image/{Path(image_path).suffix[1:].lower()}"
+                if media_type == "image/jpg":
+                    media_type = "image/jpeg"
 
             input_data_snapshot = build_input_data_snapshot(input_data)
             
@@ -355,7 +477,7 @@ class AnthropicVisionProcessor  :
                                 "source": {
                                     "type": "base64",
                                     "media_type": media_type,
-                                    "data": image_data,
+                                    "data": image_data_b64,
                                 },
                             },
                             {
@@ -374,7 +496,7 @@ class AnthropicVisionProcessor  :
                             }
                         ],
                     }
-                ],
+                ]
             )
             
             return {
@@ -394,153 +516,72 @@ class AnthropicVisionProcessor  :
                 "error": str(e)
             }
 
-    async def process_pdf_with_vision(
-        self, 
-        pdf_path: str = None,
-        s3_key: str = None,
-        query: str = None, 
-        input_data: List[FileDataInfo] = None,
-        page_range: Optional[tuple[int, int]] = None,
-        use_s3: bool = False
-    ) -> Dict[str, str]:
-        """Process PDF with Claude 3 Vision API"""
+    async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
         try:
-            if use_s3 and s3_key:
-                # Stream pages from S3
-                all_page_content = []
-                input_data_snapshot = build_input_data_snapshot(input_data)
+            # Convert base64 to image bytes
+            image_bytes = base64.b64decode(b64_page)
+            
+            # Create PIL Image from bytes
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                # Convert to RGB if necessary
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
                 
-                async for page_data in s3_file_manager.stream_pdf_by_page(s3_key, 
-                    start_page=page_range[0] if page_range else None,
-                    end_page=page_range[1] if page_range else None):
-                    
-                    # Convert page data to base64
-                    b64_page = base64.b64encode(page_data['content']).decode()
-                    
-                    # Process with vision API
-                    message = await asyncio.to_thread(
-                        self.client.messages.create,
-                        model=os.getenv("ANTHROPIC_MAIN_MODEL"),
-                        max_tokens=1024,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": "image/jpeg",
-                                            "data": b64_page,
-                                        },
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
-                                        Extract only the relevant information from the image based on the query and data.
-                                        If formatting in the image provides information, indicate as much in your response 
-                                        (e.g. large text at the top of the image: title: [large text], 
-                                        tabular data: table: [tabular data], etc...).
-                                        Query and input data snapshot below in triple backticks.
-                                        ```Query: {query} 
-                                        Input Data Snapshot: 
-                                        {input_data_snapshot}
-                                        ```
-                                        """
-                                    }
-                                ],
-                            }
-                        ],
-                    )
-                    
-                    page_content = message.content[0].text
-                    print(f"""\n -------LLM called with query: {query} on page: {page_data['page_number']} of {page_data['total_pages']} ------- \n\n
-                    Input data snapshot:\n {input_data_snapshot}
-                    Page Content:\n {page_content}\n
-                    """)
-                    
-                    all_page_content.append(f"[Page {page_data['page_number']} of {page_data['total_pages']}]\n{page_content}")
-                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+                # Save as JPEG to a new bytes buffer
+                jpeg_buffer = io.BytesIO()
+                img.save(jpeg_buffer, format='JPEG', quality=95)
+                jpeg_buffer.seek(0)
                 
-                return {
-                    "status": "completed",
-                    "content": "\n\n".join(all_page_content)
-                }
-                
-            else:
-                # Use existing local file processing
-                if not os.path.exists(pdf_path):
-                    raise ValueError(f"PDF file not found at path: {pdf_path}")
-                    
-                doc = fitz.open(pdf_path)
-                all_page_content = []
-                
-                input_data_snapshot = build_input_data_snapshot(input_data)
-                
-                # Determine page range
-                start_page = int(page_range[0]) if page_range else 0
-                end_page = min(int(page_range[1]), len(doc)) if page_range else len(doc)
-                
-                for page_num in range(start_page, end_page):
-                    b64_page = self.pdf_page_to_base64(pdf_path, page_num)
-                    
-                    message = await asyncio.to_thread(
-                        self.client.messages.create,
-                        model=os.getenv("ANTHROPIC_MAIN_MODEL"),
-                        max_tokens=1024,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": "image/jpeg",
-                                            "data": b64_page,
-                                        },
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
-                                        Extract only the relevant information from the image based on the query and data.
-                                        If formatting in the image provides information, indicate as much in your response 
-                                        (e.g. large text at the top of the image: title: [large text], 
-                                        tabular data: table: [tabular data], etc...).
-                                        Query and input data snapshot below in triple backticks.
-                                        ```Query: {query} 
-                                        Input Data Snapshot: 
-                                        {input_data_snapshot}
-                                        ```
-                                        """
-                                    }
-                                ],
-                            }
-                        ],
-                    )
-                    
-                    page_content = message.content[0].text
-                    print(f"""\n -------LLM called with query: {query} on page: {page_num + 1} of {end_page - start_page} ------- \n\n
-                    Input data snapshot:\n {input_data_snapshot}
-                    Page Content:\n {page_content}\n
-                    """)
-                    
-                    all_page_content.append(f"[Page {page_num + 1} of {len(doc)}]\n{page_content}")
-                    await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
-                
-                doc.close()
-                
-                return {
-                    "status": "completed",
-                    "content": "\n\n".join(all_page_content)
-                }
+                # Convert JPEG bytes to base64
+                jpeg_b64 = base64.b64encode(jpeg_buffer.getvalue()).decode('utf-8')
 
+            message = await asyncio.to_thread(
+                self.client.messages.create,
+                model=os.getenv("ANTHROPIC_MAIN_MODEL"),
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": jpeg_b64,
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
+                                Extract only the relevant information from the image based on the query and data.
+                                If formatting in the image provides information, indicate as much in your response 
+                                (e.g. large text at the top of the image: title: [large text], 
+                                tabular data: table: [tabular data], etc...).
+                                Query and input data snapshot below in triple backticks.
+                                ```Query: {query} 
+                                Input Data Snapshot: 
+                                {input_data_snapshot}
+                                ```
+                                """
+                            }
+                        ],
+                    }
+                ],
+            )
+            
+            page_content = message.content[0].text
+            print(f"""\n -------LLM called with query: {query} on page: {page_number} of {total_pages} ------- \n\n
+            Input data snapshot:\n {input_data_snapshot}
+            Page Content:\n {page_content}\n
+            """)
+            
+            return page_content
+            
         except Exception as e:
-            return {
-                "status": "error",
-                "error": str(e)
-            }
-        
+            logging.error(f"Error processing PDF page with vision: {str(e)}")
+            raise ValueError(f"Failed to process PDF page: {str(e)}")
+
 
 class LLMService:
     def __init__(self):
@@ -602,6 +643,7 @@ class LLMService:
 
 
     async def execute_with_fallback(self, operation: str, *args, **kwargs) -> Tuple[str, Any]:
+        """Execute a function with fallback to another provider if the first fails"""
         
         try:
             # Try default provider first
@@ -614,20 +656,17 @@ class LLMService:
             
         except Exception as e:
             # Handle other errors from default provider
-            logging.warning(f"{DEFAULT_LLM_PROVIDER} failed: {str(e)}. Falling back to alternate provider.")
+            logging.warning(f"{os.getenv('DEFAULT_LLM_PROVIDER')} failed: {str(e)}. Falling back to alternate provider.")
             try:
                 # Fallback to other provider
-                if DEFAULT_LLM_PROVIDER == "anthropic":
+                if os.getenv("DEFAULT_LLM_PROVIDER") == "anthropic":
                     result = await self._execute_openai(operation, *args, **kwargs)
                     return "openai", result
                 else:
                     result = await self._execute_anthropic(operation, *args, **kwargs)
                     return "anthropic", result
             except Exception as e2:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Both providers failed. {DEFAULT_LLM_PROVIDER}: {str(e)}, Fallback: {str(e2)}"
-                )
+                raise ValueError(f"Both providers failed. Primary error: {str(e)}. Fallback error: {str(e2)}")
 
     async def _execute_openai(self, operation: str, *args, **kwargs):
         if operation not in self._operation_map:
@@ -677,14 +716,22 @@ class LLMService:
 
     async def _openai_process_image_with_vision(
         self, 
-        image_path: str, 
-        query: str, 
-        input_data: List[FileDataInfo]
+        image_path: str = None, 
+        query: str = None, 
+        input_data: List[FileDataInfo] = None,
+        s3_key: str = None,
+        use_s3: bool = False
     ) -> Dict[str, str]:
         """Process image using OpenAI's vision API. Raises an exception on connection errors 
            so that the fallback logic is triggered."""
         processor = OpenaiVisionProcessor(self.openai_client)
-        result = await processor.process_image_with_vision(image_path, query, input_data)
+        result = await processor.process_image_with_vision(
+            image_path=image_path,
+            query=query,
+            input_data=input_data,
+            s3_key=s3_key,
+            use_s3=use_s3
+        )
 
         if result.get("status") == "error" and "connection error" in result.get("error", "").lower():
             import httpx
@@ -692,24 +739,48 @@ class LLMService:
 
         return result
 
-    async def _anthropic_process_image_with_vision(self, image_path: str, query: str, input_data: List[FileDataInfo]) -> Dict[str, str]:
+    async def _anthropic_process_image_with_vision(
+        self,
+        image_path: str = None,
+        query: str = None,
+        input_data: List[FileDataInfo] = None,
+        s3_key: str = None,
+        use_s3: bool = False
+    ) -> Dict[str, str]:
         """Process image using Anthropic's vision API"""
         processor = AnthropicVisionProcessor(self.anthropic_client)
-        return await processor.process_image_with_vision(image_path, query, input_data)
+        return await processor.process_image_with_vision(
+            image_path=image_path,
+            query=query,
+            input_data=input_data,
+            s3_key=s3_key,
+            use_s3=use_s3
+        )
 
     async def _openai_process_pdf_with_vision(
         self, 
-        pdf_path: str, 
-        query: str, 
-        input_data: List[FileDataInfo], 
-        page_range: Optional[tuple[int, int]] = None
+        pdf_path: str = None, 
+        query: str = None, 
+        input_data: List[FileDataInfo] = None, 
+        page_range: Optional[tuple[int, int]] = None,
+        s3_key: str = None,
+        use_s3: bool = False,
+        stream: BinaryIO = None
     ) -> Dict[str, str]:
         """Process PDF using OpenAI's vision API"""
         processor = OpenaiVisionProcessor(self.openai_client)
         # Ensure page_range values are integers if provided
         if page_range:
             page_range = (int(page_range[0]), int(page_range[1]))
-        result =  await processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
+        result = await processor.process_pdf_with_vision(
+            pdf_path=pdf_path,
+            s3_key=s3_key,
+            query=query,
+            input_data=input_data,
+            page_range=page_range,
+            use_s3=use_s3,
+            stream=stream
+        )
 
         # If the returned dict indicates an error related to connection, raise an actual exception
         if result.get("status") == "error" and "connection error" in result.get("error", "").lower():
@@ -721,17 +792,28 @@ class LLMService:
 
     async def _anthropic_process_pdf_with_vision(
         self, 
-        pdf_path: str, 
-        query: str, 
-        input_data: List[FileDataInfo], 
-        page_range: Optional[tuple[int, int]] = None
+        pdf_path: str = None, 
+        query: str = None, 
+        input_data: List[FileDataInfo] = None, 
+        page_range: Optional[tuple[int, int]] = None,
+        s3_key: str = None,
+        use_s3: bool = False,
+        stream: BinaryIO = None
     ) -> Dict[str, str]:
         """Process PDF using Anthropic's vision API"""
         processor = AnthropicVisionProcessor(self.anthropic_client)
         # Ensure page_range values are integers if provided
         if page_range:
             page_range = (int(page_range[0]), int(page_range[1]))
-        return await processor.process_pdf_with_vision(pdf_path, query, input_data, page_range)
+        return await processor.process_pdf_with_vision(
+            pdf_path=pdf_path,
+            s3_key=s3_key,
+            query=query,
+            input_data=input_data,
+            page_range=page_range,
+            use_s3=use_s3,
+            stream=stream
+        )
 
     
     

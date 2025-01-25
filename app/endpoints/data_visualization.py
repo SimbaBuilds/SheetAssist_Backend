@@ -13,18 +13,19 @@ from app.utils.connection_and_status import check_client_connection
 from app.utils.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import S3FileManager
+from app.utils.s3_file_actions import S3FileActions
 from app.schemas import FileUploadMetadata, InputUrl
 import os
 import base64
 import io
+import asyncio
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-s3_file_manager = S3FileManager()
+s3_file_actions = S3FileActions()
 
 class VisualizationOptions(BaseModel):
     color_palette: str
@@ -75,14 +76,16 @@ async def create_visualization(
         files_data = []
         for i, file_meta in enumerate(request_data.files_metadata or []):
             try:
-                if file_meta.s3Key:
+                if file_meta.s3_key:
                     # Handle S3 files
-                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                    stream = await s3_file_actions.get_streaming_body(file_meta.s3_key)
+                    content = await asyncio.to_thread(stream.read)
                     files_data.append({
-                        'content': file_content.read(),
+                        'content': content,
                         'filename': file_meta.name,
                         'content_type': file_meta.type
                     })
+                    await asyncio.to_thread(stream.close)
                 else:
                     # Handle regular files
                     file = files[file_meta.index]
@@ -174,8 +177,8 @@ async def create_visualization(
         if len(image_data) > 100 * 1024:  # If larger than 100KB
             try:
                 s3_key = f"visualizations/{user_id}/{generated_image_name}"
-                await s3_file_manager.stream_upload(io.BytesIO(buf.getvalue()), s3_key)
-                s3_url = s3_file_manager.get_presigned_url(s3_key)
+                await s3_file_actions.stream_upload(io.BytesIO(buf.getvalue()), s3_key)
+                s3_url = s3_file_actions.get_presigned_url(s3_key)
                 image_data = None  # Don't send the base64 data if we have S3
             except Exception as s3_error:
                 logger.error(f"S3 upload error: {str(s3_error)}")

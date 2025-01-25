@@ -23,8 +23,8 @@ class FileUploadMetadata(BaseModel):
     index: int
     file_id: Optional[str] = None  # Needed for batch processing file identification
     page_count: Optional[int] = None  # Number of pages in document
-    s3Key: Optional[str] = None
-    s3Url: Optional[str] = None
+    s3_key: Optional[str] = None
+    s3_url: Optional[str] = None
 
 
 class BatchProcessingFileInfo(BaseModel):

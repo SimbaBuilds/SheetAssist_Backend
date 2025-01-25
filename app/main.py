@@ -1,6 +1,11 @@
 import sys
 import os
 import traceback
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
@@ -11,23 +16,42 @@ import uvicorn
 import logging
 from app.endpoints import process_query, download, get_doc_title, data_visualization
 from app.utils.s3_file_management import temp_file_manager
+from app.dev_utils.memory_profiler import MemoryProfilerMiddleware
 from contextlib import asynccontextmanager
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Configure console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
+# Configure root logger
+logging.basicConfig(level=logging.INFO, handlers=[console_handler])
 logger = logging.getLogger(__name__)
+
+# Configure S3 logger
+s3_logger = logging.getLogger("s3_operations")
+s3_logger.setLevel(logging.INFO)
+s3_logger.addHandler(console_handler)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Application startup")
+    logger.info("Application startup - initializing services")
+    logger.info("Starting S3 temporary file management service")
     await temp_file_manager.start_periodic_cleanup()
     yield
     # Shutdown
-    logger.info("Application shutdown")
+    logger.info("Application shutdown initiated")
+    logger.info("Stopping S3 temporary file management service")
     await temp_file_manager.stop_periodic_cleanup()
+    logger.info("Application shutdown complete")
 
 app = FastAPI(lifespan=lifespan)
+
+# Add memory profiler middleware before other middleware
+app.add_middleware(MemoryProfilerMiddleware)
 
 @app.middleware("http")
 async def error_logging_middleware(request: Request, call_next):

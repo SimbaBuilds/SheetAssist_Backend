@@ -37,8 +37,8 @@ Transitioning from local file storage to S3-based storage to handle large files 
         index: int
         file_id: Optional[str] = None  
         page_count: Optional[int] = None  
-        s3Key: Optional[str] = None #newly added
-        s3Url: Optional[str] = None #newly added
+        s3_key: Optional[str] = None #newly added
+        s3_url: Optional[str] = None #newly added
 
 ### Implementation Notes
 

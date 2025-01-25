@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import logging
 from contextlib import asynccontextmanager
 import asyncio
@@ -11,9 +11,19 @@ import io
 from typing import Union, BinaryIO, Optional, List
 import uuid
 import json
+import time
 
-logging.basicConfig(level=logging.INFO)
+# Enhanced logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+def log_duration(start_time: float, operation: str) -> None:
+    """Log the duration of an operation"""
+    duration = time.time() - start_time
+    logger.info(f"S3 operation '{operation}' completed in {duration:.2f} seconds")
 
 class S3TempFileManager:
     def __init__(self, bucket_name: str = None, max_age_hours: int = 24, cleanup_interval_hours: int = 1):
@@ -24,6 +34,7 @@ class S3TempFileManager:
             max_age_hours: Maximum age of temp files before cleanup (in hours)
             cleanup_interval_hours: How often to run cleanup (in hours)
         """
+        logger.info("Initializing S3TempFileManager")
         self.s3_client = boto3.client(
             's3',
             aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
@@ -49,15 +60,24 @@ class S3TempFileManager:
 
     async def cleanup_old_files(self):
         """Remove temporary files older than max_age from S3"""
+        start_time = time.time()
+        logger.info("Starting cleanup of old S3 files")
         try:
-            cutoff_time = datetime.now() - self.max_age
+            cutoff_time = datetime.now(UTC) - self.max_age
             paginator = self.s3_client.get_paginator('list_objects_v2')
             
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix='temp/'):
+            # Get all pages synchronously within a thread
+            pages = await asyncio.to_thread(
+                lambda: list(paginator.paginate(Bucket=self.bucket, Prefix='temp/'))
+            )
+            
+            cleaned_count = 0
+            for page in pages:
                 if 'Contents' not in page:
                     continue
                     
                 for obj in page['Contents']:
+                    # S3 returns timezone-aware datetime, so we can compare directly
                     if obj['LastModified'] < cutoff_time:
                         try:
                             await asyncio.to_thread(
@@ -65,9 +85,13 @@ class S3TempFileManager:
                                 Bucket=self.bucket,
                                 Key=obj['Key']
                             )
-                            logger.info(f"Cleaned up old S3 file: {obj['Key']}")
+                            cleaned_count += 1
+                            logger.debug(f"Cleaned up old S3 file: {obj['Key']}")
                         except Exception as e:
                             logger.error(f"Error cleaning up {obj['Key']}: {str(e)}")
+            
+            logger.info(f"Cleanup completed. Removed {cleaned_count} old files")
+            log_duration(start_time, "cleanup_old_files")
                             
         except Exception as e:
             logger.error(f"Error during S3 cleanup: {str(e)}")
@@ -79,29 +103,27 @@ class S3TempFileManager:
         session_prefix: str = None,
         metadata: dict = None
     ) -> str:
-        """Save a temporary file to S3 and return its key
+        """Save a temporary file to S3 and return its key"""
+        start_time = time.time()
+        logger.info(f"Saving temporary file: {filename}")
         
-        Args:
-            file_data: File data to save
-            filename: Name for the saved file
-            session_prefix: Optional specific session prefix to use
-            metadata: Optional metadata to store with the file
-        """
         if session_prefix is None:
             session_prefix = self.get_temp_dir()
 
         # Generate unique filename to avoid collisions
         unique_id = str(uuid.uuid4())[:8]
         key = f"{session_prefix}{unique_id}_{filename}"
-
+        
         try:
             extra_args = {}
             if metadata:
                 extra_args['Metadata'] = {
                     k: str(v) for k, v in metadata.items()
                 }
+                logger.debug(f"Adding metadata to file {key}: {metadata}")
 
             if hasattr(file_data, 'read'):
+                logger.debug(f"Streaming file-like object to S3: {key}")
                 # For file-like objects, stream directly to S3
                 await asyncio.to_thread(
                     self.s3_client.upload_fileobj,
@@ -111,6 +133,7 @@ class S3TempFileManager:
                     ExtraArgs=extra_args
                 )
             else:
+                logger.debug(f"Uploading string/bytes content to S3: {key}")
                 # For string or bytes content
                 data = file_data.encode() if isinstance(file_data, str) else file_data
                 await asyncio.to_thread(
@@ -123,9 +146,13 @@ class S3TempFileManager:
             
             if metadata:
                 self._session_metadata[key] = metadata
-            
+                
+            logger.info(f"Successfully saved file to S3: {key}")
+            log_duration(start_time, "save_temp_file")
             return key
+            
         except Exception as e:
+            logger.error(f"Failed to save file to S3: {str(e)}", exc_info=True)
             raise ValueError(f"Failed to save file to S3: {str(e)}")
 
     def mark_for_cleanup(self, *keys: str) -> None:
@@ -148,22 +175,13 @@ class S3TempFileManager:
             except Exception as e:
                 logger.error(f"Error cleaning up marked S3 object {key}: {str(e)}")
 
-    async def get_file_stream(self, key: str) -> BinaryIO:
-        """Get a file stream from S3"""
-        try:
-            response = await asyncio.to_thread(
-                self.s3_client.get_object,
-                Bucket=self.bucket,
-                Key=key
-            )
-            return response['Body']
-        except Exception as e:
-            raise ValueError(f"Failed to get S3 stream: {str(e)}")
-
     async def get_file_metadata(self, key: str) -> Optional[dict]:
         """Get metadata for a file if it exists"""
+        start_time = time.time()
+        logger.info(f"Getting metadata for: {key}")
         try:
             if key in self._session_metadata:
+                logger.debug(f"Found metadata in cache for: {key}")
                 return self._session_metadata[key]
             
             response = await asyncio.to_thread(
@@ -171,8 +189,13 @@ class S3TempFileManager:
                 Bucket=self.bucket,
                 Key=key
             )
+            log_duration(start_time, "get_file_metadata")
             return response.get('Metadata')
-        except ClientError:
+        except ClientError as e:
+            logger.warning(f"No metadata found for {key}: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting metadata for {key}: {str(e)}", exc_info=True)
             return None
 
     async def list_session_files(self, session_prefix: str) -> List[str]:
@@ -180,7 +203,13 @@ class S3TempFileManager:
         try:
             files = []
             paginator = self.s3_client.get_paginator('list_objects_v2')
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix=session_prefix):
+            
+            # Get all pages synchronously within a thread
+            pages = await asyncio.to_thread(
+                lambda: list(paginator.paginate(Bucket=self.bucket, Prefix=session_prefix))
+            )
+            
+            for page in pages:
                 if 'Contents' in page:
                     files.extend(obj['Key'] for obj in page['Contents'])
             return files

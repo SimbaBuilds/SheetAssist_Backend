@@ -5,7 +5,7 @@ from app.utils.sandbox import EnhancedPythonInterpreter
 from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, ChunkResponse, FileDataInfo
 import json
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import S3FileManager
+from app.utils.s3_file_actions import S3FileActions
 import os
 import logging
 from app.schemas import QueryRequest
@@ -23,6 +23,7 @@ import time
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 import io
+import asyncio
 # Add at the top of the file, after imports
 
 
@@ -31,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-s3_file_manager = S3FileManager()
+s3_file_actions = S3FileActions()
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_entry_endpoint(
@@ -46,42 +47,58 @@ async def process_query_entry_endpoint(
         raise HTTPException(status_code=401, detail="Authentication required")
     
     try:
+        # Add debug logging
+        form = await request.form()
+        logger.info(f"Form data keys: {form.keys()}")
+        logger.info(f"Form files: {[k for k in form.keys() if k.startswith('files')]}")
+        
         request_data = QueryRequest(**json.loads(json_data))
+        logger.info(f"Number of files received: {len(files)}")
+        logger.info(f"Number of file metadata entries: {len(request_data.files_metadata)}")
         
         # Store file contents in memory before background processing
         files_data = []
-        for i, file_meta in enumerate(request_data.files_metadata):
-            if file_meta.s3Key:
-                # Handle S3 files
-                try:
-                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
-                    files_data.append({
-                        'content': file_content.read(),
-                        'filename': file_meta.name,
-                        'content_type': file_meta.type
-                    })
-                except Exception as e:
-                    logger.error(f"Error reading S3 file {file_meta.name}: {str(e)}")
-                    raise HTTPException(status_code=500, detail=f"Error reading S3 file: {str(e)}")
-            else:
-                # Handle regular files
-                file = files[file_meta.index]
-                content = await file.read()
-                await file.seek(0)
+        for file_meta in request_data.files_metadata:
+            logger.info(f"file_meta: {file_meta}")
+            if file_meta.s3_key:  # Explicit check for S3 files
+                # For S3 files, just store the metadata - no content loading
                 files_data.append({
-                    'content': content,
-                    'filename': file.filename,
-                    'content_type': file.content_type
+                    'content': None,  # No content for S3 files
+                    'filename': file_meta.name,
+                    'content_type': file_meta.type
                 })
+            else:
+                # Handle regular files using the index from metadata
+                if not hasattr(file_meta, 'index'):
+                    raise HTTPException(status_code=400, detail=f"Missing index for uploaded file {file_meta.name}")
+                try:
+                    file = files[file_meta.index]
+                    content = await file.read()
+                    await file.seek(0)
+                    files_data.append({
+                        'content': content,
+                        'filename': file.filename,
+                        'content_type': file.content_type
+                    })
+                except IndexError:
+                    raise HTTPException(status_code=400, detail=f"No uploaded file found at index {file_meta.index} for {file_meta.name}")
         
         total_pages = 0
         # Update page counts
-        for file_meta in request_data.files_metadata:
+        for i, file_meta in enumerate(request_data.files_metadata):
             if not file_meta.page_count and file_meta.type == 'application/pdf':
-                file_content = io.BytesIO(files_data[i]['content'])
-                pdf_reader = PdfReader(file_content)
-                file_meta.page_count = len(pdf_reader.pages)
-                total_pages += file_meta.page_count
+                if file_meta.s3_key:
+                    # For S3 PDFs, stream only the necessary parts for page count
+                    stream = await s3_file_actions.get_streaming_body(file_meta.s3_key)
+                    reader = PdfReader(stream)
+                    file_meta.page_count = len(reader.pages)
+                    total_pages += file_meta.page_count
+                    await asyncio.to_thread(stream.close)
+                else:
+                    file_content = io.BytesIO(files_data[i]['content'])
+                    pdf_reader = PdfReader(file_content)
+                    file_meta.page_count = len(pdf_reader.pages)
+                    total_pages += file_meta.page_count
 
         #If destination url and no input url, add destination url and sheet name to input urls for processing context
         if request_data.output_preferences.destination_url and not request_data.input_urls and request_data.output_preferences.modify_existing:
@@ -92,11 +109,13 @@ async def process_query_entry_endpoint(
         contains_image_or_like = False 
         
         # Check for images to propagate flag to llm service for prompt selection
-        for file_data in files_data:
+        for i, file_data in enumerate(files_data):
+            file_meta = request_data.files_metadata[i]  # Get corresponding metadata
             if file_data['content_type'].startswith('image/'):
                 contains_image_or_like = True
             elif file_data['content_type'] == 'application/pdf':
-                is_image_like = await pdf_classifier(io.BytesIO(file_data['content']))
+                content = request_data.files_metadata[i] if request_data.files_metadata[i].s3_key else io.BytesIO(file_data['content'])
+                is_image_like = await pdf_classifier(content)
                 contains_image_or_like = contains_image_or_like or is_image_like
                 if is_image_like and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
                     need_to_batch = True
@@ -260,11 +279,10 @@ async def process_query_standard_endpoint(
         files_data = []
         for i, file_meta in enumerate(request_data.files_metadata):
             try:
-                if file_meta.s3Key:
-                    # Handle S3 files
-                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                if file_meta.s3_key:
+                    # For S3 files, just store the metadata - no content loading
                     files_data.append({
-                        'content': file_content.read(),
+                        'content': None,  # No content for S3 files
                         'filename': file_meta.name,
                         'content_type': file_meta.type
                     })
@@ -285,6 +303,9 @@ async def process_query_standard_endpoint(
         # Create new UploadFile objects for preprocessing
         upload_files = []
         for file_data in files_data:
+            if file_data['content'] is None:
+                # Skip S3 files - they'll be handled by their metadata
+                continue
             file_obj = io.BytesIO(file_data['content'])
             upload_file = UploadFile(
                 file=file_obj,
@@ -646,11 +667,10 @@ async def process_query_batch_endpoint(
         files_data = []
         for i, file_meta in enumerate(request_data.files_metadata):
             try:
-                if file_meta.s3Key:
-                    # Handle S3 files
-                    file_content = await s3_file_manager.get_streaming_body(file_meta.s3Key)
+                if file_meta.s3_key:
+                    # For S3 files, just store the metadata - no content loading
                     files_data.append({
-                        'content': file_content.read(),
+                        'content': None,  # No content for S3 files
                         'filename': file_meta.name,
                         'content_type': file_meta.type
                     })
@@ -685,12 +705,21 @@ async def process_query_batch_endpoint(
             # Create new file objects for each chunk
             chunk_files = []
             for file_data in files_data:
-                file_obj = io.BytesIO(file_data['content'])
-                upload_file = UploadFile(
-                    file=file_obj,
-                    filename=file_data['filename'],
-                    headers={'content-type': file_data['content_type']}
-                )
+                if file_data['is_s3']:
+                    # For S3 files, create a streaming UploadFile
+                    stream = await s3_file_actions.get_streaming_body(file_data['s3_key'])
+                    upload_file = UploadFile(
+                        file=stream,
+                        filename=file_data['filename'],
+                        headers={'content-type': file_data['content_type']}
+                    )
+                else:
+                    file_obj = io.BytesIO(file_data['content'])
+                    upload_file = UploadFile(
+                        file=file_obj,
+                        filename=file_data['filename'],
+                        headers={'content-type': file_data['content_type']}
+                    )
                 chunk_files.append(upload_file)
 
             # Process the chunk for ChunkResponse
