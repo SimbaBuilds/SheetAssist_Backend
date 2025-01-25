@@ -10,7 +10,7 @@ Context:
 Code generation instructions:
 - The generated code should be enclosed in one set of triple backticks.
 - Each data variable may be of different types (DataFrame, string, list, etc.).
-- Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
+- Do not attempt to concatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
 - Do not forget your imports.
 - Use the simplest method to return the desired value.                
 - Do not include print statements -- ensure the last line is the return value or an assignment statement.
@@ -35,7 +35,7 @@ Code generation instructions:
 - The generated code should be enclosed in one set of triple backticks.
 - Each data variable may be of different types (DataFrame, string, list, etc.).
 - If given a large amount of organized text data, if possible, use regular expressions on the namespace variables rather than attempting to rewrite the content and manually build dataframes.
-- Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
+- Do not attempt to concatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
 - Do not forget your imports.
 - Use the simplest method to return the desired value.                
 - Do not include print statements -- ensure the last line is the return value or an assignment statement.
@@ -51,7 +51,7 @@ The generated code should be enclosed in one set of triple backticks.
 Do not forget your imports.
 The data is available in variables named 'data', 'data_1', 'data_2', etc.
 Each data variable may be of different types (DataFrame, string, list, etc.).
-Do not attempt to concatenatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
+Do not attempt to concatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
 Do not include print statements -- ensure the last line is the return value or an assignment statement.
 The return value can be either a dataframe or a string.
 """
@@ -67,7 +67,7 @@ Generation details:
 - The return value can be of any type (DataFrame, string, number, etc.).
 - The generated code should be enclosed in one set of triple backticks.
 - Do not forget your imports.
-- Do not attempt to concatenatenate to an empty or all-NA dataframe as this is no longer supported by pandas.  Instead, create a new dataframe.
+- Do not attempt to concatenate to an empty or all-NA dataframe as this is no longer supported by pandas.  Instead, create a new dataframe.
 - Do not include print statements -- ensure the last line is the return value or an assignment statement.
 - The return value can be either a dataframe or a string.
 """
