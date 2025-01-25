@@ -35,14 +35,17 @@ async def check_client_connection(request: Request) -> bool:
 def construct_status_response(job: dict) -> QueryResponse:
     """Helper function to construct status response"""
 
+    # Get the current status and data for the job
     current_status = job.get("status", "unknown")
-
     logger.info(f"Current chunk: {int(job.get('current_chunk'))+1}, Total chunks: {len(job.get('page_chunks', []))}")
     page_chunks = job.get('page_chunks', [])
     current_chunk = int(job.get('current_chunk', 0))
-    file_id = page_chunks[current_chunk]['file_id']
-    start_page = int(page_chunks[current_chunk]['page_range'][0])
+    chunk_status = job.get("chunk_status", [])
+    chunk_success = "Success" in chunk_status[current_chunk]
+    message = job.get("message", "")
+    file_id = page_chunks[current_chunk]['file_id'] # the file name
     output_preferences = job.get('output_preferences')
+
     if output_preferences.get('doc_name'):
         doc_name = output_preferences.get('doc_name')
         sheet_name = output_preferences.get('sheet_name')
@@ -50,36 +53,17 @@ def construct_status_response(job: dict) -> QueryResponse:
         doc_name = None
         sheet_name = None
     
-    
+    # Handle cases
     if current_status == "completed":
+        message += f"Processing complete"
         if output_preferences['type'] == 'online':
-            if output_preferences['modify_existing']:
-                message = f"Data successfully appended to {doc_name} - {sheet_name}."
-            else:
-                message = f"Data successfully uploaded to new sheet in {doc_name}."
             return QueryResponse(
-                result=TruncatedSandboxResult(
-                    original_query=job["query"],
-                    print_output="",
-                    error=None,
-                    timed_out=False,
-                    return_value_snapshot=job["result_snapshot"]
-                ),
                 status=current_status,
                 message=message,
-                files=None,
                 num_images_processed=job["total_images_processed"],
-                total_pages=job.get("total_pages", 0)
             )
         else:  # download type
             return QueryResponse(
-                result=TruncatedSandboxResult(
-                    original_query=job["query"],
-                    print_output="",
-                    error=None,
-                    timed_out=False,
-                    return_value_snapshot=None
-                ),
                 status=current_status,
                 message="File ready for download",
                 files=[FileInfo(
@@ -89,36 +73,28 @@ def construct_status_response(job: dict) -> QueryResponse:
                     download_url=f"/download?file_path={job['result_file_path']}"
                 )],
                 num_images_processed=job["total_images_processed"],
-                total_pages=job.get("total_pages", 0)
             )
     
     elif current_status == "error":
         return QueryResponse(
-            result=None,
             status="error",
             message=job["error_message"],
-            files=None,
             num_images_processed=job["total_images_processed"],
-            total_pages=job.get("total_pages", 0)
         )
     
-    else:  # processing or created
-        message = job.get("message", "Processing in progress")
-        
-        total_pages = page_chunks[current_chunk]['metadata']['page_count']
+    else:  # processing or created        
+        start_page = int(page_chunks[current_chunk]['page_range'][0])
+        end_page = int(page_chunks[current_chunk]['page_range'][1])
         if output_preferences['type'] == 'online':
             if output_preferences['modify_existing']:
-                message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and appended to {doc_name} - {sheet_name}."
+                message += f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
             else:
-                message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed and added to new sheet in {doc_name}."
+                message += f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
         else: #download output
-            message = f"{max(0, start_page)} of {total_pages} pages from file {file_id} processed."
+            message += f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
         
         return QueryResponse(
-            result=None,
             status=current_status,
             message=message,
-            files=None,
             num_images_processed=job['total_images_processed'],
-            total_pages=job.get("total_pages", 0)
         )

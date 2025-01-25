@@ -179,6 +179,7 @@ async def process_query_entry_endpoint(
                 "page_chunks": page_chunks,
                 "current_chunk": 0,
                 "query": request_data.query,
+                "chunk_status": []
             }).execute()
             
             # Create new UploadFile objects for the background task
@@ -581,17 +582,18 @@ async def _process_batch_chunk(
             contains_image_or_like=contains_image_or_like
         )
         
-        if result.error:
-            error_msg = f"Chunk processing error: {result.error}"
-            supabase.table("batch_jobs").update({
-                "status": "error",
-                "message": "There was an error processing your request.  This application may not have the ability to complete your request.  You can also try rephrasing your request or breaking it down into multiple requests",
-                "error_message": error_msg,
-                "completed_at": datetime.now(UTC).isoformat()
-            }).eq("job_id", job_id).execute()
-            
-            raise ValueError(error_msg)
+        
+        error_msg = f"Chunk processing error: {result.error}" if result.error else None
+        chunk_status = job_data["chunk_status"]
+        new_chunk_status = chunk_status + f"Chunk {current_chunk+1}: Error" if result.error else chunk_status + f"Chunk {current_chunk+1}: Success"
+        supabase.table("batch_jobs").update({
+            "status": "processing",
+            "error_message": error_msg,
+            "chunk_status": new_chunk_status
 
+        }).eq("job_id", job_id).execute()
+
+            
         # Handle post-processing
         status, result_file_path, result_media_type = await handle_batch_chunk_result(
             result=result,
@@ -616,6 +618,8 @@ async def _process_batch_chunk(
             "started_at": datetime.now(UTC).isoformat(),
             "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
         }).eq("job_id", job_id).execute()
+
+
 
         return ChunkResponse(
             result=result,
@@ -750,7 +754,14 @@ async def process_query_batch_endpoint(
                 "status": "processing" if chunk_index < len(page_chunks) - 1 else "completed",
                 "completed_at": datetime.now(UTC).isoformat() if chunk_index == len(page_chunks) - 1 else None
             }).eq("job_id", job_id).execute()
-        
+
+        chunk_status = job_data.get("chunk_status", [])
+        all_chunk_statuses_str = ", ".join(chunk_status)
+        if "Error" in all_chunk_statuses_str:
+            supabase.table("batch_jobs").update({
+                "status": "completed_with_error(s)",
+            }).eq("job_id", job_id).execute()
+                
         return QueryResponse(
             original_query=request_data.query,
             status=response.status,
