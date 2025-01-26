@@ -350,6 +350,8 @@ pyparsing==3.2.0
     # via
     #   httplib2
     #   matplotlib
+pypdf==5.2.0
+    # via -r requirements.in
 pypdf2==3.0.1
     # via -r requirements.in
 pytest==8.3.4

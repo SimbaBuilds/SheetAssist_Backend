@@ -23,6 +23,8 @@ import gc
 from PyPDF2 import PdfReader, PdfWriter
 import tempfile
 from pdf2image import convert_from_path
+from io import BytesIO
+from app.utils.s3_file_actions import S3PDFStreamer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,14 +63,25 @@ class BaseVisionProcessor:
         """Process PDF with Vision API - common logic for both providers"""
         try:
             if use_s3 and s3_key:
-                return await self._process_s3_pdf(s3_key, query, input_data, page_range)
+                result = await self._process_s3_pdf(s3_key, query, input_data, page_range)
             elif stream:
-                return await self._process_stream_pdf(stream, query, input_data, page_range)
+                result = await self._process_stream_pdf(stream, query, input_data, page_range)
             elif pdf_path:
-                return await self._process_local_pdf(pdf_path, query, input_data, page_range)
+                result = await self._process_local_pdf(pdf_path, query, input_data, page_range)
             else:
                 raise ValueError("Either pdf_path, s3_key, or stream must be provided")
+
+            # If no content was extracted from any page
+            if not result or (isinstance(result, dict) and not result.get("content")):
+                return {
+                    "status": "error",
+                    "error": "No content could be extracted from the PDF"
+                }
+
+            return result
+
         except Exception as e:
+            logger.error(f"Error in process_pdf_with_vision: {str(e)}", exc_info=True)
             return {
                 "status": "error",
                 "error": str(e)
@@ -78,32 +91,29 @@ class BaseVisionProcessor:
         """Process PDF stored in S3 one page at a time"""
         all_page_content = []
         input_data_snapshot = build_input_data_snapshot(input_data)
-        stream = None
-        doc = None
         
         try:
-            # Get seekable stream using s3_file_actions
-            stream = await asyncio.to_thread(s3_file_actions.get_streaming_body, s3_key)
-            
-            # Open PDF stream with PyPDF2
-            doc = PdfReader(stream)
-            total_pages = len(doc.pages)
+            # Initialize S3PDFStreamer
+            streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, s3_key)
             
             # Determine page range
-            start_page = int(page_range[0]) if page_range else 0
-            end_page = min(int(page_range[1]), total_pages) if page_range else total_pages
+            start_page = int(page_range[0]) if page_range else 1
+            end_page = min(int(page_range[1]), streamer.page_count) if page_range else streamer.page_count
             
-            for page_num in range(start_page, end_page):
+            for page_num in range(start_page, end_page + 1):
                 try:
                     # Get page and convert to image
-                    page = doc.pages[page_num]
+                    page_data = streamer.stream_page(page_num)
+                    reader = PdfReader(BytesIO(page_data))
                     
                     # Create a temporary file for the page image
                     with io.BytesIO() as img_buffer:
-                        # Convert page to image using pdf2image or similar
-                        # For now, we'll use a placeholder approach
-                        # TODO: Implement proper PDF page to image conversion
-                        img_bytes = await self._convert_pdf_page_to_image(page)
+                        # Convert page to image
+                        img_bytes = await self._convert_pdf_page_to_image(reader.pages[0])
+                        if not img_bytes:
+                            logger.error(f"Failed to convert page {page_num} to image")
+                            continue
+                            
                         img_buffer.write(img_bytes)
                         img_buffer.seek(0)
                         b64_page = base64.b64encode(img_buffer.read()).decode()
@@ -113,19 +123,27 @@ class BaseVisionProcessor:
                         b64_page,
                         query,
                         input_data_snapshot,
-                        page_num + 1,
-                        total_pages
+                        page_num,
+                        streamer.page_count
                     )
                     
-                    all_page_content.append(f"[Page {page_num + 1} of {total_pages}]\n{page_content}")
+                    if page_content:
+                        all_page_content.append(f"[Page {page_num} of {streamer.page_count}]\n{page_content}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing page {page_num}: {str(e)}")
+                    continue
                     
                 finally:
-                    # Clean up page resources immediately
-                    if page:
-                        page = None
                     # Force garbage collection after each page
                     gc.collect()
                     await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+            
+            if not all_page_content:
+                return {
+                    "status": "error",
+                    "error": "Failed to extract content from any pages"
+                }
             
             return {
                 "status": "completed",
@@ -138,10 +156,6 @@ class BaseVisionProcessor:
                 "status": "error",
                 "error": str(e)
             }
-        finally:
-            # Clean up resources
-            if stream:
-                await asyncio.to_thread(stream.close)
 
     async def _process_local_pdf(self, pdf_path: str, query: str, input_data: List[FileDataInfo], page_range: Optional[tuple[int, int]]) -> Dict[str, str]:
         """Process local PDF file one page at a time"""
@@ -229,6 +243,10 @@ class BaseVisionProcessor:
                     with io.BytesIO() as img_buffer:
                         # Convert page to image
                         img_bytes = await self._convert_pdf_page_to_image(page)
+                        if not img_bytes:
+                            logger.error(f"Failed to convert page {page_num + 1} to image")
+                            continue
+                            
                         img_buffer.write(img_bytes)
                         img_buffer.seek(0)
                         b64_page = base64.b64encode(img_buffer.read()).decode()
@@ -242,7 +260,12 @@ class BaseVisionProcessor:
                         total_pages
                     )
                     
-                    all_page_content.append(f"[Page {page_num + 1} of {total_pages}]\n{page_content}")
+                    if page_content:
+                        all_page_content.append(f"[Page {page_num + 1} of {total_pages}]\n{page_content}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing page {page_num + 1}: {str(e)}")
+                    continue
                     
                 finally:
                     # Clean up page resources immediately
@@ -251,6 +274,12 @@ class BaseVisionProcessor:
                     # Force garbage collection after each page
                     gc.collect()
                     await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
+            
+            if not all_page_content:
+                return {
+                    "status": "error",
+                    "error": "Failed to extract content from any pages"
+                }
             
             return {
                 "status": "completed",
@@ -375,7 +404,7 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
                 
                 # Convert PIL image to bytes
                 img_byte_arr = io.BytesIO()
-                images[0].save(img_byte_arr, format='JPEG')
+                images[0].save(img_byte_arr, format='JPEG', quality=95)
                 img_byte_arr.seek(0)
                 
                 return img_byte_arr.getvalue()
@@ -436,6 +465,10 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
                 max_tokens=MAX_VISION_OUTPUT_TOKENS
             )
             
+            if not completion or not completion.choices:
+                logger.error("No completion returned from OpenAI")
+                return None
+                
             page_content = completion.choices[0].message.content
             print(f"""\n -------LLM called with query: {query} on page: {page_number} of {total_pages} ------- \n\n
             Input data snapshot:\n {input_data_snapshot}
@@ -446,7 +479,7 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
             
         except Exception as e:
             logging.error(f"Error processing PDF page with vision: {str(e)}")
-            raise ValueError(f"Failed to process PDF page: {str(e)}")
+            return None
 
 
 class AnthropicVisionProcessor(BaseVisionProcessor):
@@ -574,6 +607,7 @@ class AnthropicVisionProcessor(BaseVisionProcessor):
                 os.unlink(temp_pdf.name)
 
     async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
+        """Process a single page with Claude 3 Vision API"""
         try:
             # Convert base64 to image bytes
             image_bytes = base64.b64decode(b64_page)
@@ -627,7 +661,15 @@ class AnthropicVisionProcessor(BaseVisionProcessor):
                 ],
             )
             
+            if not message or not message.content:
+                logger.error("No response content from Anthropic")
+                return None
+                
             page_content = message.content[0].text
+            if not page_content or len(page_content.strip()) == 0:
+                logger.error("Empty content returned from Anthropic")
+                return None
+                
             print(f"""\n -------LLM called with query: {query} on page: {page_number} of {total_pages} ------- \n\n
             Input data snapshot:\n {input_data_snapshot}
             Page Content:\n {page_content}\n
@@ -637,7 +679,7 @@ class AnthropicVisionProcessor(BaseVisionProcessor):
             
         except Exception as e:
             logging.error(f"Error processing PDF page with vision: {str(e)}")
-            raise ValueError(f"Failed to process PDF page: {str(e)}")
+            return None
 
 
 class LLMService:

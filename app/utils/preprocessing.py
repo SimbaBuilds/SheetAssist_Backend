@@ -7,7 +7,7 @@ import requests
 from PIL import Image
 import io
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import s3_file_actions
+from app.utils.s3_file_actions import s3_file_actions, S3PDFStreamer
 import fitz  # PyMuPDF
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
@@ -27,6 +27,8 @@ from dotenv import load_dotenv
 import aiohttp
 import asyncio
 import gc
+from io import BytesIO
+import tempfile
 
 load_dotenv(override=True)
 
@@ -410,8 +412,8 @@ class FilePreprocessor:
             raise ValueError(e)
 
     async def process_pdf(
-        self, 
-        file: Union[BinaryIO, str, FileUploadMetadata], 
+        self,
+        file: Union[BinaryIO, str, FileUploadMetadata],
         output_path: str = None,
         query: str = None,
         input_data: List[FileDataInfo] = None,
@@ -420,59 +422,37 @@ class FilePreprocessor:
         """Process PDF files and extract content"""
         doc = None
         stream = None
+        temp_path = None
+        
         try:
             # For S3 files, process directly
             if isinstance(file, FileUploadMetadata) and file.s3_key:
                 logger.info(f"Processing S3 PDF file: {file.s3_key}")
                 try:
-                    # Get streaming body
-                    logger.info("Getting streaming body")
-                    stream = await s3_file_actions.get_streaming_body(file.s3_key)
-                    logger.info("Got streaming body, attempting to open with PyPDF2")
+                    # Initialize S3PDFStreamer
+                    streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, file.s3_key)
                     
-                    try:
-                        # Open PDF with PyPDF2
-                        doc = PdfReader(stream)
-                        logger.info("Successfully opened PDF with PyPDF2")
-                    except Exception as pdf_e:
-                        logger.error(f"PyPDF2 failed to open stream: {str(pdf_e)}")
-                        raise
+                    # Get page range
+                    start_page = page_range[0] if page_range else 1
+                    end_page = min(page_range[1], streamer.page_count) if page_range else streamer.page_count
                     
-                    try:
-                        page_count = len(doc.pages)
-                        logger.info(f"Successfully got PDF page count: {page_count}")
-                    except Exception as pc_e:
-                        logger.error(f"Failed to get page count: {str(pc_e)}")
-                        raise
-                    
-                    if page_range:
-                        start_page = page_range[0] if page_range else 0
-                        end_page = min(page_range[1], page_count) if page_range else page_count
-                    else:
-                        start_page = 0
-                        end_page = page_count
-                    logger.info(f"Processing pages {start_page} to {end_page}")
-
                     text_content = []
                     total_text_length = 0
                     
                     # Process one page at a time
-                    for page_num in range(start_page, end_page):
+                    for page_num in range(start_page, end_page + 1):
                         try:
                             logger.info(f"Loading page {page_num}")
-                            page = doc.pages[page_num]
-                            logger.info(f"Getting text from page {page_num}")
-                            page_text = page.extract_text()
+                            page_data = streamer.stream_page(page_num)
+                            reader = PdfReader(BytesIO(page_data))
+                            page_text = reader.pages[0].extract_text()
                             total_text_length += len(page_text.strip())
-                            text_content.append(f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}")
+                            text_content.append(f"\n[Page {page_num} of {streamer.page_count} in user provided PDF]\n{page_text}")
                             logger.info(f"Successfully processed page {page_num}, text length: {len(page_text)}")
                         except Exception as page_e:
                             logger.error(f"Error processing page {page_num}: {str(page_e)}")
-                            raise
+                            continue
                         finally:
-                            # Clean up page resources immediately
-                            if page:
-                                page = None
                             gc.collect()
 
                     # If we got meaningful text content, return it
@@ -482,12 +462,6 @@ class FilePreprocessor:
                         
                 except Exception as e:
                     logger.error(f"Error processing PDF: {str(e)}", exc_info=True)
-                    raise
-                finally:
-                    # Clean up resources
-                    if stream:
-                        logger.info("Closing S3 stream")
-                        await asyncio.to_thread(stream.close)
                 
                 # If we reach here, process with vision
                 if self.supabase and self.user_id:
@@ -503,23 +477,38 @@ class FilePreprocessor:
                     use_s3=True
                 )
 
-                if isinstance(vision_result, dict) and vision_result.get("status") == "error":
-                    raise ValueError(f"Vision API error: {vision_result['error']}")
+                if not vision_result:
+                    raise ValueError("Failed to process PDF with vision")
+                    
+                if isinstance(vision_result, dict):
+                    if vision_result.get("status") == "error":
+                        raise ValueError(f"Vision API error: {vision_result.get('error')}")
+                    content = vision_result.get("content")
+                    if not content:
+                        raise ValueError("No content returned from vision processing")
+                else:
+                    content = vision_result
                 
-                self.num_images_processed += (end_page - start_page)
-                content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
+                self.num_images_processed += (end_page - start_page + 1)
                 return content, "vision_extracted", True
             
             # For non-S3 files, use local processing
             file_content = await get_file_content(file)
             if hasattr(file_content, 'read'):
-                stream = file_content
+                content = file_content.read()
+                stream = io.BytesIO(content)
             else:
                 stream = io.BytesIO(file_content)
             
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+                temp_pdf.write(stream.getvalue())
+                temp_pdf.flush()
+                temp_path = temp_pdf.name
+            
             try:
                 # First try to process with Python PDF libraries
-                doc = fitz.open(stream=stream, filetype="pdf")
+                doc = fitz.open(temp_path)
                 page_count = len(doc)
                 
                 if page_range:
@@ -538,6 +527,9 @@ class FilePreprocessor:
                         page_text = page.get_text()
                         total_text_length += len(page_text.strip())
                         text_content.append(f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}")
+                    except Exception as e:
+                        logger.error(f"Error processing page {page_num + 1}: {str(e)}")
+                        continue
                     finally:
                         # Clean up page resources immediately
                         if page:
@@ -556,6 +548,9 @@ class FilePreprocessor:
                 await self.check_image_processing_limits(self.supabase, self.user_id)
             
             try:
+                # Reset stream position
+                stream.seek(0)
+                
                 provider, vision_result = await self.llm_service.execute_with_fallback(
                     "process_pdf_with_vision",
                     pdf_path=None,  # Don't pass local path
@@ -566,11 +561,19 @@ class FilePreprocessor:
                     stream=stream  # Pass the stream directly
                 )
 
-                if isinstance(vision_result, dict) and vision_result.get("status") == "error":
-                    raise ValueError(f"Vision API error: {vision_result['error']}")
+                if not vision_result:
+                    raise ValueError("Failed to process PDF with vision")
+                    
+                if isinstance(vision_result, dict):
+                    if vision_result.get("status") == "error":
+                        raise ValueError(f"Vision API error: {vision_result.get('error')}")
+                    content = vision_result.get("content")
+                    if not content:
+                        raise ValueError("No content returned from vision processing")
+                else:
+                    content = vision_result
                 
                 self.num_images_processed += (end_page - start_page)
-                content = vision_result["content"] if isinstance(vision_result, dict) else vision_result
                 return content, "vision_extracted", True
 
             finally:
@@ -587,14 +590,19 @@ class FilePreprocessor:
         
         finally:
             # Clean up resources in reverse order
+            if stream:
+                try:
+                    stream.close()
+                except:
+                    pass
             if doc:
                 try:
                     doc.close()
                 except:
                     pass
-            if stream:
+            if temp_path:
                 try:
-                    stream.close()
+                    os.unlink(temp_path)
                 except:
                     pass
 
