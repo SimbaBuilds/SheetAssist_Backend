@@ -37,3 +37,4 @@ gunicorn
 smart_open
 boto3>=1.34.69
 tenacity>=8.2.0
+pdf2image>=1.17.0

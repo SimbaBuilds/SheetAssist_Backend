@@ -13,7 +13,7 @@ from app.utils.connection_and_status import check_client_connection
 from app.utils.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import S3FileActions
+from app.utils.s3_file_actions import s3_file_actions
 from app.schemas import FileUploadMetadata, InputUrl
 import os
 import base64
@@ -25,7 +25,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-s3_file_actions = S3FileActions()
 
 class VisualizationOptions(BaseModel):
     color_palette: str

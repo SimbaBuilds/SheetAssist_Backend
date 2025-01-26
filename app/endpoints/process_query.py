@@ -5,7 +5,7 @@ from app.utils.sandbox import EnhancedPythonInterpreter
 from app.schemas import QueryResponse, FileInfo, TruncatedSandboxResult, BatchProcessingFileInfo, ChunkResponse, FileDataInfo
 import json
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import S3FileActions
+from app.utils.s3_file_actions import s3_file_actions
 import os
 import logging
 from app.schemas import QueryRequest
@@ -32,7 +32,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-s3_file_actions = S3FileActions()
 
 @router.post("/process_query", response_model=QueryResponse)
 async def process_query_entry_endpoint(
@@ -53,17 +52,16 @@ async def process_query_entry_endpoint(
         logger.info(f"Form files: {[k for k in form.keys() if k.startswith('files')]}")
         
         request_data = QueryRequest(**json.loads(json_data))
-        logger.info(f"Number of files received: {len(files)}")
+        logger.info(f"Number of in memory files received: {len(files)}")
         logger.info(f"Number of file metadata entries: {len(request_data.files_metadata)}")
         
         # Store file contents in memory before background processing
         files_data = []
         for file_meta in request_data.files_metadata:
-            logger.info(f"file_meta: {file_meta}")
             if file_meta.s3_key:  # Explicit check for S3 files
                 # For S3 files, just store the metadata - no content loading
                 files_data.append({
-                    'content': None,  # No content for S3 files
+                    'content': file_meta.s3_key,  # No content for S3 files
                     'filename': file_meta.name,
                     'content_type': file_meta.type
                 })
@@ -276,9 +274,9 @@ async def process_query_standard_endpoint(
         logger.info("Calling preprocess_files")
         num_images_processed = 0
 
-        # Store file contents in memory
+        # Store file contents in memory if not S3
         files_data = []
-        for i, file_meta in enumerate(request_data.files_metadata):
+        for file_meta in request_data.files_metadata:
             try:
                 if file_meta.s3_key:
                     # For S3 files, just store the metadata - no content loading
@@ -315,6 +313,7 @@ async def process_query_standard_endpoint(
             )
             upload_files.append(upload_file)
 
+        # logger.info(f"upload_files: {upload_files}\n request_data.files_metadata: {request_data.files_metadata}")
         try:
             preprocessed_data, num_images_processed = await preprocess_files(
                 files=upload_files,
@@ -326,6 +325,7 @@ async def process_query_standard_endpoint(
                 user_id=user_id,
                 num_images_processed=num_images_processed
             )
+            logger.info(f" -- Returning preprocessed_data: {preprocessed_data} and num_images_processed: {num_images_processed} --- ")
         except ValueError as e:
             # Specifically handle image/overage limit errors
             error_msg = str(e)
@@ -521,31 +521,26 @@ async def process_query_batch_endpoint(
             logger.info(f"Processing chunk {chunk_index + 1} of {len(page_chunks)}")
             
             # Create new file objects for each chunk
-            chunk_files = []
+            # Create new UploadFile objects for preprocessing
+            upload_files = []
             for file_data in files_data:
-                if file_data['is_s3']:
-                    # For S3 files, create a streaming UploadFile
-                    stream = await s3_file_actions.get_streaming_body(file_data['s3_key'])
-                    upload_file = UploadFile(
-                        file=stream,
-                        filename=file_data['filename'],
-                        headers={'content-type': file_data['content_type']}
-                    )
-                else:
-                    file_obj = io.BytesIO(file_data['content'])
-                    upload_file = UploadFile(
-                        file=file_obj,
-                        filename=file_data['filename'],
-                        headers={'content-type': file_data['content_type']}
-                    )
-                chunk_files.append(upload_file)
+                if file_data['content'] is None:
+                    # Skip S3 files - they'll be handled by their metadata
+                    continue
+                file_obj = io.BytesIO(file_data['content'])
+                upload_file = UploadFile(
+                    file=file_obj,
+                    filename=file_data['filename'],
+                    headers={'content-type': file_data['content_type']}
+                )
+                upload_files.append(upload_file)
 
             # Process the chunk for ChunkResponse
             response = await process_batch_chunk(
                 user_id=user_id,
                 supabase=supabase,
                 request_data=request_data,
-                files=chunk_files,
+                files=upload_files,
                 job_id=job_id,
                 session_dir=session_dir,
                 current_chunk=chunk_index,

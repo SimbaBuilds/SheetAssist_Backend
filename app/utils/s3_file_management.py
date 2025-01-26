@@ -40,7 +40,16 @@ class S3TempFileManager:
             aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
             region_name=os.getenv('AWS_REGION'),
-            config=Config(signature_version='s3v4')
+            config=Config(
+                signature_version='s3v4',
+                s3={
+                    'payload_signing_enabled': True,
+                    'use_accelerate_endpoint': False,
+                    'addressing_style': 'path',
+                    'checksum_validation': True,  # Enable checksum validation
+                    'use_dualstack_endpoint': False
+                }
+            )
         )
         self.bucket = bucket_name or os.getenv('AWS_TEMP_BUCKET')
         if not self.bucket:
@@ -181,7 +190,7 @@ class S3TempFileManager:
         logger.info(f"Getting metadata for: {key}")
         try:
             if key in self._session_metadata:
-                logger.debug(f"Found metadata in cache for: {key}")
+                logger.info(f"Found metadata in cache for: {key}")
                 return self._session_metadata[key]
             
             response = await asyncio.to_thread(
@@ -189,8 +198,13 @@ class S3TempFileManager:
                 Bucket=self.bucket,
                 Key=key
             )
+            logger.info(f"Response: {response}")
             log_duration(start_time, "get_file_metadata")
-            return response.get('Metadata')
+            
+            # Return the full response if Metadata is empty
+            # This ensures we still get ContentLength and other important attributes
+            return response if not response.get('Metadata') else response.get('Metadata')
+            
         except ClientError as e:
             logger.warning(f"No metadata found for {key}: {str(e)}")
             return None

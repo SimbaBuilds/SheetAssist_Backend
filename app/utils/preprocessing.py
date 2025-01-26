@@ -7,7 +7,7 @@ import requests
 from PIL import Image
 import io
 from app.utils.s3_file_management import temp_file_manager
-from app.utils.s3_file_actions import S3FileActions, S3OperationError
+from app.utils.s3_file_actions import s3_file_actions
 import fitz  # PyMuPDF
 from tempfile import SpooledTemporaryFile
 from typing import Dict, Tuple
@@ -34,8 +34,6 @@ load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize S3 managers
-s3_file_actions = S3FileActions()
 
 async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> Union[BinaryIO, AsyncGenerator[bytes, None]]:
     """Get file content from various sources including S3"""
@@ -272,6 +270,7 @@ class FilePreprocessor:
             # Handle S3 files
             if isinstance(file, FileUploadMetadata) and file.s3_key:
                 # Pass the S3 key directly to vision processor
+                logger.info(f"Processing S3 file with key: {file.s3_key}")
                 provider, vision_result = await self.llm_service.execute_with_fallback(
                     "process_image_with_vision",
                     s3_key=file.s3_key,
@@ -284,6 +283,7 @@ class FilePreprocessor:
                     raise ValueError(f"Vision API error: {vision_result['error']}")
                 
                 self.num_images_processed += 1
+                logger.info(f" -- Returning vision_result: {vision_result} and num_images_processed: {self.num_images_processed} --- ")
                 return vision_result["content"] if isinstance(vision_result, dict) else vision_result, "s3"
             
             # For non-S3 files, use local processing
@@ -423,17 +423,27 @@ class FilePreprocessor:
         try:
             # For S3 files, process directly
             if isinstance(file, FileUploadMetadata) and file.s3_key:
-                # First try to process with PyMuPDF for text
-                response = await asyncio.to_thread(
-                    s3_file_actions.s3_client.get_object,
-                    Bucket=s3_file_actions.bucket,
-                    Key=file.s3_key
-                )
-                stream = response['Body']
-                
+                logger.info(f"Processing S3 PDF file: {file.s3_key}")
                 try:
-                    doc = fitz.open(stream=stream, filetype="pdf")
-                    page_count = len(doc)
+                    # Get streaming body
+                    logger.info("Getting streaming body")
+                    stream = await s3_file_actions.get_streaming_body(file.s3_key)
+                    logger.info("Got streaming body, attempting to open with PyPDF2")
+                    
+                    try:
+                        # Open PDF with PyPDF2
+                        doc = PdfReader(stream)
+                        logger.info("Successfully opened PDF with PyPDF2")
+                    except Exception as pdf_e:
+                        logger.error(f"PyPDF2 failed to open stream: {str(pdf_e)}")
+                        raise
+                    
+                    try:
+                        page_count = len(doc.pages)
+                        logger.info(f"Successfully got PDF page count: {page_count}")
+                    except Exception as pc_e:
+                        logger.error(f"Failed to get page count: {str(pc_e)}")
+                        raise
                     
                     if page_range:
                         start_page = page_range[0] if page_range else 0
@@ -441,16 +451,24 @@ class FilePreprocessor:
                     else:
                         start_page = 0
                         end_page = page_count
+                    logger.info(f"Processing pages {start_page} to {end_page}")
 
                     text_content = []
                     total_text_length = 0
                     
+                    # Process one page at a time
                     for page_num in range(start_page, end_page):
                         try:
-                            page = doc.load_page(page_num)
-                            page_text = page.get_text()
+                            logger.info(f"Loading page {page_num}")
+                            page = doc.pages[page_num]
+                            logger.info(f"Getting text from page {page_num}")
+                            page_text = page.extract_text()
                             total_text_length += len(page_text.strip())
                             text_content.append(f"\n[Page {page_num + 1} of {page_count} in user provided PDF]\n{page_text}")
+                            logger.info(f"Successfully processed page {page_num}, text length: {len(page_text)}")
+                        except Exception as page_e:
+                            logger.error(f"Error processing page {page_num}: {str(page_e)}")
+                            raise
                         finally:
                             # Clean up page resources immediately
                             if page:
@@ -459,14 +477,16 @@ class FilePreprocessor:
 
                     # If we got meaningful text content, return it
                     if total_text_length > 10:  # Same threshold as pdf_classifier
+                        logger.info(f"Successfully extracted text content, total length: {total_text_length}")
                         return "\n".join(text_content), "text", False
                         
                 except Exception as e:
-                    logging.error(f"Error reading PDF with PyMuPDF: {str(e)}")
+                    logger.error(f"Error processing PDF: {str(e)}", exc_info=True)
+                    raise
                 finally:
-                    if doc:
-                        doc.close()
+                    # Clean up resources
                     if stream:
+                        logger.info("Closing S3 stream")
                         await asyncio.to_thread(stream.close)
                 
                 # If we reach here, process with vision
@@ -581,7 +601,7 @@ class FilePreprocessor:
     #Class method to FilePreprocessor 
     async def preprocess_file(
         self, 
-        file: Union[BinaryIO, str], 
+        file: Union[BinaryIO, str, FileUploadMetadata], 
         query: str, 
         file_type: str, 
         sheet_name: str = None, 
@@ -682,8 +702,6 @@ async def preprocess_files(
     For batch processing, page_range specifies which pages to process.
     """
     
-    llm_service = LLMService()
-    
     preprocessor = FilePreprocessor(
         num_images_processed=num_images_processed,
         supabase=supabase,
@@ -725,8 +743,9 @@ async def preprocess_files(
             error_msg = str(e)
             logging.error(f"Error processing URL {input_url.url}")
             raise ValueError(f"Error processing URL {input_url.url}")
+    
     # Sort files_metadata to process CSV and XLSX files first
-    if files and files_metadata:
+    if files_metadata:
         priority_types = {
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'text/csv'
@@ -740,10 +759,10 @@ async def preprocess_files(
     
     
     # Process uploaded files using metadata
-    if files and files_metadata:
+    if files_metadata:
         for metadata in sorted_metadata:
             try:
-                file = files[metadata.index]
+                file = files[metadata.index] if files else metadata
                 logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
                 
                 # Map MIME types to FilePreprocessor types
@@ -773,17 +792,28 @@ async def preprocess_files(
                 elif file_type == 'pdf':
                     kwargs['query'] = query
 
-                # Process the file
-                with io.BytesIO(file.file.read()) as file_obj:
-                    file_obj.seek(0)
+                # Process the file - handle S3 files differently
+                if metadata.s3_key:  # <-- Add S3 check
+                    logger.info(f"Processing S3 file with key: {metadata.s3_key}")
                     content = await preprocessor.preprocess_file(
-                        file_obj, 
+                        metadata,  # Pass metadata instead of file_obj
                         query, 
                         file_type, 
                         sheet_name=None, 
                         processed_data=processed_data,
-                        page_range=page_range,  # Pass page_range to preprocess_file
+                        page_range=page_range,
                     )
+                else:
+                    with io.BytesIO(file.file.read()) as file_obj:
+                        file_obj.seek(0)
+                        content = await preprocessor.preprocess_file(
+                            file_obj, 
+                            query, 
+                            file_type, 
+                            sheet_name=None, 
+                            processed_data=processed_data,
+                            page_range=page_range,
+                        )
 
                 
                 # Handle different return types
@@ -812,6 +842,7 @@ async def preprocess_files(
                 logging.error(f"Error processing file {metadata.name}: {error_msg}")
                 raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
 
+    logger.info(f" -- Returning processed_data: {processed_data} and num_images_processed: {preprocessor.num_images_processed} --- ")
     return processed_data, preprocessor.num_images_processed
 
 async def determine_pdf_page_count(file: UploadFile) -> int:

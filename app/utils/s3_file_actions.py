@@ -30,7 +30,7 @@ class S3OperationError(Exception):
 
 class S3FileActions:
     # Constants for file handling
-    CHUNK_SIZE = 1024 * 1024  # 1MB chunks for streaming
+    CHUNK_SIZE = 3 * 1024 * 1024  # 3MB chunks for streaming
     RETRY_ATTEMPTS = 3
     MIN_RETRY_WAIT = 1  # seconds
     MAX_RETRY_WAIT = 10  # seconds
@@ -44,7 +44,14 @@ class S3FileActions:
             region_name=os.getenv('AWS_REGION'),
             config=Config(
                 signature_version='s3v4',
-                retries={'max_attempts': self.RETRY_ATTEMPTS, 'mode': 'adaptive'}
+                retries={'max_attempts': self.RETRY_ATTEMPTS, 'mode': 'adaptive'},
+                s3={
+                    'payload_signing_enabled': True,
+                    'use_accelerate_endpoint': False,
+                    'addressing_style': 'path',
+                    'checksum_validation': True,  # Enable checksum validation
+                    'use_dualstack_endpoint': False
+                }
             )
         )
         self.bucket = os.getenv('AWS_TEMP_BUCKET')
@@ -123,6 +130,92 @@ class S3FileActions:
         finally:
             await asyncio.to_thread(stream.close)
 
+    class SeekableStreamWrapper:
+        """Makes a non-seekable stream appear seekable by buffering only what's needed."""
+        
+        def __init__(self, stream):
+            self.stream = stream
+            self._buffer = io.BytesIO()
+            self._position = 0
+            self._eof = False
+            
+        def tell(self):
+            return self._position
+            
+        def seek(self, offset, whence=io.SEEK_SET):
+            if whence == io.SEEK_SET:
+                position = offset
+            elif whence == io.SEEK_CUR:
+                position = self._position + offset
+            else:  # io.SEEK_END - we need to read the whole stream
+                if offset != 0:
+                    raise io.UnsupportedOperation("can't do nonzero end-relative seeks")
+                # Read the rest of the stream
+                while not self._eof:
+                    chunk = self.stream.read(1024 * 1024)  # 1MB chunks
+                    if not chunk:
+                        self._eof = True
+                        break
+                    self._buffer.write(chunk)
+                position = self._buffer.getbuffer().nbytes + offset
+                
+            # If we need to read more data
+            if position > self._buffer.getbuffer().nbytes and not self._eof:
+                to_read = position - self._buffer.getbuffer().nbytes
+                while to_read > 0 and not self._eof:
+                    chunk = self.stream.read(min(1024 * 1024, to_read))
+                    if not chunk:
+                        self._eof = True
+                        break
+                    self._buffer.write(chunk)
+                    to_read -= len(chunk)
+                    
+            self._position = min(position, self._buffer.getbuffer().nbytes)
+            self._buffer.seek(self._position)
+            return self._position
+            
+        def read(self, size=-1):
+            if size == -1:
+                # Read the rest of the buffer
+                data = self._buffer.read()
+                # Then read the rest of the stream
+                while not self._eof:
+                    chunk = self.stream.read(1024 * 1024)  # 1MB chunks
+                    if not chunk:
+                        self._eof = True
+                        break
+                    self._buffer.write(chunk)
+                    data += chunk
+                self._position = self._buffer.tell()
+                return data
+                
+            # First try reading from buffer
+            data = self._buffer.read(size)
+            read_size = len(data)
+            
+            # Need more data from stream
+            if read_size < size and not self._eof:
+                remaining = size - read_size
+                chunk = self.stream.read(remaining)
+                if not chunk:
+                    self._eof = True
+                else:
+                    self._buffer.write(chunk)
+                    data += chunk
+                
+            self._position = self._buffer.tell()
+            return data
+            
+        def seekable(self):
+            return True
+            
+        def readable(self):
+            return True
+            
+        def close(self):
+            self.stream.close()
+            self._buffer.close()
+
     @retry(
         stop=stop_after_attempt(RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=MIN_RETRY_WAIT, max=MAX_RETRY_WAIT),
@@ -134,17 +227,30 @@ class S3FileActions:
         start_time = time.time()
         logger.info(f"Getting streaming body for key: {key}")
         try:
-            stream = await asyncio.to_thread(
-                smart_open.open,
-                f"s3://{self.bucket}/{key}",
-                'rb',
-                transport_params={'client': self.s3_client}
+            # Get raw stream from S3
+            logger.info("Calling S3 get_object")
+            response = await asyncio.to_thread(
+                self.s3_client.get_object,
+                Bucket=self.bucket,
+                Key=key
             )
+            
+            # Get the raw stream
+            stream = response['Body']
+            
+            # Create a seekable wrapper around the stream
+            seekable_stream = self.SeekableStreamWrapper(stream)
+            logger.info("Created seekable stream wrapper")
+            
             log_duration(start_time, "get_streaming_body")
-            return stream
+            return seekable_stream
+            
         except Exception as e:
             logger.error(f"Failed to get S3 stream: {str(e)}", exc_info=True)
             raise S3OperationError(f"Failed to get S3 stream: {str(e)}")
+        finally:
+            if 'stream' in locals() and not isinstance(stream, self.SeekableStreamWrapper):
+                await asyncio.to_thread(stream.close)
 
     @retry(
         stop=stop_after_attempt(RETRY_ATTEMPTS),

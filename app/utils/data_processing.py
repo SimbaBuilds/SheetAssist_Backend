@@ -184,7 +184,7 @@ def compute_dataset_diff(old_df: pd.DataFrame, new_df: pd.DataFrame,
             logging.info(f"Single row comparison result: has_differences={has_differences}")
         else:
             logging.info("Processing multiple rows comparison")
-            are_equal = (old_subset.fillna(pd.NA) == new_subset.fillna(pd.NA)).all(axis=1)
+            are_equal = (old_subset.fillna(-999999999) == new_subset.fillna(-999999999)).all(axis=1)
             modified_indices = common_indices[~are_equal]
     else:
         modified_indices = pd.Index([])

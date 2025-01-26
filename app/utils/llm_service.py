@@ -20,6 +20,10 @@ import asyncio
 from app.utils.s3_file_actions import s3_file_actions
 from app.utils.s3_file_management import temp_file_manager
 import gc
+from PyPDF2 import PdfReader, PdfWriter
+import tempfile
+from pdf2image import convert_from_path
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -78,17 +82,12 @@ class BaseVisionProcessor:
         doc = None
         
         try:
-            # Get S3 object stream
-            response = await asyncio.to_thread(
-                s3_file_actions.s3_client.get_object,
-                Bucket=s3_file_actions.bucket,
-                Key=s3_key
-            )
-            stream = response['Body']
+            # Get seekable stream using s3_file_actions
+            stream = await asyncio.to_thread(s3_file_actions.get_streaming_body, s3_key)
             
-            # Open PDF stream without loading entire file
-            doc = fitz.open(stream=stream, filetype="pdf")
-            total_pages = len(doc)
+            # Open PDF stream with PyPDF2
+            doc = PdfReader(stream)
+            total_pages = len(doc.pages)
             
             # Determine page range
             start_page = int(page_range[0]) if page_range else 0
@@ -96,11 +95,18 @@ class BaseVisionProcessor:
             
             for page_num in range(start_page, end_page):
                 try:
-                    # Load and process one page at a time
-                    page = doc.load_page(page_num)
-                    pix = page.get_pixmap()
-                    img_bytes = pix.tobytes()
-                    b64_page = base64.b64encode(img_bytes).decode()
+                    # Get page and convert to image
+                    page = doc.pages[page_num]
+                    
+                    # Create a temporary file for the page image
+                    with io.BytesIO() as img_buffer:
+                        # Convert page to image using pdf2image or similar
+                        # For now, we'll use a placeholder approach
+                        # TODO: Implement proper PDF page to image conversion
+                        img_bytes = await self._convert_pdf_page_to_image(page)
+                        img_buffer.write(img_bytes)
+                        img_buffer.seek(0)
+                        b64_page = base64.b64encode(img_buffer.read()).decode()
                     
                     # Process with provider-specific vision API
                     page_content = await self._process_single_page(
@@ -115,8 +121,6 @@ class BaseVisionProcessor:
                     
                 finally:
                     # Clean up page resources immediately
-                    if pix:
-                        pix = None
                     if page:
                         page = None
                     # Force garbage collection after each page
@@ -135,9 +139,7 @@ class BaseVisionProcessor:
                 "error": str(e)
             }
         finally:
-            # Clean up all resources
-            if doc:
-                doc.close()
+            # Clean up resources
             if stream:
                 await asyncio.to_thread(stream.close)
 
@@ -155,19 +157,24 @@ class BaseVisionProcessor:
         try:
             # Open file as stream
             stream = open(pdf_path, 'rb')
-            doc = fitz.open(stream=stream, filetype="pdf")
+            doc = PdfReader(stream)
             
             # Determine page range
             start_page = int(page_range[0]) if page_range else 0
-            end_page = min(int(page_range[1]), len(doc)) if page_range else len(doc)
+            end_page = min(int(page_range[1]), len(doc.pages)) if page_range else len(doc.pages)
             
             for page_num in range(start_page, end_page):
                 try:
-                    # Load and process one page at a time
-                    page = doc.load_page(page_num)
-                    pix = page.get_pixmap()
-                    img_bytes = pix.tobytes()
-                    b64_page = base64.b64encode(img_bytes).decode()
+                    # Get page and convert to image
+                    page = doc.pages[page_num]
+                    
+                    # Create a temporary file for the page image
+                    with io.BytesIO() as img_buffer:
+                        # Convert page to image
+                        img_bytes = await self._convert_pdf_page_to_image(page)
+                        img_buffer.write(img_bytes)
+                        img_buffer.seek(0)
+                        b64_page = base64.b64encode(img_buffer.read()).decode()
                     
                     # Process with provider-specific vision API
                     page_content = await self._process_single_page(
@@ -175,15 +182,13 @@ class BaseVisionProcessor:
                         query,
                         input_data_snapshot,
                         page_num + 1,
-                        len(doc)
+                        len(doc.pages)
                     )
                     
-                    all_page_content.append(f"[Page {page_num + 1} of {len(doc)}]\n{page_content}")
+                    all_page_content.append(f"[Page {page_num + 1} of {len(doc.pages)}]\n{page_content}")
                     
                 finally:
                     # Clean up page resources immediately
-                    if pix:
-                        pix = None
                     if page:
                         page = None
                     # Force garbage collection after each page
@@ -191,9 +196,7 @@ class BaseVisionProcessor:
                     await asyncio.sleep(float(os.getenv("SLEEP_TIME")))
         
         finally:
-            # Clean up all resources
-            if doc:
-                doc.close()
+            # Clean up resources
             if stream:
                 stream.close()
         
@@ -209,9 +212,9 @@ class BaseVisionProcessor:
         doc = None
         
         try:
-            # Open PDF stream without loading entire file
-            doc = fitz.open(stream=stream, filetype="pdf")
-            total_pages = len(doc)
+            # Open PDF stream with PyPDF2
+            doc = PdfReader(stream)
+            total_pages = len(doc.pages)
             
             # Determine page range
             start_page = int(page_range[0]) if page_range else 0
@@ -219,11 +222,16 @@ class BaseVisionProcessor:
             
             for page_num in range(start_page, end_page):
                 try:
-                    # Load and process one page at a time
-                    page = doc.load_page(page_num)
-                    pix = page.get_pixmap()
-                    img_bytes = pix.tobytes()
-                    b64_page = base64.b64encode(img_bytes).decode()
+                    # Get page and convert to image
+                    page = doc.pages[page_num]
+                    
+                    # Create a temporary file for the page image
+                    with io.BytesIO() as img_buffer:
+                        # Convert page to image
+                        img_bytes = await self._convert_pdf_page_to_image(page)
+                        img_buffer.write(img_bytes)
+                        img_buffer.seek(0)
+                        b64_page = base64.b64encode(img_buffer.read()).decode()
                     
                     # Process with provider-specific vision API
                     page_content = await self._process_single_page(
@@ -238,8 +246,6 @@ class BaseVisionProcessor:
                     
                 finally:
                     # Clean up page resources immediately
-                    if pix:
-                        pix = None
                     if page:
                         page = None
                     # Force garbage collection after each page
@@ -257,10 +263,10 @@ class BaseVisionProcessor:
                 "status": "error",
                 "error": str(e)
             }
-        finally:
-            # Clean up doc but don't close stream (caller's responsibility)
-            if doc:
-                doc.close()
+
+    async def _convert_pdf_page_to_image(self, page) -> bytes:
+        """Convert a PDF page to an image. To be implemented by provider-specific classes."""
+        raise NotImplementedError
 
     async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
         """Process a single page - to be implemented by provider-specific classes"""
@@ -353,6 +359,31 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
                 "error": str(e)
             }
 
+    async def _convert_pdf_page_to_image(self, page) -> bytes:
+        """Convert a PDF page to an image using pdf2image"""
+        try:
+            # Create a temporary file for the page
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+                # Write the page to a temporary PDF
+                writer = PdfWriter()
+                writer.add_page(page)
+                writer.write(temp_pdf)
+                temp_pdf.flush()
+                
+                # Convert the page to image
+                images = convert_from_path(temp_pdf.name, dpi=200, fmt='jpeg')
+                
+                # Convert PIL image to bytes
+                img_byte_arr = io.BytesIO()
+                images[0].save(img_byte_arr, format='JPEG')
+                img_byte_arr.seek(0)
+                
+                return img_byte_arr.getvalue()
+        finally:
+            # Clean up temporary file
+            if 'temp_pdf' in locals():
+                os.unlink(temp_pdf.name)
+
     async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
         try:
             # Convert base64 to image bytes
@@ -440,6 +471,7 @@ class AnthropicVisionProcessor(BaseVisionProcessor):
             if use_s3 and s3_key:
                 # Get metadata to get content length
                 metadata = await temp_file_manager.get_file_metadata(s3_key)
+                logger.info(f"metadata: {metadata}")
                 if not metadata:
                     raise ValueError(f"Could not get metadata for S3 key: {s3_key}")
                 content_length = int(metadata.get('ContentLength', 0))
@@ -515,6 +547,31 @@ class AnthropicVisionProcessor(BaseVisionProcessor):
                 "status": "error",
                 "error": str(e)
             }
+
+    async def _convert_pdf_page_to_image(self, page) -> bytes:
+        """Convert a PDF page to an image using pdf2image"""
+        try:
+            # Create a temporary file for the page
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+                # Write the page to a temporary PDF
+                writer = PdfWriter()
+                writer.add_page(page)
+                writer.write(temp_pdf)
+                temp_pdf.flush()
+                
+                # Convert the page to image
+                images = convert_from_path(temp_pdf.name, dpi=200, fmt='jpeg')
+                
+                # Convert PIL image to bytes
+                img_byte_arr = io.BytesIO()
+                images[0].save(img_byte_arr, format='JPEG')
+                img_byte_arr.seek(0)
+                
+                return img_byte_arr.getvalue()
+        finally:
+            # Clean up temporary file
+            if 'temp_pdf' in locals():
+                os.unlink(temp_pdf.name)
 
     async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
         try:
