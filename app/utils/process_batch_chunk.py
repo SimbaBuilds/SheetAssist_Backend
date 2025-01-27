@@ -50,9 +50,7 @@ async def process_batch_chunk(
         current_chunk_info = page_chunks[current_chunk]
         page_range = current_chunk_info['page_range']
         supabase.table("batch_jobs").update({
-            "status": "processing",
-            "started_at": datetime.now(UTC).isoformat(),
-            "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
+            "started_at": datetime.now(UTC).isoformat()
         }).eq("job_id", job_id).execute()
 
         # Create new UploadFile objects for preprocessing
@@ -143,19 +141,21 @@ async def process_batch_chunk(
         error_msg = f"Chunk processing error: {result.error}" if result.error else None
         chunk_status = job_data["chunk_status"]
         if result.error:
-            new_chunk_status = chunk_status + f"Chunk {current_chunk+1}: Error" 
+            chunk_status.append(f"Chunk {current_chunk+1}: Error")
         else:
-            chunk_status + f"Chunk {current_chunk+1}: Success"
+            chunk_status.append(f"Chunk {current_chunk+1}: Success") 
+
         
         supabase.table("batch_jobs").update({
             "status": "processing",
             "error_message": error_msg,
-            "chunk_status": new_chunk_status
+            "chunk_status": chunk_status
 
         }).eq("job_id", job_id).execute()
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
 
         logging.info(f"CHUNK STATUS: {job_response.data[0]['chunk_status']}")
+
         
 
             
@@ -190,8 +190,6 @@ async def process_batch_chunk(
         supabase.table("batch_jobs").update({
             "images_processed": num_images_processed,
             "status": "processing",
-            "started_at": datetime.now(UTC).isoformat(),
-            "message": f"Processing pages {page_range[0] + 1} to {page_range[1]}"
         }).eq("job_id", job_id).execute()
 
         return ChunkResponse(
