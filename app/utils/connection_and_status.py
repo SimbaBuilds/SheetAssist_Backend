@@ -37,10 +37,9 @@ def construct_status_response(job: dict) -> QueryResponse:
 
     # Get the current status and data for the job
     current_status = job.get("status", "unknown")
-    logger.info(f"Current chunk: {int(job.get('current_chunk'))+1}, Total chunks: {len(job.get('page_chunks', []))}")
     page_chunks = job.get('page_chunks', [])
     current_chunk = int(job.get('current_chunk', 0))
-    message = job.get("message", "")
+    message = job.get("message")
     file_id = page_chunks[current_chunk]['file_id'] # the file name
     output_preferences = job.get('output_preferences')
 
@@ -54,18 +53,18 @@ def construct_status_response(job: dict) -> QueryResponse:
     # Handle cases
     if current_status == "completed":
         if output_preferences['type'] == 'online':
-            message += f"Processing complete"
+            new_message = message + f"Processing complete."
 
             return QueryResponse(
                 status=current_status,
-                message=message,
+                message=new_message,
                 num_images_processed=job["total_images_processed"],
             )
         else:  # download type
-            message += f"Processing complete. Your file should download automatically"
+            new_message = message + f"Processing complete. Your file should download automatically"
             return QueryResponse(
                 status=current_status,
-                message=message,
+                message=new_message,
                 files=[FileInfo(
                     file_path=job["result_file_path"],
                     media_type=job["result_media_type"],
@@ -92,22 +91,20 @@ def construct_status_response(job: dict) -> QueryResponse:
     else:  # processing        
         start_page = int(page_chunks[current_chunk]['page_range'][0]) + 1
         end_page = int(page_chunks[current_chunk]['page_range'][1])
-        logger.info(f"Start page: {start_page}, End page: {end_page}")
         current_chunk = int(job.get('current_chunk', 0))
         chunk_status = job.get("chunk_status", [])
-        logger.info(f"Current chunk: {current_chunk}, Chunk status length: {len(chunk_status)}, Chunk status: {chunk_status}")
         chunk_success = "Success" in chunk_status[current_chunk] if current_chunk < len(chunk_status) else False
-        logger.info(f"Chunk status: {chunk_status}")
+        logger.info(f"CHUNK STATUS: {chunk_status[current_chunk]}, Current chunk: {current_chunk}, Chunk SUCCESS: {chunk_success}")
         if output_preferences['type'] == 'online':
             if output_preferences['modify_existing']:
-                message += f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
+                new_message = message + f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
             else:
-                message += f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
+                new_message = message + f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
         else: #download output
-            message += f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
+            new_message = message + f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect those pages and your output destination.\n"
         logger.info(f"Message: {message}")
         return QueryResponse(
             status=current_status,
-            message=message,
+            message=new_message,
             num_images_processed=job['total_images_processed'],
         )

@@ -186,10 +186,8 @@ async def process_batch_chunk(
         # Cleanup temporary files
         temp_file_manager.cleanup_marked()
 
-        # Update job with images processed count
         supabase.table("batch_jobs").update({
-            "images_processed": num_images_processed,
-            "status": "processing",
+            "status": "processing"
         }).eq("job_id", job_id).execute()
 
         return ChunkResponse(

@@ -574,6 +574,7 @@ async def process_query_batch_endpoint(
             # Accumulate total images processed
             total_images_processed += response.num_images_processed
 
+            logger.info(f"TOTAL images processed: {total_images_processed}")
             # Update progress including images processed
             processed_pages = min((chunk_index + 1) * int(os.getenv("CHUNK_SIZE")), job_data["total_pages"])
             supabase.table("batch_jobs").update({
@@ -596,7 +597,7 @@ async def process_query_batch_endpoint(
             status=response.status,
             message=response.message,
             files=response.files,
-            num_images_processed=response.num_images_processed,
+            num_images_processed=total_images_processed,
             job_id=response.job_id
         )
 
