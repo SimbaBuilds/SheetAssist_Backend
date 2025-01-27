@@ -73,7 +73,7 @@ async def process_batch_chunk(
             )
             upload_files.append(upload_file)
 
-        # Process chunk
+        # PRE-PROCESS
         try:
             preprocessed_data, num_images_processed = await preprocess_files(
                 files=upload_files,
@@ -109,7 +109,7 @@ async def process_batch_chunk(
 
             raise ValueError(error_msg)
 
-        #append previous chunk to input data if it exists and output type is download (online sheet output appends each batch, persisting past results automatically)
+        #append PREVIOUS chunk to input data if it exists and output type is DOWNLOAD (online sheet output appends each batch, persisting past results automatically)
         if previous_chunk_return_value and request_data.output_preferences.type == "download":
             job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
             if not job_response.data:
@@ -128,7 +128,8 @@ async def process_batch_chunk(
             preprocessed_data.append(previous_chunk_data)
 
         sandbox = EnhancedPythonInterpreter()
-        #Obtain SandboxResult
+
+        #PROCESS_QUERY_ALGO
         result = await process_query_algo( 
             request=None,  # Not needed for core processing
             query=request_data.query,
@@ -141,13 +142,21 @@ async def process_batch_chunk(
         #Update job status and chunk status
         error_msg = f"Chunk processing error: {result.error}" if result.error else None
         chunk_status = job_data["chunk_status"]
-        new_chunk_status = chunk_status + f"Chunk {current_chunk+1}: Error" if result.error else chunk_status + f"Chunk {current_chunk+1}: Success"
+        if result.error:
+            new_chunk_status = chunk_status + f"Chunk {current_chunk+1}: Error" 
+        else:
+            chunk_status + f"Chunk {current_chunk+1}: Success"
+        
         supabase.table("batch_jobs").update({
             "status": "processing",
             "error_message": error_msg,
             "chunk_status": new_chunk_status
 
         }).eq("job_id", job_id).execute()
+        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+
+        logging.info(f"CHUNK STATUS: {job_response.data[0]['chunk_status']}")
+        
 
             
         # Handle post-processing

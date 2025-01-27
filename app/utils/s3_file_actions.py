@@ -54,7 +54,7 @@ class S3FileActions:
                     'payload_signing_enabled': True,
                     'use_accelerate_endpoint': False,
                     'addressing_style': 'path',
-                    'checksum_validation': True,  # Enable checksum validation
+                    'checksum_validation': False,  # Disable checksum validation
                     'use_dualstack_endpoint': False
                 }
             )
@@ -491,8 +491,6 @@ class S3PDFStreamer:
 
     def stream_page(self, page_number: int) -> bytes:
         """Stream a specific page from the PDF."""
-        if not 1 <= page_number <= self.page_count:
-            raise ValueError(f"Page number {page_number} is out of range (1-{self.page_count})")
 
         try:
             # Read the entire file since we need it for reliable page extraction

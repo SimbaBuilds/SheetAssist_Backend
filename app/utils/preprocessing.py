@@ -75,99 +75,64 @@ async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata]
         raise
 
 async def pdf_classifier(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> bool:
-    """Classify if a PDF is image-like (True) or text-based (False) by checking first page"""
+    """
+    Classify if a PDF is image-like (scanned) or text-based.
+    Returns True if the PDF is image-like (scanned), False if text-based.
+    """
     doc = None
-    stream = None
-    
     try:
-        # If file has s3_key, process directly from S3
+        # Handle S3 files using S3PDFStreamer
         if isinstance(file, FileUploadMetadata) and file.s3_key:
             try:
-                # Get S3 object without loading entire file
-                response = await asyncio.to_thread(
-                    s3_file_actions.s3_client.get_object,
-                    Bucket=s3_file_actions.bucket,
-                    Key=file.s3_key
-                )
-                stream = response['Body']
+                # Use S3PDFStreamer for efficient page streaming
+                pdf_streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, file.s3_key)
                 
-                # Open PDF stream without loading entire file
-                doc = fitz.open(stream=stream, filetype="pdf")
-                if len(doc) > 0:
-                    # Only check first page
-                    page = doc.load_page(0)
-                    page_text = page.get_text().strip()
-                    page = None  # Release page immediately
-                    
-                    # If we can read text, it's not image-like
-                    return len(page_text) == 0
-                
+                # Only check first page
+                if pdf_streamer.page_count > 0:
+                    page_data = pdf_streamer.stream_page(1)
+                    doc = fitz.open(stream=BytesIO(page_data), filetype="pdf")
+                    if len(doc) > 0:
+                        page = doc[0]  # More efficient than load_page(0)
+                        page_text = page.get_text().strip()
+                        return len(page_text) == 0
                 return True
                 
             except Exception as e:
-                logger.error(f"Error reading PDF from S3: {str(e)}")
-                return True
-            finally:
-                if stream:
-                    stream.close()
-                if doc:
-                    doc.close()
-
-        # For non-S3 files
-        file_content = await get_file_content(file)
-        
-        if isinstance(file_content, AsyncGenerator):
-            # Create a temporary file for streaming content
-            response = await asyncio.to_thread(
-                s3_file_actions.s3_client.get_object,
-                Bucket=s3_file_actions.bucket,
-                Key=file.s3_key
-            )
-            stream = response['Body']
-            
-            try:
-                doc = fitz.open(stream=stream, filetype="pdf")
-                if len(doc) > 0:
-                    # Only check first page
-                    page = doc.load_page(0)
-                    page_text = page.get_text().strip()
-                    page = None  # Release page immediately
-                    
-                    # If we can read text, it's not image-like
-                    return len(page_text) == 0
+                logger.error(f"Error in PDF classification using S3PDFStreamer: {str(e)}")
+                return True  # Default to image-like on error
                 
-                return True
-                
-            finally:
-                if stream:
-                    stream.close()
-                if doc:
-                    doc.close()
         else:
             # Handle direct file content
-            temp_path = await temp_file_manager.save_temp_file(file_content, "temp.pdf")
             try:
-                doc = fitz.open(temp_path)
-                if len(doc) > 0:
-                    # Only check first page
-                    page = doc.load_page(0)
-                    page_text = page.get_text().strip()
-                    page = None  # Release page immediately
-                    
-                    # If we can read text, it's not image-like
-                    return len(page_text) == 0
+                # Get content as bytes
+                if hasattr(file, 'read'):
+                    if hasattr(file, 'seek'):
+                        file.seek(0)
+                    content = file.read()
+                    if isinstance(content, str):
+                        content = content.encode('utf-8')
+                else:
+                    content = file if isinstance(file, bytes) else file.encode('utf-8')
                 
+                # Use BytesIO for consistent handling
+                doc = fitz.open(stream=BytesIO(content), filetype="pdf")
+                if len(doc) > 0:
+                    page = doc[0]  # More efficient than load_page(0)
+                    page_text = page.get_text().strip()
+                    return len(page_text) == 0
                 return True
                 
-            finally:
-                temp_file_manager.mark_for_cleanup(temp_path)
-                await temp_file_manager.cleanup_marked()
-                if doc:
-                    doc.close()
-            
-    except Exception as e:
-        logger.error(f"Error in PDF classification: {str(e)}")
-        raise ValueError(f"Failed to classify PDF: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error in PDF classification for direct content: {str(e)}")
+                return True  # Default to image-like on error
+                
+    finally:
+        # Clean up resources
+        if doc:
+            try:
+                doc.close()
+            except Exception as e:
+                logger.error(f"Error closing PDF document: {str(e)}")
 
 class FilePreprocessor:
     """Handles preprocessing of various file types for data processing pipeline."""
@@ -850,7 +815,7 @@ async def preprocess_files(
                 logging.error(f"Error processing file {metadata.name}: {error_msg}")
                 raise ValueError(f"Error processing file {metadata.name}: {error_msg}")
 
-    logger.info(f" -- Returning processed_data: {processed_data} and num_images_processed: {preprocessor.num_images_processed} --- ")
+    # logger.info(f" -- Returning processed_data: {processed_data} and num_images_processed: {preprocessor.num_images_processed} --- ")
     return processed_data, preprocessor.num_images_processed
 
 async def determine_pdf_page_count(file: UploadFile) -> int:

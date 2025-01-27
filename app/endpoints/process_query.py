@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 import io
 import asyncio
+from app.utils.s3_file_actions import S3PDFStreamer
 
 
 load_dotenv(override=True)
@@ -72,7 +73,7 @@ async def process_query_entry_endpoint(
                 try:
                     file = files[file_meta.index]
                     content = await file.read()
-                    await file.seek(0)
+                    await file.seek(0)  # Reset file pointer after reading
                     files_data.append({
                         'content': content,
                         'filename': file.filename,
@@ -86,17 +87,30 @@ async def process_query_entry_endpoint(
         for i, file_meta in enumerate(request_data.files_metadata):
             if not file_meta.page_count and file_meta.type == 'application/pdf':
                 if file_meta.s3_key:
-                    # For S3 PDFs, stream only the necessary parts for page count
-                    stream = await s3_file_actions.get_streaming_body(file_meta.s3_key)
-                    reader = PdfReader(stream)
-                    file_meta.page_count = len(reader.pages)
-                    total_pages += file_meta.page_count
-                    await asyncio.to_thread(stream.close)
+                    try:
+                        # Use S3PDFStreamer for more reliable page counting
+                        pdf_streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, file_meta.s3_key)
+                        file_meta.page_count = pdf_streamer.page_count
+                        total_pages += file_meta.page_count
+                    except Exception as e:
+                        logger.error(f"Error getting page count for S3 PDF {file_meta.s3_key}: {str(e)}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to process PDF file {file_meta.name}: {str(e)}"
+                        )
                 else:
-                    file_content = io.BytesIO(files_data[i]['content'])
-                    pdf_reader = PdfReader(file_content)
-                    file_meta.page_count = len(pdf_reader.pages)
-                    total_pages += file_meta.page_count
+                    try:
+                        file_content = io.BytesIO(files_data[i]['content'])
+                        pdf_reader = PdfReader(file_content)
+                        file_meta.page_count = len(pdf_reader.pages)
+                        total_pages += file_meta.page_count
+                        file_content.seek(0)  # Reset file pointer after reading
+                    except Exception as e:
+                        logger.error(f"Error getting page count for uploaded PDF {file_meta.name}: {str(e)}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to process PDF file {file_meta.name}: {str(e)}"
+                        )
 
         #If destination url and no input url, add destination url and sheet name to input urls for processing context
         if request_data.output_preferences.destination_url and not request_data.input_urls and request_data.output_preferences.modify_existing:
@@ -112,8 +126,14 @@ async def process_query_entry_endpoint(
             if file_data['content_type'].startswith('image/'):
                 contains_image_or_like = True
             elif file_data['content_type'] == 'application/pdf':
-                content = request_data.files_metadata[i] if request_data.files_metadata[i].s3_key else io.BytesIO(file_data['content'])
+                if file_meta.s3_key:
+                    content = file_meta  # Pass the metadata object directly
+                else:
+                    # Create a BytesIO object for the PDF content
+                    content = io.BytesIO(file_data['content'])
                 is_image_like = await pdf_classifier(content)
+                if not file_meta.s3_key:
+                    content.seek(0)  # Reset file pointer after classification
                 contains_image_or_like = contains_image_or_like or is_image_like
                 if is_image_like and file_meta.page_count > int(os.getenv("CHUNK_SIZE")):
                     need_to_batch = True
@@ -183,7 +203,7 @@ async def process_query_entry_endpoint(
             # Create new UploadFile objects for the background task
             batch_files = []
             for file_data in files_data:
-                file_obj = io.BytesIO(file_data['content'])
+                file_obj = None if isinstance (file_data['content'], str) else io.BytesIO(file_data['content'])
                 upload_file = UploadFile(
                     file=file_obj,
                     filename=file_data['filename'],

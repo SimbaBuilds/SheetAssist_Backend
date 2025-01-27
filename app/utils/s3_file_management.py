@@ -46,7 +46,7 @@ class S3TempFileManager:
                     'payload_signing_enabled': True,
                     'use_accelerate_endpoint': False,
                     'addressing_style': 'path',
-                    'checksum_validation': True,  # Enable checksum validation
+                    'checksum_validation': False,  # Disable checksum validation
                     'use_dualstack_endpoint': False
                 }
             )
