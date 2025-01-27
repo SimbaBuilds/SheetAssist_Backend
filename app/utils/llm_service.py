@@ -128,7 +128,7 @@ class BaseVisionProcessor:
                     )
                     
                     if page_content:
-                        all_page_content.append(f"[Page {page_num} of {streamer.page_count}]\n{page_content}")
+                        all_page_content.append(f"[Page {page_num + 1} of {streamer.page_count}]\n{page_content}")
                     
                 except Exception as e:
                     logger.error(f"Error processing page {page_num}: {str(e)}")
@@ -370,7 +370,7 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
                 ],
                 max_tokens=MAX_VISION_OUTPUT_TOKENS
             )
-            print(f"\n ------- LLM called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
+            print(f"\n ------- Vision Processor called with query: {query} and input data snapshot: {input_data_snapshot} ------- \n")
             return {
                 "status": "completed",
                 "content": completion.choices[0].message.content
@@ -470,7 +470,7 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
                 return None
                 
             page_content = completion.choices[0].message.content
-            print(f"""\n -------LLM called with query: {query} on page: {page_number} of {total_pages} ------- \n\n
+            print(f"""\n -------Vision Processor called with query: {query} on page: {page_number+1} of {total_pages} ------- \n\n
             Input data snapshot:\n {input_data_snapshot}
             Page Content:\n {page_content}\n
             """)
@@ -670,7 +670,7 @@ class AnthropicVisionProcessor(BaseVisionProcessor):
                 logger.error("Empty content returned from Anthropic")
                 return None
                 
-            print(f"""\n -------LLM called with query: {query} on page: {page_number} of {total_pages} ------- \n\n
+            print(f"""\n -------Vision Processor called with query: {query} on page: {page_number+1} of {total_pages} ------- \n\n
             Input data snapshot:\n {input_data_snapshot}
             Page Content:\n {page_content}\n
             """)

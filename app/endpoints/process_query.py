@@ -265,9 +265,11 @@ async def process_query_status_endpoint(
             raise HTTPException(status_code=404, detail="Job not found")
             
         job = job_response.data[0]
-        
-        # Construct response based on job status
-        return construct_status_response(job)
+        response = construct_status_response(job)
+        supabase.table("batch_jobs").update({
+        "message": response.message
+    }).eq("job_id", job_id).execute()
+        return response
             
     except Exception as e:
         logger.error(f"Error in process_query_status_endpoint: {str(e)}")
@@ -572,7 +574,9 @@ async def process_query_batch_endpoint(
             previous_chunk_return_value = response.result.return_value #tuple
 
             # Accumulate total images processed
-            total_images_processed += response.num_images_processed
+            current_chunk_status = chunk_status[chunk_index]
+            if "Success" in current_chunk_status:
+                total_images_processed += response.num_images_processed
 
             logger.info(f"TOTAL images processed: {total_images_processed}")
             # Update progress including images processed
