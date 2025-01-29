@@ -91,6 +91,7 @@ def construct_status_response(job: dict) -> QueryResponse:
     
     elif current_status == "processing":        
         completed_chunk = int(job.get('current_chunk', 0)) - 1 # -1 because current_chunk already got incremented
+        completed_chunk = max(0, completed_chunk)
         start_page = int(page_chunks[completed_chunk]['page_range'][0]) + 1
         end_page = int(page_chunks[completed_chunk]['page_range'][1])
         chunk_status = job.get("chunk_status", [])

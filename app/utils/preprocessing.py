@@ -733,11 +733,29 @@ async def preprocess_files(
     
     # Process uploaded files using metadata
     if files_metadata:
+        logging.info("Beginning file processing")
+        
+        # Create index mapping accounting for S3 files
+        valid_indices = []
+        for idx, metadata in enumerate(sorted_metadata):
+            if not metadata.s3_key:  # Only count non-S3 files for index mapping
+                valid_indices.append(idx)
+        
         for metadata in sorted_metadata:
             try:
-                file = files[metadata.index] if files else metadata
-                logging.info(f"Preprocessing file: {metadata.name} with type: {metadata.type}")
-                
+                if metadata.s3_key:
+                    # Directly process S3 files without file list access
+                    file = metadata
+                    logging.info(f"Processing S3 file: {metadata.s3_key}")
+                else:
+                    # Calculate adjusted index for local files
+                    adjusted_index = valid_indices.index(metadata.index)
+                    if adjusted_index >= len(files):
+                        raise IndexError(f"Metadata index {metadata.index} out of range for files list (max {len(files)-1})")
+                    
+                    file = files[adjusted_index]
+                    logging.info(f"Processing local file index {adjusted_index}: {metadata.name}")
+
                 # Map MIME types to FilePreprocessor types
                 mime_to_processor = {
                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
@@ -766,8 +784,7 @@ async def preprocess_files(
                     kwargs['query'] = query
 
                 # Process the file - handle S3 files differently
-                if metadata.s3_key:  # <-- Add S3 check
-                    logger.info(f"Processing S3 file with key: {metadata.s3_key}")
+                if metadata.s3_key:
                     content = await preprocessor.preprocess_file(
                         metadata,  # Pass metadata instead of file_obj
                         query, 
