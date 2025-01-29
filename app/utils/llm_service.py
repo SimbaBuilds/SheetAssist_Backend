@@ -100,7 +100,7 @@ class BaseVisionProcessor:
             start_page = int(page_range[0]) if page_range else 1
             end_page = min(int(page_range[1]), streamer.page_count) if page_range else streamer.page_count
             
-            for page_num in range(start_page, end_page + 1):
+            for page_num in range(start_page, end_page):
                 try:
                     # Get page and convert to image
                     page_data = streamer.stream_page(page_num)
@@ -292,14 +292,6 @@ class BaseVisionProcessor:
                 "status": "error",
                 "error": str(e)
             }
-
-    async def _convert_pdf_page_to_image(self, page) -> bytes:
-        """Convert a PDF page to an image. To be implemented by provider-specific classes."""
-        raise NotImplementedError
-
-    async def _process_single_page(self, b64_page: str, query: str, input_data_snapshot: str, page_number: int, total_pages: int) -> str:
-        """Process a single page - to be implemented by provider-specific classes"""
-        raise NotImplementedError
 
 
 class OpenaiVisionProcessor(BaseVisionProcessor):
@@ -738,7 +730,6 @@ class LLMService:
         self._sentiment_analysis_prompt = sentiment_analysis_prompt
         self._file_namer_prompt = file_namer_prompt
         self._gen_visualization_prompt = gen_visualization_prompt
-
 
 
     async def execute_with_fallback(self, operation: str, *args, **kwargs) -> Tuple[str, Any]:

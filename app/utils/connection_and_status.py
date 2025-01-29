@@ -62,7 +62,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                 num_images_processed=job["total_images_processed"],
             )
         else:  # download type
-            new_message = message + f"Processing complete. Your file should download automatically"
+            new_message = existing_message + f"Processing complete. Your file should download automatically."
             return QueryResponse(
                 status=current_status,
                 message=new_message,
@@ -85,17 +85,17 @@ def construct_status_response(job: dict) -> QueryResponse:
     elif current_status == "created":
         return QueryResponse(
             status="created",
-            message=f"Processing pages {page_chunks[current_chunk]['page_range'][0] + 1} to {page_chunks[current_chunk]['page_range'][1]}",
+            message=f"Processing pages {page_chunks[current_chunk]['page_range'][0] + 1} to {page_chunks[current_chunk]['page_range'][1]}.\n",
             num_images_processed=job["total_images_processed"],
         )
     
     elif current_status == "processing":        
-        start_page = int(page_chunks[current_chunk]['page_range'][0]) + 1
-        end_page = int(page_chunks[current_chunk]['page_range'][1])
-        current_chunk = int(job.get('current_chunk', 0))
+        completed_chunk = int(job.get('current_chunk', 0)) - 1 # -1 because current_chunk already got incremented
+        start_page = int(page_chunks[completed_chunk]['page_range'][0]) + 1
+        end_page = int(page_chunks[completed_chunk]['page_range'][1])
         chunk_status = job.get("chunk_status", [])
-        chunk_success = "Success" in chunk_status[current_chunk] if current_chunk < len(chunk_status) else False
-        logger.info(f"CHUNK STATUS: {chunk_status[current_chunk]}, Current chunk: {current_chunk}, Chunk SUCCESS: {chunk_success}")
+        chunk_success = "Success" in chunk_status[completed_chunk] if completed_chunk < len(chunk_status) else False
+        logger.info(f"CHUNK STATUS: {chunk_status[completed_chunk]}, Current chunk: {completed_chunk}, Chunk SUCCESS: {chunk_success}")
         
         # FIX: Use job's existing message as base for new_message
         existing_message = job.get("message", "")

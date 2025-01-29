@@ -179,6 +179,9 @@ async def process_query_entry_endpoint(
                         )
                         start_page += CHUNK_SIZE
             
+            chunk_status_default_list = []
+            for i in range(len(page_chunks)):
+                chunk_status_default_list.append(f"Chunk {i} Status:")
             # Initialize job in database
             response = supabase.table("batch_jobs").insert({
                 "job_id": job_id,
@@ -197,7 +200,7 @@ async def process_query_entry_endpoint(
                 "page_chunks": page_chunks,
                 "current_chunk": 0,
                 "query": request_data.query,
-                "chunk_status": []
+                "chunk_status": chunk_status_default_list
             }).execute()
             
             # Create new UploadFile objects for the background task
@@ -440,7 +443,7 @@ async def process_query_standard_endpoint(
                 )
 
                 # Only cleanup immediately for online type
-                temp_file_manager.cleanup_marked()
+                await temp_file_manager.cleanup_marked()
                 await check_client_connection(request)
                 if request_data.output_preferences.modify_existing:
                     message = f"Data successfully uploaded to {request_data.output_preferences.doc_name} - {request_data.output_preferences.sheet_name}."
@@ -573,7 +576,13 @@ async def process_query_batch_endpoint(
             # Store the return value for the next chunk
             previous_chunk_return_value = response.result.return_value #tuple
 
+                    # Get job data
+            job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
+            if not job_response.data or len(job_response.data) == 0:
+                raise ValueError("Job not found")
+            job_data = job_response.data[0]
             # Accumulate total images processed
+            chunk_status = job_data.get("chunk_status", [])
             current_chunk_status = chunk_status[chunk_index]
             if "Success" in current_chunk_status:
                 total_images_processed += response.num_images_processed

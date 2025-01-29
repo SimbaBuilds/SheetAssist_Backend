@@ -88,14 +88,10 @@ async def process_batch_chunk(
             error_msg = str(e)
             if "limit reached" in error_msg.lower():
                 # Get current job data
-                job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
-                if job_response.data:
-                    job_data = job_response.data[0]
+                if job_data:
                     page_chunks = job_data["page_chunks"]
-                    
                     # Remove unprocessed chunks
                     updated_chunks = page_chunks[:current_chunk + 1]
-                    
                     # Update job with error and truncated chunks
                     supabase.table("batch_jobs").update({
                         "status": "error",
@@ -141,23 +137,14 @@ async def process_batch_chunk(
         error_msg = f"Chunk processing error: {result.error}" if result.error else None
         chunk_status = job_data["chunk_status"]
         if result.error:
-            chunk_status.append(f"Chunk {current_chunk+1}: Error")
+            chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Error"
         else:
-            chunk_status.append(f"Chunk {current_chunk+1}: Success") 
+            chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Success" 
 
         
-        supabase.table("batch_jobs").update({
-            "status": "processing",
-            "error_message": error_msg,
-            "chunk_status": chunk_status
-
-        }).eq("job_id", job_id).execute()
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
 
         logging.info(f"CHUNK STATUS: {job_response.data[0]['chunk_status']}")
-
-        
-
             
         # Handle post-processing
         try:
@@ -175,16 +162,17 @@ async def process_batch_chunk(
             )
         except Exception as e:
             logger.error(f"Error in handle_batch_chunk_result for chunk {current_chunk}: {str(e)}")
-            chunk_status = job_data["chunk_status"]
-            new_chunk_status = chunk_status + f"Chunk {current_chunk+1}: Error"
-            supabase.table("batch_jobs").update({
-                "status": "processing",
-                "error_message": f"Error processing chunk {current_chunk+1}: {str(e)}",
-                "chunk_status": new_chunk_status
-            }).eq("job_id", job_id).execute()
+            chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Error"
+            
+        supabase.table("batch_jobs").update({
+            "status": "processing",
+            "error_message": error_msg,
+            "chunk_status": chunk_status
 
+        }).eq("job_id", job_id).execute()
+        
         # Cleanup temporary files
-        temp_file_manager.cleanup_marked()
+        await temp_file_manager.cleanup_marked()
 
         supabase.table("batch_jobs").update({
             "status": "processing"

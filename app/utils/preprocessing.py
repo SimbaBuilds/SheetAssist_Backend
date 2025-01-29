@@ -454,7 +454,7 @@ class FilePreprocessor:
                 else:
                     content = vision_result
                 
-                self.num_images_processed += (end_page - start_page + 1)
+                self.num_images_processed += (end_page - start_page)
                 return content, "vision_extracted", True
             
             # For non-S3 files, use local processing

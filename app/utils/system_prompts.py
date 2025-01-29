@@ -10,12 +10,13 @@ Context:
 Code generation instructions:
 - The generated code should be enclosed in one set of triple backticks.
 - Each data variable may be of different types (DataFrame, string, list, etc.).
-- Do not attempt to concatenate to an empty or all-NA dataframe -- this is no longer supported by pandas  -- create a new dataframe instead.
+- Do not attempt to concatenate to an empty or all-NA dataframe -- this is no longer supported by pandas -- create a new dataframe instead.
 - Do not forget your imports.
 - Use the simplest method to return the desired value.                
 - Do not include print statements -- ensure the last line is the return value or an assignment statement.
 - The return value can be either a dataframe or a string.
-- If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable. 
+- If no further processing beyond preprocessing needs to be done, return the relevant data in the namespace variable.
+- Post-processing into the user specified format (e.g. csv, txt, google sheet,  etc...) will be handled downstream -- the return value of your code should be a dataframe or string.
 ------
 Generate Python code for the given query and data.   
 """

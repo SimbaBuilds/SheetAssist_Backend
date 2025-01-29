@@ -54,7 +54,7 @@ class S3FileActions:
                     'payload_signing_enabled': True,
                     'use_accelerate_endpoint': False,
                     'addressing_style': 'path',
-                    'checksum_validation': False,  # Disable checksum validation
+                    'checksum_validation': False,  
                     'use_dualstack_endpoint': False
                 }
             )
@@ -324,7 +324,23 @@ def parse_xref_table(s3_client, bucket: str, key: str, xref_offset: int) -> dict
 
 def get_page_offsets(bucket: str, key: str) -> list[int]:
     """Get the actual byte offsets for each page in a PDF stored in S3."""
-    s3 = boto3.client('s3')
+    s3 = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_REGION'),
+            config=Config(
+                signature_version='s3v4',
+                retries={'max_attempts': 3, 'mode': 'adaptive'},
+                s3={
+                    'payload_signing_enabled': True,
+                    'use_accelerate_endpoint': False,
+                    'addressing_style': 'path',
+                    'checksum_validation': False,  
+                    'use_dualstack_endpoint': False
+                }
+            )
+        )
     
     # First, find the xref table offset
     xref_offset = find_xref_offset(s3, bucket, key)

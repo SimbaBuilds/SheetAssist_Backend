@@ -38,15 +38,10 @@ s3_logger.addHandler(console_handler)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Application startup - initializing services")
-    logger.info("Starting S3 temporary file management service")
     await temp_file_manager.start_periodic_cleanup()
     yield
     # Shutdown
-    logger.info("Application shutdown initiated")
-    logger.info("Stopping S3 temporary file management service")
     await temp_file_manager.stop_periodic_cleanup()
-    logger.info("Application shutdown complete")
 
 app = FastAPI(lifespan=lifespan)
 
