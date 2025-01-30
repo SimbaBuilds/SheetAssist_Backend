@@ -78,20 +78,20 @@ def get_data_snapshot(content: Any, data_type: str, is_image_like_pdf: bool = Fa
 def process_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
     """Process a DataFrame to make it JSON serializable by handling datetime, object types, and NA values."""
     processed_df = df.copy()
-    
+    logging.info(f"Processing DataFrame with shape: {processed_df.shape}")
     # Handle datetime columns
     for col in processed_df.select_dtypes(include=['datetime64[ns]']).columns:
         processed_df[col] = processed_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-    
+    logging.info(f"Processed DataFrame with shape: {processed_df.shape}")
     # Handle object columns with numpy types
     for col in processed_df.columns:
-        col_dtype = processed_df[col].dtype
-        if col_dtype == object or str(col_dtype) == 'object':
-            processed_df[col] = processed_df[col].apply(lambda x: x.item() if hasattr(x, 'item') else x)
-    
+        processed_df[col] = processed_df[col].apply(
+            lambda x: x.item() if isinstance(x, (np.number, np.bool_)) else x
+        )
+    logging.info(f"Processed DataFrame with shape: {processed_df.shape}")
     # Replace NaN, NaT, etc with None
     processed_df = processed_df.replace({pd.NaT: None, pd.NA: None, np.nan: None})
-    
+    logging.info(f"Processed DataFrame with shape: {processed_df.shape}")
     return processed_df
 
 @dataclass

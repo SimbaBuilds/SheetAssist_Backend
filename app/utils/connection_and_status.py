@@ -30,7 +30,20 @@ async def check_client_connection(request: Request) -> bool:
     
     return True
 
-
+def prevent_duplicate_message(existing_message: str, new_line: str) -> str:
+    """
+    Checks if the new line is already the last line in the existing message.
+    Returns the combined message without duplication.
+    """
+    if not existing_message:
+        return new_line
+    
+    # Split existing message into lines and get the last non-empty line
+    existing_lines = [line.strip() for line in existing_message.split('\n') if line.strip()]
+    if existing_lines and existing_lines[-1] == new_line.strip():
+        return existing_message
+    
+    return existing_message + new_line
 
 def construct_status_response(job: dict) -> QueryResponse:
     """Helper function to construct status response"""
@@ -100,17 +113,21 @@ def construct_status_response(job: dict) -> QueryResponse:
         
         # FIX: Use job's existing message as base for new_message
         existing_message = job.get("message", "")
+        
+        # Construct the new line based on output preferences and success status
         if output_preferences['type'] == 'online':
             if output_preferences['modify_existing']:
-                new_message = existing_message + f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+                new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
             else:
-                new_message = existing_message + f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+                new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
         else: #download output
-            new_message = existing_message + f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"        
+        # Combine messages without duplication
+        new_message = prevent_duplicate_message(existing_message, new_line)
         
         logger.info(f"Updated message: {new_message}")
         return QueryResponse(
             status=current_status,
-            message=new_message,  # This will now contain cumulative messages
+            message=new_message,
             num_images_processed=job['total_images_processed'],
         )

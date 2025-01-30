@@ -433,12 +433,13 @@ class OpenaiVisionProcessor(BaseVisionProcessor):
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"""Your job is to extract relevant information from this pdf image based on a user query and input data.
-                                Extract only the relevant information from the image based on the query and data.
+                                "text": f"""You are a vision enabled language model at the preprocessing step of data processing pipeline.
+                                Your job is to extract information from this pdf image based on a user query and input data.
+                                Extract all relevant information from the image that would allow other downstream LLM processors to complete processing -- providing structure in your response helps.
                                 If formatting in the image provides information, indicate as much in your response 
                                 (e.g. large text at the top of the image: title: [large text], 
                                 tabular data: table: [tabular data], etc...).
-                                Query and input data snapshot below in triple backticks.
+                                Query and input data snapshot are below in triple backticks:
                                 ```Query: {query} 
                                 Input Data Snapshot: 
                                 {input_data_snapshot}

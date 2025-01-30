@@ -37,13 +37,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata]) -> Union[BinaryIO, AsyncGenerator[bytes, None]]:
+async def get_file_content(file: Union[BinaryIO, str, bytes, FileUploadMetadata, UploadFile]) -> Union[BinaryIO, AsyncGenerator[bytes, None]]:
     """Get file content from various sources including S3"""
     try:
         if isinstance(file, FileUploadMetadata):
             if file.s3_key:
                 # Get content from S3
                 return s3_file_actions.stream_download(file.s3_key)
+            
+        elif isinstance(file, UploadFile):
+            # Handle UploadFile object
+            return file.file
             
         elif isinstance(file, (str, bytes)):
             return io.BytesIO(file if isinstance(file, bytes) else file.encode())
@@ -150,25 +154,42 @@ class FilePreprocessor:
             self.microsoft_integration = MicrosoftIntegration(supabase, user_id)
 
     @staticmethod
-    async def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO, FileUploadMetadata]) -> pd.DataFrame:
+    async def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO, FileUploadMetadata, UploadFile]) -> pd.DataFrame:
         """Process Excel files (.xlsx) and convert to pandas DataFrame"""
         try:
             file_content = await get_file_content(file)
+            # Handle BytesIO content from file.file
+            if hasattr(file_content, 'read'):
+                content = file_content.read()
+                file_content.seek(0)
+                if isinstance(content, bytes):
+                    return pd.read_excel(io.BytesIO(content))
+                return pd.read_excel(io.StringIO(content))
+            
             return pd.read_excel(file_content)
         except Exception as e:
             raise ValueError(f"Error processing Excel file: {str(e)}")
 
     @staticmethod
-    async def process_csv(file: Union[BinaryIO, str, FileUploadMetadata]) -> pd.DataFrame:
+    async def process_csv(file: Union[BinaryIO, str, FileUploadMetadata, UploadFile]) -> pd.DataFrame:
         """Process CSV files and convert to pandas DataFrame"""
         try:
             file_content = await get_file_content(file)
+            
+            # Handle BytesIO content from file.file
+            if hasattr(file_content, 'read'):
+                content = file_content.read()
+                file_content.seek(0)
+                if isinstance(content, bytes):
+                    return pd.read_csv(io.BytesIO(content))
+                return pd.read_csv(io.StringIO(content))
+            
             return pd.read_csv(file_content)
         except Exception as e:
             raise ValueError(f"Error processing CSV file: {str(e)}")
 
     @staticmethod
-    async def process_json(file: Union[BinaryIO, str, FileUploadMetadata]) -> str:
+    async def process_json(file: Union[BinaryIO, str, FileUploadMetadata, UploadFile]) -> str:
         """Process JSON files and convert to string"""
         try:
             file_content = await get_file_content(file)
@@ -181,7 +202,7 @@ class FilePreprocessor:
             raise ValueError(f"Error processing JSON file: {str(e)}")
 
     @staticmethod
-    async def process_text(file: Union[BinaryIO, str, FileUploadMetadata]) -> str:
+    async def process_text(file: Union[BinaryIO, str, FileUploadMetadata, UploadFile]) -> str:
         """Process text files (.txt) and convert to string"""
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         
@@ -204,7 +225,7 @@ class FilePreprocessor:
             raise ValueError(f"Error processing text file: {str(e)}")
 
     @staticmethod
-    async def process_docx(file: Union[BinaryIO, str, FileUploadMetadata]) -> str:
+    async def process_docx(file: Union[BinaryIO, str, FileUploadMetadata, UploadFile]) -> str:
         """Process Word documents (.docx) and convert to string"""
         try:
             file_content = await get_file_content(file)
@@ -719,6 +740,7 @@ async def preprocess_files(
     
     # Sort files_metadata to process CSV and XLSX files first
     if files_metadata:
+        logger.info(f"files_metadata length: {len(files_metadata)}")
         priority_types = {
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'text/csv'
@@ -729,32 +751,29 @@ async def preprocess_files(
             files_metadata,
             key=lambda x: (x.type not in priority_types, x.index)
         )
-    
-    
+        logger.info(f"sorted_metadata: {sorted_metadata}")
+        logger.info(f"files length: {len(files)}")
+        logger.info(f"files_metadata length: {len(files_metadata)}")
+        
+
+
     # Process uploaded files using metadata
     if files_metadata:
         logging.info("Beginning file processing")
         
-        # Create index mapping accounting for S3 files
-        valid_indices = []
-        for idx, metadata in enumerate(sorted_metadata):
-            if not metadata.s3_key:  # Only count non-S3 files for index mapping
-                valid_indices.append(idx)
-        
         for metadata in sorted_metadata:
             try:
                 if metadata.s3_key:
-                    # Directly process S3 files without file list access
+                    # Directly process S3 files using metadata
                     file = metadata
                     logging.info(f"Processing S3 file: {metadata.s3_key}")
                 else:
-                    # Calculate adjusted index for local files
-                    adjusted_index = valid_indices.index(metadata.index)
-                    if adjusted_index >= len(files):
-                        raise IndexError(f"Metadata index {metadata.index} out of range for files list (max {len(files)-1})")
+                    # Use original index directly from metadata
+                    if metadata.index >= len(files):
+                        raise IndexError(f"Metadata index {metadata.index} exceeds files list length {len(files)}")
                     
-                    file = files[adjusted_index]
-                    logging.info(f"Processing local file index {adjusted_index}: {metadata.name}")
+                    file = files[metadata.index]
+                    logging.info(f"Processing local file index {metadata.index}: {metadata.name}")
 
                 # Map MIME types to FilePreprocessor types
                 mime_to_processor = {

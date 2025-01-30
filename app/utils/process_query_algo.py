@@ -40,6 +40,7 @@ async def process_query_algo(
 
     try:
         # Initial code generation and execution
+        print("Initial code generation begun with query:", query, "\nand data:\n", data)
         provider, suggested_code = await llm_service.execute_with_fallback(
             "gen_from_query", 
             query, 

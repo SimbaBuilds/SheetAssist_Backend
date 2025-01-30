@@ -9,6 +9,7 @@ venv/
 .git
 .gitignore
 .pytest_cache
+/dev_utils/
 .coverage
 htmlcov/
 .DS_Store

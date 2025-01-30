@@ -170,34 +170,32 @@ async def create_visualization(
         )
         generated_image_name = f"{generated_image_name[1]}.png"  # Add .png extension to the generated name
 
-        # Save to S3 if the image is large
-        s3_key = None
-        s3_url = None
-        if len(image_data) > 100 * 1024:  # If larger than 100KB
-            try:
-                s3_key = f"visualizations/{user_id}/{generated_image_name}"
-                await s3_file_actions.stream_upload(io.BytesIO(buf.getvalue()), s3_key)
-                s3_url = s3_file_actions.get_presigned_url(s3_key)
-                image_data = None  # Don't send the base64 data if we have S3
-            except Exception as s3_error:
-                logger.error(f"S3 upload error: {str(s3_error)}")
-                # Continue with base64 if S3 upload fails
-                s3_key = None
-                s3_url = None
+        # # Save to S3 if the image is large
+        # s3_key = None
+        # s3_url = None
+        # if len(image_data) > 100 * 1024:  # If larger than 100KB
+        #     try:
+        #         s3_key = f"visualizations/{user_id}/{generated_image_name}"
+        #         await s3_file_actions.stream_upload(io.BytesIO(buf.getvalue()), s3_key)
+        #         s3_url = s3_file_actions.get_presigned_url(s3_key)
+        #         image_data = None  # Don't send the base64 data if we have S3
+        #     except Exception as s3_error:
+        #         logger.error(f"S3 upload error: {str(s3_error)}")
+        #         # Continue with base64 if S3 upload fails
+        #         s3_key = None
+        #         s3_url = None
 
-        # Save locally only if not in S3
-        if not s3_key:
-            temp_image_path = os.path.join(session_dir, generated_image_name)
-            with open(temp_image_path, "wb") as f:
-                f.write(buf.getvalue())
+        # # Save locally only if not in S3
+        # if not s3_key:
+        #     temp_image_path = os.path.join(session_dir, generated_image_name)
+        #     with open(temp_image_path, "wb") as f:
+        #         f.write(buf.getvalue())
 
         return VisualizationSuccessResponse(
             success=True,
             image_data=image_data,
             generated_image_name=generated_image_name,
             message="Visualization generated successfully",
-            s3_key=s3_key,
-            s3_url=s3_url
         )
 
     except Exception as e:

@@ -46,6 +46,26 @@ async def process_batch_chunk(
             
         current_processing_info = BatchProcessingFileInfo(**page_chunks[current_chunk])
         
+        # Create fresh copies of files for this chunk
+        fresh_files = []
+        for file in files:
+            if file.file:  # Only process files that have content (not S3 files)
+                # Read the content
+                content = await file.read()
+                await file.seek(0)  # Reset original file
+                
+                # Create a fresh BytesIO and UploadFile
+                fresh_file_obj = io.BytesIO(content)
+                fresh_upload_file = UploadFile(
+                    file=fresh_file_obj,
+                    filename=file.filename,
+                    headers=file.headers
+                )
+                fresh_files.append(fresh_upload_file)
+            else:
+                # For S3 files, just pass through
+                fresh_files.append(file)
+
         # Update status
         current_chunk_info = page_chunks[current_chunk]
         page_range = current_chunk_info['page_range']
@@ -53,29 +73,11 @@ async def process_batch_chunk(
             "started_at": datetime.now(UTC).isoformat()
         }).eq("job_id", job_id).execute()
 
-        # Create new UploadFile objects for preprocessing
-        upload_files = []
-        for file in files:
-            if hasattr(file, 'file'):
-                content = await file.read()
-                await file.seek(0)
-            else:
-                content = file.read()
-                file.seek(0)
-            
-            file_obj = io.BytesIO(content)
-            upload_file = UploadFile(
-                file=file_obj,
-                filename=file.filename if hasattr(file, 'filename') else 'file',
-                headers={'content-type': file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'}
-            )
-            upload_files.append(upload_file)
-
-        # PRE-PROCESS
+        # PRE-PROCESS with fresh files
         try:
             preprocessed_data, num_images_processed = await preprocess_files(
-                files=upload_files,
-                files_metadata=[current_processing_info.metadata],
+                files=fresh_files,  # Use fresh files here
+                files_metadata=request_data.files_metadata,
                 input_urls=request_data.input_urls,
                 query=request_data.query,
                 session_dir=session_dir,

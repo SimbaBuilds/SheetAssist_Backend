@@ -16,24 +16,23 @@ import uvicorn
 import logging
 from app.endpoints import process_query, download, get_doc_title, data_visualization
 from app.utils.s3_file_management import temp_file_manager
-from app.dev_utils.memory_profiler import MemoryProfilerMiddleware
 from contextlib import asynccontextmanager
 
-# Configure logging
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# # Configure logging
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Configure console handler
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
+# # Configure console handler
+# console_handler = logging.StreamHandler()
+# console_handler.setFormatter(formatter)
 
-# Configure root logger
-logging.basicConfig(level=logging.INFO, handlers=[console_handler])
-logger = logging.getLogger(__name__)
+# # Configure root logger
+# logging.basicConfig(level=logging.INFO, handlers=[console_handler])
+# logger = logging.getLogger(__name__)
 
-# Configure S3 logger
-s3_logger = logging.getLogger("s3_operations")
-s3_logger.setLevel(logging.INFO)
-s3_logger.addHandler(console_handler)
+# # Configure S3 logger
+# s3_logger = logging.getLogger("s3_operations")
+# s3_logger.setLevel(logging.INFO)
+# s3_logger.addHandler(console_handler)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,8 +44,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Add memory profiler middleware before other middleware
-app.add_middleware(MemoryProfilerMiddleware)
+# # Add memory profiler middleware before other middleware
+# app.add_middleware(MemoryProfilerMiddleware)
 
 @app.middleware("http")
 async def error_logging_middleware(request: Request, call_next):
@@ -54,9 +53,9 @@ async def error_logging_middleware(request: Request, call_next):
         response = await call_next(request)
         return response
     except Exception as e:
-        logger.error(f"Request failed: {request.url}")
-        logger.error(f"Error details: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        # logger.error(f"Request failed: {request.url}")
+        # logger.error(f"Error details: {str(e)}")
+        # logger.error(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
             status_code=500,
             content={

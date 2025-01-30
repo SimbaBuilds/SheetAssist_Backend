@@ -10,7 +10,6 @@ import tenacity
 from tenacity import retry, stop_after_attempt, wait_exponential
 import logging
 import time
-from app.dev_utils.memory_profiler import profile_memory
 from pypdf import PdfReader
 from io import BytesIO
 import re
@@ -67,7 +66,6 @@ class S3FileActions:
         wait=wait_exponential(multiplier=MIN_RETRY_WAIT, max=MAX_RETRY_WAIT),
         reraise=True
     )
-    @profile_memory
     async def stream_upload(self, file: BinaryIO, key: str) -> str:
         """Stream file directly to S3 with retry logic and proper error handling"""
         start_time = time.time()
@@ -103,7 +101,6 @@ class S3FileActions:
         wait=wait_exponential(multiplier=MIN_RETRY_WAIT, max=MAX_RETRY_WAIT),
         reraise=True
     )
-    @profile_memory
     async def stream_download(self, key: str) -> AsyncGenerator[bytes, None]:
         """Stream file from S3 in chunks"""
         start_time = time.time()
@@ -226,7 +223,6 @@ class S3FileActions:
         wait=wait_exponential(multiplier=MIN_RETRY_WAIT, max=MAX_RETRY_WAIT),
         reraise=True
     )
-    @profile_memory
     async def get_streaming_body(self, key: str) -> BinaryIO:
         """Get a streaming body for reading from S3 with retry logic"""
         start_time = time.time()
@@ -262,7 +258,6 @@ class S3FileActions:
         wait=wait_exponential(multiplier=MIN_RETRY_WAIT, max=MAX_RETRY_WAIT),
         reraise=True
     )
-    @profile_memory
     async def get_file_range(self, key: str, start: int, end: int) -> bytes:
         """Get specific byte range from S3 file with retry logic"""
         start_time = time.time()

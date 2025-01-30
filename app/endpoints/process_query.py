@@ -58,6 +58,7 @@ async def process_query_entry_endpoint(
         
         # Store file contents in memory before background processing
         files_data = []
+        i = 0
         for file_meta in request_data.files_metadata:
             if file_meta.s3_key:  # Explicit check for S3 files
                 # For S3 files, just store the metadata - no content loading
@@ -68,10 +69,11 @@ async def process_query_entry_endpoint(
                 })
             else:
                 # Handle regular files using the index from metadata
+    
                 if not hasattr(file_meta, 'index'):
                     raise HTTPException(status_code=400, detail=f"Missing index for uploaded file {file_meta.name}")
                 try:
-                    file = files[file_meta.index]
+                    file = files[i]
                     content = await file.read()
                     await file.seek(0)  # Reset file pointer after reading
                     files_data.append({
@@ -79,9 +81,23 @@ async def process_query_entry_endpoint(
                         'filename': file.filename,
                         'content_type': file.content_type
                     })
+                    i += 1
                 except IndexError:
                     raise HTTPException(status_code=400, detail=f"No uploaded file found at index {file_meta.index} for {file_meta.name}")
         
+                    # Create new UploadFile objects for the background task
+        
+        upload_files = []
+        for file_data in files_data:
+            file_obj = None if isinstance (file_data['content'], str) else io.BytesIO(file_data['content'])
+            upload_file = UploadFile(
+                file=file_obj,
+                filename=file_data['filename'],
+                headers={'content-type': file_data['content_type']}
+            )
+            upload_files.append(upload_file)
+
+        logger.info(f"LENGTH of upload_files: {len(upload_files)}")
         total_pages = 0
         # Update page counts
         for i, file_meta in enumerate(request_data.files_metadata):
@@ -202,18 +218,7 @@ async def process_query_entry_endpoint(
                 "query": request_data.query,
                 "chunk_status": chunk_status_default_list
             }).execute()
-            
-            # Create new UploadFile objects for the background task
-            batch_files = []
-            for file_data in files_data:
-                file_obj = None if isinstance (file_data['content'], str) else io.BytesIO(file_data['content'])
-                upload_file = UploadFile(
-                    file=file_obj,
-                    filename=file_data['filename'],
-                    headers={'content-type': file_data['content_type']}
-                )
-                batch_files.append(upload_file)
-
+            logger.info(f"LENGTH of upload_files: {len(upload_files)}")
             # Start first batch processing in background
             background_tasks.add_task(
                 process_query_batch_endpoint,
@@ -221,7 +226,7 @@ async def process_query_entry_endpoint(
                 user_id=user_id,
                 supabase=supabase,
                 request_data=request_data,
-                files=batch_files,
+                files=upload_files,
                 job_id=job_id,
                 contains_image_or_like=contains_image_or_like
             )
@@ -240,7 +245,7 @@ async def process_query_entry_endpoint(
                 user_id=user_id,
                 supabase=supabase,
                 request_data=request_data,
-                files=files,
+                files=upload_files,
                 background_tasks=background_tasks,
                 contains_image_or_like=contains_image_or_like
             )
@@ -506,31 +511,6 @@ async def process_query_batch_endpoint(
         total_images_processed = 0
         previous_chunk_return_value = None
 
-        # Store file contents for processing
-        files_data = []
-        for i, file_meta in enumerate(request_data.files_metadata):
-            try:
-                if file_meta.s3_key:
-                    # For S3 files, just store the metadata - no content loading
-                    files_data.append({
-                        'content': None,  # No content for S3 files
-                        'filename': file_meta.name,
-                        'content_type': file_meta.type
-                    })
-                else:
-                    # Handle regular files
-                    file = files[file_meta.index]
-                    content = await file.read()
-                    await file.seek(0)
-                    files_data.append({
-                        'content': content,
-                        'filename': file.filename,
-                        'content_type': file.content_type
-                    })
-            except Exception as e:
-                logger.error(f"Error reading file {file_meta.name}: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
-        
         # Get job data
         job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
         if not job_response.data or len(job_response.data) == 0:
@@ -545,27 +525,13 @@ async def process_query_batch_endpoint(
             await check_client_connection(request)
             logger.info(f"Processing chunk {chunk_index + 1} of {len(page_chunks)}")
             
-            # Create new file objects for each chunk
-            # Create new UploadFile objects for preprocessing
-            upload_files = []
-            for file_data in files_data:
-                if file_data['content'] is None:
-                    # Skip S3 files - they'll be handled by their metadata
-                    continue
-                file_obj = io.BytesIO(file_data['content'])
-                upload_file = UploadFile(
-                    file=file_obj,
-                    filename=file_data['filename'],
-                    headers={'content-type': file_data['content_type']}
-                )
-                upload_files.append(upload_file)
 
             # Process the chunk for ChunkResponse
             response = await process_batch_chunk(
                 user_id=user_id,
                 supabase=supabase,
                 request_data=request_data,
-                files=upload_files,
+                files=files,
                 job_id=job_id,
                 session_dir=session_dir,
                 current_chunk=chunk_index,

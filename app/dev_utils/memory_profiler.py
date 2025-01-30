@@ -1,4 +1,3 @@
-from memory_profiler import profile
 import psutil
 import logging
 from functools import wraps
