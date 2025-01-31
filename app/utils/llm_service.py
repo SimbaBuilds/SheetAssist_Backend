@@ -25,6 +25,7 @@ import tempfile
 from pdf2image import convert_from_path
 from io import BytesIO
 from app.utils.s3_file_actions import S3PDFStreamer
+from app.utils.s3_file_actions import S3OperationError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -94,7 +95,11 @@ class BaseVisionProcessor:
         
         try:
             # Initialize S3PDFStreamer
-            streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, s3_key)
+            try:
+                streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, s3_key)
+            except S3OperationError as s3_err:
+                # Propagate S3 errors directly
+                raise s3_err
             
             # Determine page range
             start_page = int(page_range[0]) if page_range else 1
@@ -892,19 +897,26 @@ class LLMService:
         stream: BinaryIO = None
     ) -> Dict[str, str]:
         """Process PDF using Anthropic's vision API"""
-        processor = AnthropicVisionProcessor(self.anthropic_client)
-        # Ensure page_range values are integers if provided
-        if page_range:
-            page_range = (int(page_range[0]), int(page_range[1]))
-        return await processor.process_pdf_with_vision(
-            pdf_path=pdf_path,
-            s3_key=s3_key,
-            query=query,
-            input_data=input_data,
-            page_range=page_range,
-            use_s3=use_s3,
-            stream=stream
-        )
+        try:
+            processor = AnthropicVisionProcessor(self.anthropic_client)
+            # Ensure page_range values are integers if provided
+            if page_range:
+                page_range = (int(page_range[0]), int(page_range[1]))
+            return await processor.process_pdf_with_vision(
+                pdf_path=pdf_path,
+                s3_key=s3_key,
+                query=query,
+                input_data=input_data,
+                page_range=page_range,
+                use_s3=use_s3,
+                stream=stream
+            )
+        except S3OperationError as s3_err:
+            # Propagate S3 errors without fallback
+            return {
+                "status": "error",
+                "error": f"S3 Operation Error: {str(s3_err)}"
+            }
 
     
     

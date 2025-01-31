@@ -197,7 +197,7 @@ async def process_query_entry_endpoint(
             
             chunk_status_default_list = []
             for i in range(len(page_chunks)):
-                chunk_status_default_list.append(f"Chunk {i} Status:")
+                chunk_status_default_list.append(f"Chunk {i+1} Status:")
             # Initialize job in database
             response = supabase.table("batch_jobs").insert({
                 "job_id": job_id,

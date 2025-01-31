@@ -481,8 +481,12 @@ class S3PDFStreamer:
 
     def _get_file_size(self) -> int:
         """Get the total file size from S3."""
-        response = self.s3.head_object(Bucket=self.bucket, Key=self.key)
-        return response['ContentLength']
+        try:
+            response = self.s3.head_object(Bucket=self.bucket, Key=self.key)
+            return response['ContentLength']
+        except Exception as e:
+            logger.error(f"Error getting file size from S3: {str(e)}")
+            raise
 
     @property
     def page_count(self) -> int:
