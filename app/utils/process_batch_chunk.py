@@ -33,7 +33,7 @@ async def process_batch_chunk(
         # Get job data and validate chunk
         logger.info(f"\n\n------- Processing chunk: {current_chunk + 1} (Index: {current_chunk}) -----------\n")
         
-        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
+        job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
         if not job_response.data or len(job_response.data) == 0:
             raise ValueError("Job not found")
             
@@ -69,7 +69,7 @@ async def process_batch_chunk(
         # Update status
         current_chunk_info = page_chunks[current_chunk]
         page_range = current_chunk_info['page_range']
-        supabase.table("batch_jobs").update({
+        supabase.table("jobs").update({
             "started_at": datetime.now(UTC).isoformat()
         }).eq("job_id", job_id).execute()
 
@@ -95,7 +95,7 @@ async def process_batch_chunk(
                     # Remove unprocessed chunks
                     updated_chunks = page_chunks[:current_chunk + 1]
                     # Update job with error and truncated chunks
-                    supabase.table("batch_jobs").update({
+                    supabase.table("jobs").update({
                         "status": "error",
                         "message": "Limit reached.  Please check usage in your account settings.",
                         "error_message": error_msg,
@@ -107,7 +107,7 @@ async def process_batch_chunk(
 
         #append PREVIOUS chunk to input data if it exists and output type is DOWNLOAD (online sheet output appends each batch, persisting past results automatically)
         if previous_chunk_return_value and request_data.output_preferences.type == "download":
-            job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+            job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
             if not job_response.data:
                 raise HTTPException(status_code=404, detail="Job not found")
             job = job_response.data[0]
@@ -144,7 +144,7 @@ async def process_batch_chunk(
             chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Success" 
 
         
-        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
 
         logging.info(f"CHUNK STATUS: {job_response.data[0]['chunk_status']}")
             
@@ -166,7 +166,7 @@ async def process_batch_chunk(
             logger.error(f"Error in handle_batch_chunk_result for chunk {current_chunk}: {str(e)}")
             chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Error"
             
-        supabase.table("batch_jobs").update({
+        supabase.table("jobs").update({
             "status": "processing",
             "error_message": error_msg,
             "chunk_status": chunk_status
@@ -176,7 +176,7 @@ async def process_batch_chunk(
         # Cleanup temporary files
         await temp_file_manager.cleanup_marked()
 
-        supabase.table("batch_jobs").update({
+        supabase.table("jobs").update({
             "status": "processing"
         }).eq("job_id", job_id).execute()
 
@@ -191,7 +191,7 @@ async def process_batch_chunk(
 
     except ValueError as e:  # Specific handling for preprocessing errors
         logger.error(f"Processing error in batch chunk {current_chunk}: {str(e)}")
-        supabase.table("batch_jobs").update({
+        supabase.table("jobs").update({
             "status": "error",
             "error_message": str(e),
             "completed_at": datetime.now(UTC).isoformat()
@@ -199,7 +199,7 @@ async def process_batch_chunk(
         raise
     except Exception as e:
         logger.error(f"Error processing batch chunk {current_chunk}: {str(e)}")
-        supabase.table("batch_jobs").update({
+        supabase.table("jobs").update({
             "status": "error",
             "error_message": str(e),
             "completed_at": datetime.now(UTC).isoformat()

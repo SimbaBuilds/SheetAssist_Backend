@@ -362,7 +362,7 @@ async def handle_batch_destination_upload(
             )
             
             # Get current job to preserve existing output_preferences
-            current_job = supabase.table("batch_jobs").select("*").eq("job_id", job_id).execute()
+            current_job = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
             if not current_job.data:
                 raise HTTPException(status_code=404, detail="Job not found")
             
@@ -371,7 +371,7 @@ async def handle_batch_destination_upload(
             current_preferences["sheet_name"] = suggested_name
             
             # Update with merged preferences
-            supabase.table("batch_jobs").update({
+            supabase.table("jobs").update({
                 "output_preferences": current_preferences
             }).eq("job_id", job_id).execute()
 
@@ -388,7 +388,7 @@ async def handle_batch_destination_upload(
                     suggested_name
                 )
         
-        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
         
         if not job_response.data:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -460,7 +460,7 @@ async def handle_batch_chunk_result(
             type(processed_data).__name__
         )
 
-        job_response = supabase.table("batch_jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
         
         if not job_response.data:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -515,7 +515,7 @@ async def handle_batch_chunk_result(
                         "error_message": error_msg,
                         "completed_at": datetime.now(UTC).isoformat()
                     })
-                    supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+                    supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
                     raise ValueError(error_msg)
 
         elif request_data.output_preferences.type == "online":
@@ -548,11 +548,11 @@ async def handle_batch_chunk_result(
                     "error_message": error_msg,
                     "completed_at": datetime.now(UTC).isoformat()
                 })
-                supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+                supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
                 raise ValueError(error_msg)
 
         # Update job status in database
-        supabase.table("batch_jobs").update(update_data).eq("job_id", job_id).execute()
+        supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
 
         return status, result_file_path, result_media_type
 
@@ -564,5 +564,5 @@ async def handle_batch_chunk_result(
             "error_message": error_msg,
             "completed_at": datetime.now(UTC).isoformat()
         }
-        supabase.table("batch_jobs").update(error_update).eq("job_id", job_id).execute()
+        supabase.table("jobs").update(error_update).eq("job_id", job_id).execute()
         raise ValueError(error_msg)

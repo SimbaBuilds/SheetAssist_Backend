@@ -6,6 +6,7 @@ from typing import Annotated
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
 import logging
+import asyncio
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -52,8 +53,8 @@ async def download_file(
         
         media_type = media_types.get(extension, 'application/octet-stream')
         
-        # Add cleanup task to run after file is sent
-        background_tasks.add_task(temp_file_manager.cleanup_marked)
+        # # Add cleanup task to run after file is sent
+        # background_tasks.add_task(temp_file_manager.cleanup_marked)
         
         logger.info(f"Serving file {filename} to user {user_id}")
         

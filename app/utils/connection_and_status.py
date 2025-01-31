@@ -45,11 +45,12 @@ def prevent_duplicate_message(existing_message: str, new_line: str) -> str:
     
     return existing_message + new_line
 
-def construct_status_response(job: dict) -> QueryResponse:
+def construct_status_response_batch(job: dict) -> QueryResponse:
     """Helper function to construct status response"""
 
     # Get the current status and data for the job
     current_status = job.get("status", "unknown")
+    job_id = job.get("job_id")
     page_chunks = job.get('page_chunks', [])
     current_chunk = int(job.get('current_chunk', 0))
     message = job.get("message")
@@ -73,6 +74,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                 status=current_status,
                 message=new_message,
                 num_images_processed=job["total_images_processed"],
+                job_id=job_id
             )
         else:  # download type
             new_message = existing_message + f"Processing complete. Your file should download automatically."
@@ -86,6 +88,7 @@ def construct_status_response(job: dict) -> QueryResponse:
                     download_url=f"/download?file_path={job['result_file_path']}"
                 )],
                 num_images_processed=job["total_images_processed"],
+                job_id=job_id
             )
     
     elif current_status == "error":
@@ -93,6 +96,7 @@ def construct_status_response(job: dict) -> QueryResponse:
             status="error",
             message=job["error_message"],
             num_images_processed=job["total_images_processed"],
+            job_id=job_id
         )
     
     elif current_status == "created":
@@ -100,6 +104,7 @@ def construct_status_response(job: dict) -> QueryResponse:
             status="created",
             message=f"Processing pages {page_chunks[current_chunk]['page_range'][0] + 1} to {page_chunks[current_chunk]['page_range'][1]}.\n",
             num_images_processed=job["total_images_processed"],
+            job_id=job_id
         )
     
     elif current_status == "processing":        
@@ -130,4 +135,77 @@ def construct_status_response(job: dict) -> QueryResponse:
             status=current_status,
             message=new_message,
             num_images_processed=job['total_images_processed'],
+            job_id=job_id
+        )
+
+def construct_status_response_standard(job: dict) -> QueryResponse:
+    """Helper function to construct status response"""
+
+    # Get the current status and data for the job
+    current_status = job.get("status", "unknown")
+    job_id = job.get("job_id")
+    output_preferences = job.get('output_preferences')
+
+    if output_preferences.get('doc_name'):
+        doc_name = output_preferences.get('doc_name')
+        sheet_name = output_preferences.get('sheet_name')
+    else:
+        doc_name = None
+        sheet_name = None
+    
+    # Handle cases
+    if current_status == "completed":
+        existing_message = job.get("message", "")
+        if output_preferences['type'] == 'online':
+            if output_preferences['modify_existing']:
+                new_message = existing_message + f"Processing complete.  Content has been appended to {doc_name} - {sheet_name}."
+            else:
+                new_message = existing_message + f"Processing complete.  Content has been added to new sheet in {doc_name}."
+            return QueryResponse(
+                status=current_status,
+                message=new_message,
+                num_images_processed=job["total_images_processed"],
+                job_id=job_id
+            )
+        else:  # download type
+            new_message = existing_message + f"Processing complete. Your file should download automatically."
+            return QueryResponse(
+                status=current_status,
+                message=new_message,
+                files=[FileInfo(
+                    file_path=job["result_file_path"],
+                    media_type=job["result_media_type"],
+                    filename=os.path.basename(job["result_file_path"]),
+                    download_url=f"/download?file_path={job['result_file_path']}"
+                )],
+                num_images_processed=job["total_images_processed"],
+                job_id=job_id
+            )
+    
+    elif current_status == "error":
+        return QueryResponse(
+            status="error",
+            message=job["error_message"],
+            num_images_processed=job["total_images_processed"],
+            job_id=job_id
+        )
+    
+    elif current_status == "created":
+        return QueryResponse(
+            status="created",
+            message=f"Processing your request...\n",
+            num_images_processed=job["total_images_processed"],
+            job_id=job_id
+        )
+    
+    elif current_status == "processing":        
+        new_line = f"Processing your request...\n"
+        # Combine messages without duplication
+        new_message = prevent_duplicate_message(existing_message, new_line)
+
+        return QueryResponse(
+            status=current_status,
+            message=new_message,
+            num_images_processed=job['total_images_processed'],
+            job_id=job_id
         )
