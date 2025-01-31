@@ -9,6 +9,7 @@ from app.schemas import QueryRequest
 from app.utils.postprocessing import handle_batch_chunk_result
 from app.utils.data_processing import get_data_snapshot
 from app.utils.preprocessing import preprocess_files
+from app.dev_utils.memory_profiler import profile_memory
 from supabase.client import Client as SupabaseClient
 from datetime import datetime, UTC
 import io
@@ -18,6 +19,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+@profile_memory
 async def process_batch_chunk(
     user_id: str,
     supabase: SupabaseClient,
@@ -147,12 +149,6 @@ async def process_batch_chunk(
         job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
         job = job_response.data[0]
         
-        # Generate new message
-        message = construct_status_response_batch(job)
-        supabase.table("jobs").update({
-            "message": message
-        }).eq("job_id", job_id).execute()
-
             
         # Handle post-processing
         try:
@@ -178,7 +174,6 @@ async def process_batch_chunk(
             "status": "processing",
             "error_message": error_msg,
             "chunk_status": chunk_status,
-            "message": message
         }).eq("job_id", job_id).execute()
         
         # Cleanup temporary files

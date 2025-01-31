@@ -184,8 +184,8 @@ async def process_query_standard(
             try:
                 tmp_path, media_type = await handle_download(result, request_data, preprocessed_data)
                 
-                # Add cleanup task but DON'T execute immediately
-                asyncio.create_task(temp_file_manager.cleanup_marked)
+                # # Add cleanup task but DON'T execute immediately
+                # asyncio.create_task(temp_file_manager.cleanup_marked)
                 
                 # Update download URL to match client expectations
                 download_url = f"/download?file_path={tmp_path}"

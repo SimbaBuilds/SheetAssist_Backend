@@ -48,6 +48,7 @@ class QueryRequest(BaseModel):
     files_metadata: Optional[List[FileUploadMetadata]] = []
     query: str
     output_preferences: OutputPreferences  # no longer Optional
+    job_id: Optional[str] = None
 
 
 class FileDataInfo(BaseModel):

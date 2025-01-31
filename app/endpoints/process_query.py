@@ -28,6 +28,7 @@ from PyPDF2 import PdfReader
 import io
 import asyncio
 from app.utils.s3_file_actions import S3PDFStreamer
+from app.dev_utils.memory_profiler import profile_memory
 
 
 load_dotenv(override=True)
@@ -36,7 +37,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 @router.post("/process_query", response_model=QueryResponse)
+@profile_memory
 async def process_query_entry_endpoint(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user)],

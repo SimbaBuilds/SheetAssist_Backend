@@ -45,6 +45,40 @@ def prevent_duplicate_message(existing_message: str, new_line: str) -> str:
     
     return existing_message + new_line
 
+def get_last_chunk_message(job: dict) -> str:
+    """Helper function to get the last chunk message"""
+    if output_preferences.get('doc_name'):
+        doc_name = output_preferences.get('doc_name')
+        sheet_name = output_preferences.get('sheet_name')
+    else:
+        doc_name = None
+        sheet_name = None
+    
+    file_id = job.get('file_id')
+    page_chunks = job.get('page_chunks', [])
+    output_preferences = job.get('output_preferences')
+    completed_chunk = int(job.get('current_chunk', 0)) - 1 # -1 because current_chunk already got incremented
+    completed_chunk = max(0, completed_chunk)
+    start_page = int(page_chunks[completed_chunk]['page_range'][0]) + 1
+    end_page = int(page_chunks[completed_chunk]['page_range'][1])
+    chunk_status = job.get("chunk_status", [])
+    chunk_success = "Success" in chunk_status[completed_chunk] if completed_chunk < len(chunk_status) else False
+    
+    # Use job's existing message as base
+    existing_message = job.get("message", "")
+    
+    # Construct the new line based on output preferences and success status
+    if output_preferences['type'] == 'online':
+        if output_preferences['modify_existing']:
+            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+        else:
+            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+    else: #download output
+        new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"        
+    
+    # Combine messages without duplication
+    return prevent_duplicate_message(existing_message, new_line)
+
 def construct_status_response_batch(job: dict) -> str:
     """Helper function to construct status message string"""
 
@@ -52,7 +86,6 @@ def construct_status_response_batch(job: dict) -> str:
     current_status = job.get("status", "unknown")
     page_chunks = job.get('page_chunks', [])
     current_chunk = int(job.get('current_chunk', 0))
-    message = job.get("message", "")
     file_id = page_chunks[current_chunk]['file_id'] if page_chunks else None
     output_preferences = job.get('output_preferences')
 
@@ -65,11 +98,11 @@ def construct_status_response_batch(job: dict) -> str:
     
     # Handle cases
     if current_status == "completed":
-        existing_message = job.get("message", "")
+        last_chunk_message = get_last_chunk_message(job)
         if output_preferences['type'] == 'online':
-            return existing_message + f"Processing complete."
+            return last_chunk_message + f"Processing complete."
         else:  # download type
-            return existing_message + f"Processing complete. Your file should download automatically."
+            return last_chunk_message + f"Processing complete. Your file should download automatically."
     
     elif current_status == "error":
         return job["error_message"]

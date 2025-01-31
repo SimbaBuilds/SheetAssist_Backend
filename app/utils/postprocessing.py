@@ -470,7 +470,6 @@ async def handle_batch_chunk_result(
         
         # Prepare base update data
         update_data = {
-            "current_chunk": current_chunk + 1,
             "result_snapshot": result_snapshot,
             "query": request_data.query
         }
