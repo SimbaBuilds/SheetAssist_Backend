@@ -12,6 +12,7 @@ from app.utils.preprocessing import preprocess_files
 from supabase.client import Client as SupabaseClient
 from datetime import datetime, UTC
 import io
+from app.utils.message_builder import construct_status_response_batch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -143,10 +144,15 @@ async def process_batch_chunk(
         else:
             chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Success" 
 
-        
         job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
+        job = job_response.data[0]
+        
+        # Generate new message
+        message = construct_status_response_batch(job)
+        supabase.table("jobs").update({
+            "message": message
+        }).eq("job_id", job_id).execute()
 
-        logging.info(f"CHUNK STATUS: {job_response.data[0]['chunk_status']}")
             
         # Handle post-processing
         try:
@@ -166,11 +172,13 @@ async def process_batch_chunk(
             logger.error(f"Error in handle_batch_chunk_result for chunk {current_chunk}: {str(e)}")
             chunk_status[current_chunk] = f"Chunk {current_chunk+1}: Error"
             
+        message = construct_status_response_batch(job)
+
         supabase.table("jobs").update({
             "status": "processing",
             "error_message": error_msg,
-            "chunk_status": chunk_status
-
+            "chunk_status": chunk_status,
+            "message": message
         }).eq("job_id", job_id).execute()
         
         # Cleanup temporary files

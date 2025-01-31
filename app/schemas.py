@@ -123,8 +123,8 @@ class ChunkResponse(BaseModel):
         """docstring"""
         arbitrary_types_allowed = True
 
-# batch_jobs table
-class BatchJob(BaseModel):
+# jobs table
+class Job(BaseModel):
     job_id: str
     user_id: str
     status: str  # "created", "processing", "completed", "error"
@@ -138,10 +138,11 @@ class BatchJob(BaseModel):
     result_snapshot: Optional[dict] = None
     result_file_path: Optional[str] = None
     result_media_type: Optional[str] = None
-    page_chunks: Optional[List[dict]] = None  # Added for chunk tracking
-    current_chunk: Optional[int] = None       # Added for chunk tracking
-    query: Optional[str] = None               # Added to store original query
-    message: Optional[str] = None            # Added to store message
-    images_processed: Optional[List[dict]] = None  # Added for image processing
-    total_images_processed: Optional[int] = None  # Added for total images
-
+    page_chunks: Optional[List[dict]] = None  
+    current_chunk: Optional[int] = None       
+    query: Optional[str] = None               
+    message: Optional[str] = None           
+    images_processed: Optional[List[dict]] = None  
+    total_images_processed: Optional[int] = None  
+    type: Optional[str] = None
+    chunk_status: Optional[List[str]] = None

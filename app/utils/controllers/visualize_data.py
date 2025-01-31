@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from typing import List, Optional, Tuple, Any, Union
 from io import BytesIO
 from fastapi import Request
-from app.utils.connection_and_status import check_client_connection
+from app.utils.message_builder import check_client_connection
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
