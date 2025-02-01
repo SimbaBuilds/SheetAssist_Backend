@@ -18,8 +18,7 @@ from app.utils.auth import get_current_user, get_supabase_client
 from app.utils.message_builder import check_client_connection, construct_status_response_standard
 from dotenv import load_dotenv
 import io
-import asyncio
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 load_dotenv(override=True)
@@ -164,7 +163,8 @@ async def process_query_standard(
             job = job_response.data[0]
             message = construct_status_response_standard(job)
             supabase.table("jobs").update({
-                "message": message
+                "message": message,
+                "status": "error"
                 }).eq("job_id", job_id).execute()
                 
             return QueryResponse(
@@ -192,8 +192,6 @@ async def process_query_standard(
                 
                 # Update job with success status for download
                 supabase.table("jobs").update({
-                    "status": "completed",
-                    "completed_at": datetime.utcnow().isoformat(),
                     "result_snapshot": result.return_value_snapshot,
                     "result_file_path": str(tmp_path),
                     "total_images_processed": num_images_processed
@@ -202,10 +200,19 @@ async def process_query_standard(
                 # Get updated job data for message
                 job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
                 job = job_response.data[0]
+                job["status"] = "completed" # local job update to get completion message before supabase status update and end
                 message = construct_status_response_standard(job)
+
                 supabase.table("jobs").update({
-                        "message": message
-                    }).eq("job_id", job_id).execute()
+                    "message": message
+                }).eq("job_id", job_id).execute()       
+                
+                
+                supabase.table("jobs").update({
+                    "status": "completed",
+                    "completed_at": datetime.now(UTC).isoformat(),
+                }).eq("job_id", job_id).execute()                
+                        
                 return QueryResponse(
                     original_query=request_data.query,
                     status="completed",
@@ -260,7 +267,6 @@ async def process_query_standard(
                     user_id
                 )
                 supabase.table("jobs").update({
-                    "status": "completed",
                     "completed_at": datetime.utcnow().isoformat(),
                     "result_snapshot": result.return_value_snapshot,
                     "total_images_processed": num_images_processed
@@ -269,8 +275,22 @@ async def process_query_standard(
                 # Get updated job data for message
                 job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
                 job = job_response.data[0]
+                job["status"] = "completed" # local job update to get completion message before supabase status update and end
                 message = construct_status_response_standard(job)
 
+                supabase.table("jobs").update({
+                    "message": message
+                }).eq("job_id", job_id).execute()       
+                
+                
+                supabase.table("jobs").update({
+                    "status": "completed",
+                    "completed_at": datetime.now(UTC).isoformat(),
+                }).eq("job_id", job_id).execute()  
+                
+                
+                
+                
                 # Only cleanup immediately for online type
                 await temp_file_manager.cleanup_marked()
                 await check_client_connection(request)

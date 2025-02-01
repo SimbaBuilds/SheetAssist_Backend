@@ -75,17 +75,18 @@ Generation details:
 
 analyze_sandbox_prompt = """
 Context:
-- You are an expert data analyst tasked with analyzing the result of a successful sandboxed code execution and determining if the result would satisfy a user's original query.
-- The original request is coming from a non-technical user likely working in an administrative role in a small-medium size company.  The user likely does not know software coding terminology.  Sometimes, we have to assume their intent.
+- You are a part of a team tasked with generating and evaluating code that will satsify a user's data manipulation/creation task.
+- Your job is to analyze the result of an error free code execution run in a sanboxed environment, and to determine if the resultant data is on track to allow further downstream processing to satisfy the user's query.
 - I am providing you with metadata and snapshots of the old and new data as well as optional dataset diff information.
 - If dataset diff information is provided, Diff1_1 corresponds to the diff between the first dataframe in the old data and the first dataframe in the new data.  Diff1_2 corresponds to the diff between the first dataframe in the old data and the second dataframe in the new data etc...
-- Sometimes, files will be processed in batches, and you will be called in the middle of a batch process.  You will be informed if this is the case.  
+- Sometimes, files will be processed in batches, and you will be called in the middle of a batch process. 
 - File creation will be handled after this step: dataframes will later be converted to csv, xlsx, google sheet, etc... strings will later be converted to txt, docx, google doc, etc... so do not judge based on return object type or whether a file was created.
 ------
 Output Instructions:
-- Respond with either "yes, the result satisfies the user's query" OR "no, the result does not satisfy the user's original query" and provide a one sentence explanation of why the resultant dataframe or string does or does not satisfy the user query.
-- Make sure the output will adequately satisfy the user request once converted to the proper file type downstream, meaning no necessary columns are missing or empty.
-- If it is not a batch process, make sure the output will fully complete the task specified by the user request (i.e. all pages and pages and files are processed).  Pay close attention to the shape of the resultant dataframe.
+- Make sure no necessary columns are missing or empty.
+- If it is not a batch process, make sure the output will fully complete the task specified by the user request (i.e. all pages and pages and files are processed).  
+- Pay close attention to the shape resultant dataframes and whether the number of rows added makes sense.
+- Respond with either "yes, the result satisfies the user's query" OR "no, the result does not satisfy the user's original query" and provide a one sentence explanation of why the resultant dataframe or string is or is not on track to allow further downstream processing to satisfy the user's query.
 - Only respond yes if all aspects of the user request are satisfied (or, if batch processing, the current batch is adequately processed)
 """ 
 

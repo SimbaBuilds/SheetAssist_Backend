@@ -135,7 +135,7 @@ async def process_query_batch(
         # Get updated job data for message generation
         job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
         job = job_response.data[0]
-        job["status"] = final_status
+        job["status"] = final_status # local job update to get completion message before supabase status update and end
         message = construct_status_response_batch(job)
 
         supabase.table("jobs").update({
@@ -162,18 +162,12 @@ async def process_query_batch(
         error_msg = str(e)[:200] if str(e).isascii() else f"Error processing request: {e.__class__.__name__}"
         logger.error(f"Batch processing error for job {job_id}: {error_msg}")
         
-        # Get updated job data for error message
-        job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
-        job = job_response.data[0]
-        message = construct_status_response_batch(job)
-        
         # Comprehensive error update
         supabase.table("jobs").update({
             "status": "error",
             "error_message": error_msg,
             "completed_at": datetime.now(UTC).isoformat(),
             "total_images_processed": total_images_processed if 'total_images_processed' in locals() else 0,
-            "message": message
         }).eq("job_id", job_id).execute()
         
         raise HTTPException(status_code=500, detail=error_msg)

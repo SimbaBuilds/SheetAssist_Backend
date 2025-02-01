@@ -137,6 +137,8 @@ def construct_status_response_standard(job: dict) -> str:
     # Get the current status and data for the job
     current_status = job.get("status", "unknown")
     output_preferences = job.get('output_preferences')
+    existing_message = job.get("message", "")
+
 
     if output_preferences.get('doc_name'):
         doc_name = output_preferences.get('doc_name')
@@ -147,7 +149,6 @@ def construct_status_response_standard(job: dict) -> str:
     
     # Handle cases
     if current_status == "completed":
-        existing_message = job.get("message", "")
         if output_preferences['type'] == 'online':
             if output_preferences['modify_existing']:
                 return existing_message + f"Processing complete.  Content has been appended to {doc_name} - {sheet_name}."
@@ -157,13 +158,12 @@ def construct_status_response_standard(job: dict) -> str:
             return existing_message + f"Processing complete. Your file should download automatically."
     
     elif current_status == "error":
-        return job["error_message"]
+        return existing_message + job["error_message"]
     
     elif current_status == "created":
         return f"Processing your request...\n"
     
     elif current_status == "processing":        
-        existing_message = job.get("message", "")
         new_line = f"Processing your request...\n"
         # Combine messages without duplication
         return prevent_duplicate_message(existing_message, new_line)
