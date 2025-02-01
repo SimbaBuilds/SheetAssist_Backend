@@ -171,7 +171,7 @@ async def process_query_entry_endpoint(
         if not need_to_batch:
             supabase.table("jobs").update({
                 "type": "standard",
-                "status": "processing"
+                "status": "created"
             }).eq("job_id", job_id).execute() 
 
 
@@ -202,7 +202,7 @@ async def process_query_entry_endpoint(
                 chunk_status_default_list.append(f"Chunk {i+1} Status:")
 
             supabase.table("jobs").update({
-                "status": "processing",
+                "status": "created",
                 "total_pages": total_pages,
                 "processed_pages": 0,
                 "started_at": datetime.now(UTC).isoformat(),
@@ -256,6 +256,8 @@ async def process_query_entry_endpoint(
         logger.error(f"Error in process_query_entry_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+#DEPRECATED
 @router.post("/process_query/status", response_model=QueryResponse)
 async def process_query_status_endpoint(
     request: Request,

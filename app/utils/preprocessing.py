@@ -419,7 +419,7 @@ class FilePreprocessor:
                     streamer = S3PDFStreamer(s3_file_actions.s3_client, s3_file_actions.bucket, file.s3_key)
                     
                     # Get page range
-                    start_page = page_range[0] if page_range else 1
+                    start_page = page_range[0] if page_range else 0
                     end_page = min(page_range[1], streamer.page_count) if page_range else streamer.page_count
                     
                     text_content = []

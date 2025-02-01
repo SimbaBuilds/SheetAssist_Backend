@@ -495,17 +495,17 @@ async def handle_batch_chunk_result(
                         request_data,
                         preprocessed_data,
                     )
-                    status = "completed"
                     result_file_path = str(tmp_path)
                     result_media_type = media_type
                     
                     # Update final data
                     update_data.update({
-                        "status": status,
                         "completed_at": datetime.now(UTC).isoformat(),
                         "result_file_path": result_file_path,
                         "result_media_type": result_media_type
                     })
+                    supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
+
                 except Exception as e:
                     error_msg = f"Error creating download for batch result: {str(e)}"
                     logging.error(error_msg)
@@ -534,9 +534,7 @@ async def handle_batch_chunk_result(
 
                 # Mark as completed if last chunk
                 if current_chunk == total_chunks - 1:
-                    status = "completed"
                     update_data.update({
-                        "status": status,
                         "completed_at": datetime.now(UTC).isoformat()
                     })
             except Exception as e:

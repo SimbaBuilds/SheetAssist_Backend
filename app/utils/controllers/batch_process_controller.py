@@ -62,6 +62,10 @@ async def process_query_batch(
         page_chunks = job_data["page_chunks"]
         response = None
 
+        message = construct_status_response_batch(job_data)
+        supabase.table("jobs").update({"message": message}).eq("job_id", job_id).execute()
+        
+
         # Process all chunks sequentially
         for chunk_index in range(len(page_chunks)):
             await check_client_connection(request)
@@ -112,7 +116,6 @@ async def process_query_batch(
                 "current_chunk": min(chunk_index + 1, len(page_chunks) - 1),
                 "processed_pages": processed_pages,
                 "total_images_processed": total_images_processed,
-                "status": "completed" if is_last_chunk else "processing",
                 "result_snapshot": response.result.return_value_snapshot if is_last_chunk else None,
                 "message": message
             }
@@ -120,7 +123,6 @@ async def process_query_batch(
             if is_last_chunk:
                 update_data.update({
                     "completed_at": datetime.now(UTC).isoformat(),
-                    "result_file_path": response.files[0].file_path if response.files else None
                 })
             
             supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
@@ -129,18 +131,23 @@ async def process_query_batch(
         chunk_status = job_data.get("chunk_status", [])
         all_chunk_statuses_str = ", ".join(chunk_status)
         final_status = "completed_with_error(s)" if "Error" in all_chunk_statuses_str else "completed"
-        final_message = "Completed with some errors" if "Error" in all_chunk_statuses_str else "Successfully completed all chunks"
         
         # Get updated job data for message generation
         job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
         job = job_response.data[0]
+        job["status"] = final_status
         message = construct_status_response_batch(job)
+
+        supabase.table("jobs").update({
+            "message": message
+        }).eq("job_id", job_id).execute()       
+        
         
         supabase.table("jobs").update({
             "status": final_status,
             "completed_at": datetime.now(UTC).isoformat(),
-            "message": message
         }).eq("job_id", job_id).execute()
+
                 
         return QueryResponse(
             original_query=request_data.query,

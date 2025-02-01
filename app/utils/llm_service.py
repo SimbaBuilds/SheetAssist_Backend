@@ -102,7 +102,7 @@ class BaseVisionProcessor:
                 raise s3_err
             
             # Determine page range
-            start_page = int(page_range[0]) if page_range else 1
+            start_page = int(page_range[0]) if page_range else 0
             end_page = min(int(page_range[1]), streamer.page_count) if page_range else streamer.page_count
             
             for page_num in range(start_page, end_page):

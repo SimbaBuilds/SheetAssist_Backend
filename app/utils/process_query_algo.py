@@ -126,7 +126,7 @@ async def process_query_algo(
                 analysis_result
             )
             logging.info(f"Sentiment analysis result - success: {success}")
-            logging.info(f"\n\n----- Analysis result -----\n {analysis_result}\n")
+            print(f"\n\n----- Analysis result -----\n {analysis_result}\n")
 
             if success:
                 #SUCCESS

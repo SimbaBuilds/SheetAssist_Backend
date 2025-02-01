@@ -46,24 +46,21 @@ def prevent_duplicate_message(existing_message: str, new_line: str) -> str:
     return existing_message + new_line
 
 def get_last_chunk_message(job: dict) -> str:
-    """Helper function to get the last chunk message"""
+    last_chunk = len(job.get('page_chunks', [])) - 1
+    page_chunks = job.get('page_chunks', [])
+    file_id = page_chunks[last_chunk]['file_id'] if page_chunks else None
+    output_preferences = job.get('output_preferences')
+    start_page = int(page_chunks[last_chunk]['page_range'][0]) + 1
+    end_page = int(page_chunks[last_chunk]['page_range'][1])
+    chunk_status = job.get("chunk_status", [])
+    chunk_success = "Success" in chunk_status[last_chunk] if last_chunk < len(chunk_status) else False
     if output_preferences.get('doc_name'):
         doc_name = output_preferences.get('doc_name')
         sheet_name = output_preferences.get('sheet_name')
     else:
         doc_name = None
         sheet_name = None
-    
-    file_id = job.get('file_id')
-    page_chunks = job.get('page_chunks', [])
-    output_preferences = job.get('output_preferences')
-    completed_chunk = int(job.get('current_chunk', 0)) - 1 # -1 because current_chunk already got incremented
-    completed_chunk = max(0, completed_chunk)
-    start_page = int(page_chunks[completed_chunk]['page_range'][0]) + 1
-    end_page = int(page_chunks[completed_chunk]['page_range'][1])
-    chunk_status = job.get("chunk_status", [])
-    chunk_success = "Success" in chunk_status[completed_chunk] if completed_chunk < len(chunk_status) else False
-    
+
     # Use job's existing message as base
     existing_message = job.get("message", "")
     
@@ -83,6 +80,7 @@ def construct_status_response_batch(job: dict) -> str:
     """Helper function to construct status message string"""
 
     # Get the current status and data for the job
+    existing_message = job.get("message", "")
     current_status = job.get("status", "unknown")
     page_chunks = job.get('page_chunks', [])
     current_chunk = int(job.get('current_chunk', 0))
@@ -97,7 +95,7 @@ def construct_status_response_batch(job: dict) -> str:
         sheet_name = None
     
     # Handle cases
-    if current_status == "completed":
+    if current_status == "completed" or current_status == "completed_with_error(s)":
         last_chunk_message = get_last_chunk_message(job)
         if output_preferences['type'] == 'online':
             return last_chunk_message + f"Processing complete."

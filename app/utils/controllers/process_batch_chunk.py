@@ -174,6 +174,7 @@ async def process_batch_chunk(
             "status": "processing",
             "error_message": error_msg,
             "chunk_status": chunk_status,
+            "message": message
         }).eq("job_id", job_id).execute()
         
         # Cleanup temporary files
