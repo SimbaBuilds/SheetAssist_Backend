@@ -125,13 +125,12 @@ class MicrosoftIntegration:
 
     async def _get_one_drive_and_item_info(self, file_url: str) -> Tuple[str, str]:
         """Get drive ID and item ID from a OneDrive URL"""
-        drive_id = await self._get_one_drive_id()
         if 'id=' not in file_url:
             raise ValueError("Could not find item ID in OneDrive URL")
         item_id = file_url.split('id=')[1].split('&')[0]
         if not item_id:
             raise ValueError("Empty item ID extracted from OneDrive URL")
-        return drive_id, item_id
+        return None, item_id
 
     async def _manage_office_session(self, item_id: str, action: str = 'create') -> str:
         """Manage Microsoft Office Excel sessions"""
@@ -163,8 +162,8 @@ class MicrosoftIntegration:
         """Append data to Office Excel Online workbook on the specified sheet"""
         logging.info(f"Starting append to Office Excel sheet: {sheet_name}")
         try:
-            # Get drive ID and workbook ID
-            drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
+            # Get item ID only
+            _, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             headers = await self._get_microsoft_headers()
             
             # Convert input data to DataFrame if it isn't already
@@ -183,7 +182,7 @@ class MicrosoftIntegration:
             async with aiohttp.ClientSession() as session:
                 # Get the specified worksheet
                 async with session.get(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets',
                     headers=headers
                 ) as response:
                     if response.status != 200:
@@ -209,7 +208,7 @@ class MicrosoftIntegration:
                 
                 # Get the used range to find existing row count
                 async with session.get(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
                     headers=headers
                 ) as response:
                     if response.status != 200:
@@ -256,7 +255,7 @@ class MicrosoftIntegration:
                 }
                 
                 async with session.patch(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/range(address=\'{range_address}\')',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/range(address=\'{range_address}\')',
                     headers=headers,
                     json=request_body
                 ) as response:
@@ -276,8 +275,8 @@ class MicrosoftIntegration:
     async def append_to_new_office_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Add data to a new sheet within an existing Office Excel workbook"""
         try:
-            # Get drive ID and workbook ID
-            drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
+            # Get item ID only
+            _, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
             headers = await self._get_microsoft_headers()
             values = self._format_data_for_excel(data)
@@ -285,7 +284,7 @@ class MicrosoftIntegration:
             async with aiohttp.ClientSession() as session:
                 # Get existing worksheets
                 async with session.get(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets',
                     headers=headers
                 ) as response:
                     if response.status != 200:
@@ -306,7 +305,7 @@ class MicrosoftIntegration:
                 
                 # Create new worksheet
                 async with session.post(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/add',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets/add',
                     headers=headers,
                     json={'name': final_name}
                 ) as response:
@@ -325,7 +324,7 @@ class MicrosoftIntegration:
                 }
                 
                 async with session.patch(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{new_worksheet["id"]}/range(address=\'{range_address}\')',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets/{new_worksheet["id"]}/range(address=\'{range_address}\')',
                     headers=headers,
                     json=request_body
                 ) as response:
@@ -358,14 +357,14 @@ class MicrosoftIntegration:
             HTTPException: If API requests fail
         """
         try:
-            # Get drive ID and workbook ID
-            drive_id, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
+            # Get item ID only
+            _, workbook_id = await self._get_one_drive_and_item_info(sheet_url)
             
             headers = await self._get_microsoft_headers()
             async with aiohttp.ClientSession() as session:
                 # Get all worksheets
                 async with session.get(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets',
                     headers=headers
                 ) as response:
                     if response.status != 200:
@@ -390,7 +389,7 @@ class MicrosoftIntegration:
                 
                 # Get all data from the sheet using usedRange
                 async with session.get(
-                    f'https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
+                    f'https://graph.microsoft.com/v1.0/me/drive/items/{workbook_id}/workbook/worksheets/{active_sheet["id"]}/usedRange',
                     headers=headers
                 ) as response:
                     if response.status != 200:

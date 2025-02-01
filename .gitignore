@@ -9,3 +9,4 @@ venv/
 .ebextensions
 .ebextensions/01_environment.config
 /.ebextensions
+.platform/nginx/conf.d/proxy_timeout.conf

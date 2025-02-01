@@ -9,7 +9,6 @@ from app.schemas import QueryRequest
 from app.utils.postprocessing import handle_batch_chunk_result
 from app.utils.data_processing import get_data_snapshot
 from app.utils.preprocessing import preprocess_files
-from app.dev_utils.memory_profiler import profile_memory
 from supabase.client import Client as SupabaseClient
 from datetime import datetime, UTC
 import io
@@ -19,7 +18,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-@profile_memory
 async def process_batch_chunk(
     user_id: str,
     supabase: SupabaseClient,
