@@ -102,6 +102,11 @@ def construct_status_response_batch(job: dict) -> str:
         else:  # download type
             return last_chunk_message + f"Processing complete. Your file should download automatically."
     
+    elif current_status == "completed_with_error(s)":
+        last_chunk_message = get_last_chunk_message(job)
+        completed_with_errors_message = "Processing complete.  Some pages may have failed to process.  Please inspect relevant pages and the output and try again."
+        return last_chunk_message + completed_with_errors_message
+    
     elif current_status == "error":
         return job["error_message"]
     

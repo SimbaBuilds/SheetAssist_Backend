@@ -123,6 +123,14 @@ async def process_query_standard(
             # Specifically handle image/overage limit errors
             error_msg = str(e)
             if "limit reached" in error_msg.lower():
+                message="Usage limit reached. Please check usage in your account settings.",
+                supabase.table("jobs").update({
+                    "message": message
+                }).eq("job_id", job_id).execute()
+                message="Usage limit reached. Please check usage in your account settings.",
+                supabase.table("jobs").update({
+                    "status": "error"
+                }).eq("job_id", job_id).execute()
                 return QueryResponse(
                     original_query=request_data.query,
                     status="error",
@@ -149,8 +157,11 @@ async def process_query_standard(
         logger.info(f"Query processed for user {user_id} with return value snapshot type: {type(result.return_value).__name__}")
 
         if result.error:
-            error_message = "There was an error processing your request. This application may not have the ability to complete your request. You can also try rephrasing your request or breaking it down into multiple requests."
+            message = "There was an error processing your request. This application may not have the ability to complete your request. You can also try rephrasing your request or breaking it down into multiple requests."
             # Update job with error status
+            supabase.table("jobs").update({
+                "message": message,
+                }).eq("job_id", job_id).execute()
             supabase.table("jobs").update({
                 "status": "error",
                 "completed_at": datetime.utcnow().isoformat(),
@@ -158,15 +169,6 @@ async def process_query_standard(
                 "total_images_processed": 0
             }).eq("job_id", job_id).execute()
             
-            # Get updated job data for message
-            job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
-            job = job_response.data[0]
-            message = construct_status_response_standard(job)
-            supabase.table("jobs").update({
-                "message": message,
-                "status": "error"
-                }).eq("job_id", job_id).execute()
-                
             return QueryResponse(
                 original_query=request_data.query,
                 status="error",

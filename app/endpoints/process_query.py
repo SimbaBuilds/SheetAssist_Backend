@@ -212,7 +212,7 @@ async def process_query_entry_endpoint(
             }).eq("job_id", job_id).execute()   
             logger.info("Large PDF detected")
             try:
-                await check_limits_pre_batch(supabase, user_id, total_pages)
+                await check_limits_pre_batch(supabase, user_id, total_pages, job_id)
             except ValueError as e:
                 return QueryResponse(
                     original_query=request_data.query,

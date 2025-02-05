@@ -873,7 +873,7 @@ async def determine_pdf_page_count(file: UploadFile) -> int:
         logger.error(f"Error determining PDF page count: {str(e)}")
         return 0
 
-async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_pages: int = 1) -> None:
+async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_pages: int = 1, job_id: str = None) -> None:
     """
     Check if user has exceeded image processing limits
     
@@ -903,6 +903,13 @@ async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_p
     current_images = usage.get("images_processed_this_month", 0)
     if current_images + total_pages > image_limit:
         if plan == "free":
+            message = "This request would put you over your monthly image limit.  You can upgrade to pro in the account page to continue."
+            supabase.table("jobs").update({
+                "message": message
+            }).eq("job_id", job_id).execute()
+            supabase.table("jobs").update({
+                "status": "error"
+            }).eq("job_id", job_id).execute()
             raise ValueError(f"This request would put you over your monthly image limit.  You can upgrade to pro in the account page to continue.")
         # Check overage limit
         overage_this_month = usage.get("overage_this_month", 0)
@@ -911,6 +918,13 @@ async def check_limits_pre_batch(supabase: SupabaseClient, user_id: str, total_p
         print(f"potential_overage: {potential_overage}")
         print(f"overage_hard_limit: {overage_hard_limit}")
         if potential_overage >= overage_hard_limit:
+            message = "This request would put you over your monthly overage limit.  You can increase your overage in your account page."
+            supabase.table("jobs").update({
+                "message": message
+            }).eq("job_id", job_id).execute()
+            supabase.table("jobs").update({
+                "status": "error"
+            }).eq("job_id", job_id).execute()
             raise ValueError(f"This request would put you over your monthly overage limit.  You can increase your overage in your account page.")
 
         
