@@ -128,7 +128,7 @@ class ChunkResponse(BaseModel):
 class Job(BaseModel):
     job_id: str
     user_id: str
-    status: str  # "created", "processing", "completed", "error"
+    status: str 
     total_pages: int
     processed_pages: int
     output_preferences: OutputPreferences
@@ -147,3 +147,4 @@ class Job(BaseModel):
     total_images_processed: Optional[int] = None  
     type: Optional[str] = None
     chunk_status: Optional[List[str]] = None
+    total_file_size: Optional[int] = None

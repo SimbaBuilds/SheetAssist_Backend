@@ -102,8 +102,10 @@ async def process_query_entry_endpoint(
 
         logger.info(f"LENGTH of upload_files: {len(upload_files)}")
         total_pages = 0
+        total_file_size = 0
         # Update page counts
         for i, file_meta in enumerate(request_data.files_metadata):
+            total_file_size += file_meta.size
             if not file_meta.page_count and file_meta.type == 'application/pdf':
                 if file_meta.s3_key:
                     try:
@@ -169,7 +171,8 @@ async def process_query_entry_endpoint(
         if not need_to_batch:
             supabase.table("jobs").update({
                 "type": "standard",
-                "status": "created"
+                "status": "created",
+                "total_file_size": total_file_size
             }).eq("job_id", job_id).execute() 
 
 
@@ -208,7 +211,8 @@ async def process_query_entry_endpoint(
                 "current_chunk": 0,
                 "query": request_data.query,
                 "chunk_status": chunk_status_default_list,
-                "type": "batch"
+                "type": "batch",
+                "total_file_size": total_file_size
             }).eq("job_id", job_id).execute()   
             logger.info("Large PDF detected")
             try:
