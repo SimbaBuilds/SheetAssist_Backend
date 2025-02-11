@@ -33,9 +33,7 @@ class GoogleIntegration:
             refresh_token=google_refresh_token,
             token_uri='https://oauth2.googleapis.com/token',
             scopes =  [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.readonly',
-]
+    'https://www.googleapis.com/auth/drive.file']
         )
 
     def _format_data_for_sheets(self, data: Any) -> List[List[str]]:

@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
-from app.endpoints import process_query, download, get_doc_title, data_visualization
+from app.endpoints import get_sheet_names, process_query, download, data_visualization
 from app.utils.s3_file_management import temp_file_manager
 from contextlib import asynccontextmanager
 
@@ -92,7 +92,7 @@ async def health_check():
 
 app.include_router(process_query.router)
 app.include_router(download.router)
-app.include_router(get_doc_title.router)
+app.include_router(get_sheet_names.router)
 app.include_router(data_visualization.router)
 
 if __name__ == "__main__":    

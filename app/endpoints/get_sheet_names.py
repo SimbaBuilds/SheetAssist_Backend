@@ -431,8 +431,8 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
     sheet_md = OnlineSheet(doc_name=file_name, provider='microsoft', sheet_names=sheet_names) 
     return sheet_md
 
-@router.post("/get_document_title", response_model=WorkbookResponse)
-async def get_document_title(
+@router.post("/get_sheet_names", response_model=WorkbookResponse)
+async def get_sheet_names(
     url: DocumentTitleRequest,
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)]
