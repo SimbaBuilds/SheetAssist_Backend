@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Security, Header
 from pydantic import BaseModel
 from typing import Optional
 from google.oauth2.credentials import Credentials
@@ -10,10 +10,12 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Annotated
 from supabase.client import Client as SupabaseClient
-from app.utils.auth import get_current_user, get_supabase_client
+from app.utils.auth import get_current_user, get_supabase_client, security
 import logging
 from googleapiclient.errors import HttpError
 import asyncio
+from fastapi.security import HTTPAuthorizationCredentials
+import aiohttp
 
 # Add logging configuration
 logging.basicConfig(level=logging.INFO)
@@ -183,25 +185,6 @@ async def refresh_microsoft_token(token_info: TokenInfo, supabase_client) -> Opt
 async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseClient) -> OnlineSheet | None:
     """Get document title using Google Drive API"""
     try:
-        # Check if token is expired
-        expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
-        if expires_at <= datetime.now(timezone.utc):
-            logger.warning("Google token is expired, attempting refresh")
-            token_info = await refresh_google_token(token_info, supabase)
-            if not token_info:
-                logger.error("Failed to refresh Google token")
-                return None
-
-        # Create credentials object from token
-        creds = Credentials(
-            token=token_info.access_token,
-            refresh_token=token_info.refresh_token,
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=os.getenv('GOOGLE_CLIENT_ID'),
-            client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
-            scopes=token_info.scope.split(' ')
-        )
-        
         # Extract file ID from URL
         file_id = None
         if '/document/d/' in url:
@@ -213,54 +196,125 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
             logger.error(f"Could not extract file ID from URL: {url}")
             return None
 
-        
-        # Build the service
-        drive_service = build('drive', 'v3', credentials=creds)
-        sheet_id = url.split('/d/')[1].split('/')[0]
-        logger.info(f"Building sheets service with sheet_id: {sheet_id}")
-        sheet_service = build('sheets', 'v4', credentials=creds)
-
-        try:
-            # Get file metadata
-            file = drive_service.files().get(fileId=file_id, fields='name').execute()
-            logger.info(f"Successfully retrieved file metadata: {file}")
+        # For direct access tokens from Google Picker, make direct API calls
+        if not token_info.refresh_token:
+            logger.info(f"Using direct access token (first 10 chars): {token_info.access_token[:10]}...")
+            logger.info(f"Token scope: {token_info.scope}")
             
-            # Get all sheet names
-            sheet_names = []
-            sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-            for sheet in sheet_metadata.get('sheets', []):
-                sheet_name = sheet['properties']['title']
-                sheet_names.append(sheet_name)
+            # Add a small delay to allow for permission propagation
+            await asyncio.sleep(2)
+            logger.info("Waited 2 seconds for permission propagation")
+            
+            # Verify token is valid
+            verify_url = 'https://www.googleapis.com/oauth2/v1/tokeninfo'
+            params = {'access_token': token_info.access_token}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(verify_url, params=params) as response:
+                    logger.info(f"Token verification response status: {response.status}")
+                    verify_response_text = await response.text()
+                    logger.info(f"Token verification response: {verify_response_text}")
+                    
+                headers = {
+                    'Authorization': f'Bearer {token_info.access_token}',
+                    'Accept': 'application/json',
+                }
+                logger.info(f"Request headers: {headers}")
+                
+                # Try sheets API first with different format
+                sheets_url = f'https://sheets.googleapis.com/v4/spreadsheets/{file_id}'  # Removed fields parameter
+                logger.info(f"Making sheets request to: {sheets_url}")
+                async with session.get(sheets_url, headers=headers) as response:
+                    logger.info(f"Sheets response status: {response.status}")
+                    sheets_response_text = await response.text()
+                    logger.info(f"Sheets response text: {sheets_response_text}")
+                    
+                    if response.status == 404:
+                        error_data = await response.json()
+                        error_message = error_data.get('error', {}).get('message', 'Unknown error')
+                        error_reason = error_data.get('error', {}).get('errors', [{}])[0].get('reason', 'unknown')
+                        logger.error(f"File not found: {file_id}. Reason: {error_reason}. Message: {error_message}")
+                        
+                        # Fall back to drive API
+                        metadata_url = f'https://www.googleapis.com/drive/v3/files/{file_id}?fields=name,trashed,capabilities&supportsAllDrives=true'
+                        logger.info(f"Falling back to Drive API: {metadata_url}")
+                        async with session.get(metadata_url, headers=headers) as response:
+                            logger.info(f"Metadata response status: {response.status}")
+                            response_text = await response.text()
+                            logger.info(f"Metadata response text: {response_text}")
+                            
+                            if response.status == 404:
+                                error_data = await response.json()
+                                error_message = error_data.get('error', {}).get('message', 'Unknown error')
+                                error_reason = error_data.get('error', {}).get('errors', [{}])[0].get('reason', 'unknown')
+                                logger.error(f"File not found: {file_id}. Reason: {error_reason}. Message: {error_message}")
+                                return "not_found"
+                            if response.status == 401:
+                                logger.error(f"401 Unauthorized response: {response_text}")
+                                raise HTTPException(status_code=401, detail="Invalid Google access token")
+                            response.raise_for_status()
+                            file_data = await response.json()
+                            logger.info(f"File metadata response: {file_data}")
+                            doc_name = file_data.get('name')
 
-            doc_name = file.get('name')
-            sheet_md = OnlineSheet(doc_name=doc_name, provider='google', sheet_names=sheet_names)
+                        result = OnlineSheet(doc_name=doc_name, provider='google', sheet_names=[])
+                        logger.info(f"Returning result: {result}")
+                        return result
+                    if response.status == 401:
+                        logger.error(f"401 Unauthorized response: {sheets_response_text}")
+                        raise HTTPException(status_code=401, detail="Invalid Google access token")
+                    response.raise_for_status()
+                    sheets_data = await response.json()
+                    logger.info(f"Sheets response data: {sheets_data}")
+                    sheet_names = [sheet['properties']['title'] for sheet in sheets_data.get('sheets', [])]
+                    logger.info(f"Extracted sheet names: {sheet_names}")
 
-            return sheet_md
+            result = OnlineSheet(doc_name=sheets_data.get('properties', {}).get('title'), provider='google', sheet_names=sheet_names)
+            logger.info(f"Returning result: {result}")
+            return result
 
-        except Exception as api_error:
-            logger.error(f"API error while accessing file: {str(api_error)}")
-            # Check for 404 error specifically
-            if isinstance(api_error, HttpError) and api_error.resp.status == 404:
-                logger.warning("File not found or not accessible")
-                return "not_found"
-            # Handle specific Google API errors
-            if 'invalid_grant' in str(api_error):
-                logger.warning("Invalid grant error, attempting token refresh")
+        # For stored tokens with refresh capability, use the existing flow
+        else:
+            expires_at = datetime.fromisoformat(token_info.expires_at.replace('Z', '+00:00'))
+            if expires_at <= datetime.now(timezone.utc):
+                logger.warning("Google token is expired, attempting refresh")
                 token_info = await refresh_google_token(token_info, supabase)
-                if token_info:
-                    # Retry once with new token
-                    creds = Credentials(
-                        token=token_info.access_token,
-                        refresh_token=token_info.refresh_token,
-                        token_uri='https://oauth2.googleapis.com/token',
-                        client_id=os.getenv('GOOGLE_CLIENT_ID'),
-                        client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
-                        scopes=token_info.scope.split(' ')
-                    )
-                    drive_service = build('drive', 'v3', credentials=creds)
-                    file = drive_service.files().get(fileId=file_id, fields='name').execute()
-                    return file.get('name')
-            return None  # Return None instead of raising the error
+                if not token_info:
+                    logger.error("Failed to refresh Google token")
+                    return None
+
+            # Create credentials object with refresh capability
+            creds = Credentials(
+                token=token_info.access_token,
+                refresh_token=token_info.refresh_token,
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=os.getenv('GOOGLE_CLIENT_ID'),
+                client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+                scopes=token_info.scope.split(' ')
+            )
+            
+            # Build the service
+            drive_service = build('drive', 'v3', credentials=creds)
+            sheet_service = build('sheets', 'v4', credentials=creds)
+
+            try:
+                # Get file metadata
+                file = drive_service.files().get(
+                    fileId=file_id, 
+                    fields='name',
+                    supportsAllDrives=True
+                ).execute()
+                
+                # Get sheet names
+                sheet_metadata = sheet_service.spreadsheets().get(spreadsheetId=file_id).execute()
+                sheet_names = [sheet['properties']['title'] for sheet in sheet_metadata.get('sheets', [])]
+
+                return OnlineSheet(doc_name=file.get('name'), provider='google', sheet_names=sheet_names)
+
+            except Exception as api_error:
+                logger.error(f"API error while accessing file {file_id}: {str(api_error)}")
+                if isinstance(api_error, HttpError) and api_error.resp.status == 404:
+                    return "not_found"
+                raise
 
     except Exception as e:
         logger.error(f"Error fetching Google doc title: {str(e)}")
@@ -435,7 +489,8 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
 async def get_sheet_names(
     url: DocumentTitleRequest,
     user_id: Annotated[str, Depends(get_current_user)],
-    supabase: Annotated[SupabaseClient, Depends(get_supabase_client)]
+    supabase: Annotated[SupabaseClient, Depends(get_supabase_client)],
+    google_token: str | None = Header(None, alias="X-Google-Token")
 ):
     if not user_id:
         return WorkbookResponse(
@@ -446,29 +501,47 @@ async def get_sheet_names(
 
     # Handle Google URLs
     if any(domain in url.url for domain in ['docs.google.com', 'sheets.google.com']):
-        google_token = await get_provider_token(user_id, 'google', supabase)
-        if not google_token:
-            return WorkbookResponse(
-                url=url.url,
-                success=False,
-                error="Google authentication required. Please connect your Google account, accepting all permissions."
+        google_token_info = None
+        if google_token:
+            logger.info("Using provided Google access token")
+            google_token_info = TokenInfo(
+                access_token=google_token,
+                refresh_token="",  # Not needed for temporary access
+                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),  # Assume 1 hour validity
+                token_type="Bearer",
+                scope="https://www.googleapis.com/auth/drive.file",
+                user_id=user_id
             )
+        else:
+            logger.info("No Google token provided, falling back to stored token")
+            google_token_info = await get_provider_token(user_id, 'google', supabase)
+            if not google_token_info:
+                return WorkbookResponse(
+                    url=url.url,
+                    success=False,
+                    error="Google authentication required. Please connect your Google account, accepting all permissions."
+                )
 
         try:
-            online_sheet = await get_google_title(url.url, google_token, supabase)
+            logger.info(f"Attempting to get sheet names for URL: {url.url}")
+            online_sheet = await get_google_title(url.url, google_token_info, supabase)
             if online_sheet == "not_found":
+                error_message = "Document not found or not accessible. Please check that the document exists and you have been granted access to it."
+                logger.error(f"Document not found or not accessible: {url.url}")
                 return WorkbookResponse(
                     url=url.url,
                     success=False,
-                    error="Document not found or not accessible. Please connect your Google account, accepting all permissions."
+                    error=error_message
                 )
             if online_sheet is None:
+                logger.error(f"Error accessing Google Sheets: {url.url}")
                 return WorkbookResponse(
                     url=url.url,
                     success=False,
-                    error="Error accessing Google Sheets. Please reconnect your Google account, accepting all permissions."
+                    error="Error accessing Google Sheets. Please check your permissions and try again."
                 )
 
+            logger.info(f"Successfully retrieved sheet info: {online_sheet}")
             return WorkbookResponse(
                 url=url.url,
                 doc_name=online_sheet.doc_name,
