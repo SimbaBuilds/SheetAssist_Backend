@@ -72,126 +72,136 @@ class GoogleIntegration:
             sheet_id = sheet_url.split('/d/')[1].split('/')[0]
             logging.info(f"Extracted sheet ID: {sheet_id}")
             
-            # Create Google Sheets service with proper scopes
-            service = build('sheets', 'v4', credentials=self.google_creds)
-            logging.info("Created Google Sheets service")
+            headers = self._get_headers()
             
             # First get existing data to determine row count
             logging.info(f"Fetching existing data from sheet: {sheet_name}")
-            result = service.spreadsheets().values().get(
-                spreadsheetId=sheet_id,
-                range=f"{sheet_name}"
-            ).execute()
-            
-            existing_values = result.get('values', [])
-            existing_row_count = len(existing_values)
-            logging.info(f"Existing row count: {existing_row_count}")
-            
-            # Convert input data to DataFrame if it isn't already
-            logging.info("Converting input data to DataFrame")
-            if not isinstance(data, pd.DataFrame):
-                if isinstance(data, dict):
-                    data = pd.DataFrame([data])
-                elif isinstance(data, list):
-                    data = pd.DataFrame(data)
-                else:
-                    data = pd.DataFrame([data])
-            logging.info(f"Data shape: {data.shape}")
-            # Get only the new rows (rows beyond existing count)
-            new_rows = data.iloc[existing_row_count-1:]
-            logging.info(f"New rows to append: {len(new_rows)}")
-            print(f"New rows to append: {len(new_rows)}")
-            all_new = False
-            if len(new_rows) == 0:
-                logging.info("No new rows detected, processing all passed data")
-                all_new = True
-                new_rows = data  # Use all passed data instead of returning
-            
-            # Format the new data for sheets
-            logging.info("Formatting data for Google Sheets")
-            values = self._format_data_for_sheets(new_rows)
-            # Remove header row since we're appending to existing sheet
-            if not all_new:
-                values = values[1:] if values else []
-            logging.info(f"Formatted {len(values)} rows")
-            
-            # Append the data
-            body = {
-                'values': values
-            }
-            
-            logging.info("Appending data to sheet")
-            append_result = service.spreadsheets().values().append(
-                spreadsheetId=sheet_id,
-                range=f"{sheet_name}!A1",  # Specify starting cell
-                valueInputOption='RAW',
-                insertDataOption='INSERT_ROWS',
-                body=body
-            ).execute()
-            
-            updated_rows = append_result.get('updates', {}).get('updatedRows', 0)
-            logging.info(f"Successfully appended {updated_rows} rows")
-            logging.info(f"Full append result: {append_result}")
-            
-            return True
+            async with aiohttp.ClientSession() as session:
+                values_url = f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{sheet_name}'
+                async with session.get(values_url, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Failed to get sheet data: {error_text}")
+                    result = await response.json()
+                
+                existing_values = result.get('values', [])
+                existing_row_count = len(existing_values)
+                logging.info(f"Existing row count: {existing_row_count}")
+                
+                # Convert input data to DataFrame if it isn't already
+                logging.info("Converting input data to DataFrame")
+                if not isinstance(data, pd.DataFrame):
+                    if isinstance(data, dict):
+                        data = pd.DataFrame([data])
+                    elif isinstance(data, list):
+                        data = pd.DataFrame(data)
+                    else:
+                        data = pd.DataFrame([data])
+                logging.info(f"Data shape: {data.shape}")
+                
+                # Get only the new rows (rows beyond existing count)
+                new_rows = data.iloc[existing_row_count-1:]
+                logging.info(f"New rows to append: {len(new_rows)}")
+                print(f"New rows to append: {len(new_rows)}")
+                all_new = False
+                if len(new_rows) == 0:
+                    logging.info("No new rows detected, processing all passed data")
+                    all_new = True
+                    new_rows = data  # Use all passed data instead of returning
+                
+                # Format the new data for sheets
+                logging.info("Formatting data for Google Sheets")
+                values = self._format_data_for_sheets(new_rows)
+                # Remove header row since we're appending to existing sheet
+                if not all_new:
+                    values = values[1:] if values else []
+                logging.info(f"Formatted {len(values)} rows")
+                
+                # Append the data
+                append_url = f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{sheet_name}!A1:append'
+                body = {
+                    'values': values,
+                    'majorDimension': 'ROWS'
+                }
+                params = {
+                    'valueInputOption': 'RAW',
+                    'insertDataOption': 'INSERT_ROWS'
+                }
+                
+                async with session.post(append_url, headers=headers, json=body, params=params) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Failed to append data: {error_text}")
+                    append_result = await response.json()
+                    
+                    updated_rows = append_result.get('updates', {}).get('updatedRows', 0)
+                    logging.info(f"Successfully appended {updated_rows} rows")
+                    logging.info(f"Full append result: {append_result}")
+                
+                return True
             
         except Exception as e:
-            logging.error(f"Failed to append to Google Sheet: {str(e)}", exc_info=True)
+            logging.error(f"Failed to append to Google Sheet: {str(e)}")
             raise
-
 
     async def append_to_new_google_sheet(self, data: Any, sheet_url: str, sheet_name: str) -> bool:
         """Add data to a new sheet within an existing Google Sheets workbook"""
         try:
             # Extract spreadsheet ID from URL
             sheet_id = sheet_url.split('/d/')[1].split('/')[0]
-            
-            # Create Google Sheets service
-            service = build('sheets', 'v4', credentials=self.google_creds)
+            headers = self._get_headers()
             
             # Get existing sheets
-            sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-            existing_sheets = [sheet['properties']['title'] for sheet in sheet_metadata['sheets']]
-            
-            # Ensure unique sheet name
-            final_name = sheet_name
-            counter = 1
-            while final_name in existing_sheets:
-                final_name = f"{sheet_name} {counter}"
-                counter += 1
-            
-            # Add new sheet
-            body = {
-                'requests': [{
-                    'addSheet': {
-                        'properties': {
-                            'title': final_name
+            async with aiohttp.ClientSession() as session:
+                # Get existing sheets
+                sheets_url = f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}?fields=sheets.properties.title'
+                async with session.get(sheets_url, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Failed to get sheets: {error_text}")
+                    metadata = await response.json()
+                    existing_sheets = [sheet['properties']['title'] for sheet in metadata.get('sheets', [])]
+                
+                # Ensure unique sheet name
+                final_name = sheet_name
+                counter = 1
+                while final_name in existing_sheets:
+                    final_name = f"{sheet_name} {counter}"
+                    counter += 1
+                
+                # Add new sheet
+                batch_url = f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}:batchUpdate'
+                body = {
+                    'requests': [{
+                        'addSheet': {
+                            'properties': {
+                                'title': final_name
+                            }
                         }
-                    }
-                }]
-            }
-            response = service.spreadsheets().batchUpdate(
-                spreadsheetId=sheet_id,
-                body=body
-            ).execute()
-            
-            # Format data for sheets using helper function
-            values = self._format_data_for_sheets(data)
-            
-            # Ensure values is a 2D array of strings
-            if not values or not isinstance(values[0], list):
-                values = [[str(x) for x in values]]
-
-            # Write data to new sheet
-            body = {
-                'values': values
-            }
-            service.spreadsheets().values().update(
-                spreadsheetId=sheet_id,
-                range=f"{final_name}!A1",
-                valueInputOption='USER_ENTERED',  # Changed from 'RAW'
-                body=body
-            ).execute()
+                    }]
+                }
+                async with session.post(batch_url, headers=headers, json=body) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Failed to create new sheet: {error_text}")
+                
+                # Format data for sheets
+                values = self._format_data_for_sheets(data)
+                if not values or not isinstance(values[0], list):
+                    values = [[str(x) for x in values]]
+                
+                # Write data to new sheet
+                update_url = f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{final_name}!A1'
+                update_body = {
+                    'values': values,
+                    'majorDimension': 'ROWS'
+                }
+                params = {'valueInputOption': 'USER_ENTERED'}
+                
+                async with session.put(update_url, headers=headers, json=update_body, params=params) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Failed to update sheet data: {error_text}")
             
             return True
             

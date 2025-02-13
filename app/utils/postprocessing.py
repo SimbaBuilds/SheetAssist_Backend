@@ -248,21 +248,15 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
             else:
                 data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
 
-        # Initialize integrations with picker token if available
-        g_integration = GoogleIntegration(
-            supabase=supabase,
-            user_id=user_id,
-            picker_token=request.output_preferences.picker_token if "docs.google.com" in request.output_preferences.destination_url.lower() else None
-        )
-        msft_integration = MicrosoftIntegration(
-            supabase=supabase,
-            user_id=user_id,
-            picker_token=request.output_preferences.picker_token if any(x in request.output_preferences.destination_url.lower() for x in ["onedrive", "sharepoint.com"]) else None
-        )
         llm_service = LLMService()
         url_lower = request.output_preferences.destination_url.lower()
         
         if "docs.google.com" in url_lower:
+            g_integration = GoogleIntegration(
+                supabase=supabase,
+                user_id=user_id,
+                picker_token=request.output_preferences.picker_token if "docs.google.com" in request.output_preferences.destination_url.lower() else None
+            ) 
             if request.output_preferences.modify_existing:
                 return await g_integration.append_to_current_google_sheet(
                     data, 
@@ -282,6 +276,11 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
                 )
         
         elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+            msft_integration = MicrosoftIntegration(
+                supabase=supabase,
+                user_id=user_id,
+                picker_token=request.output_preferences.picker_token if any(x in request.output_preferences.destination_url.lower() for x in ["onedrive", "sharepoint.com"]) else None
+            )
             if request.output_preferences.modify_existing:
                 return await msft_integration.append_to_current_office_sheet(
                     data, 

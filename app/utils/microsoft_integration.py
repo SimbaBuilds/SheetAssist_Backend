@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 class MicrosoftIntegration:
     def __init__(self, supabase: SupabaseClient = None, user_id: str = None, picker_token: str = None):
         self._one_drive_id = None
-        self.ms_access_token = None
-        self.ms_token_type = 'Bearer'
-        self.ms_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        self.access_token = None
+        self.refresh_token = None
+        self.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
         if picker_token:
             logger.info("Using picker token for Microsoft integration")
-            self.ms_access_token = picker_token
+            self.access_token = picker_token
         else:
             logger.info("Using db stored token for Microsoft integration")
             # Fallback to stored token if picker token not provided
@@ -39,7 +39,7 @@ class MicrosoftIntegration:
             if not ms_response.data or len(ms_response.data) == 0:
                 print(f"No Microsoft token found for user {user_id}")
                 return None
-            self.ms_refresh_token = ms_response.data[0]['refresh_token']
+            self.refresh_token = ms_response.data[0]['refresh_token']
             self._refresh_microsoft_token()
 
     def _refresh_microsoft_token(self) -> None:
@@ -48,7 +48,7 @@ class MicrosoftIntegration:
             data = {
                 'client_id': os.getenv('MS_CLIENT_ID'),
                 'client_secret': os.getenv('MS_CLIENT_SECRET'),
-                'refresh_token': self.ms_refresh_token,
+                'refresh_token': self.refresh_token,
                 'grant_type': 'refresh_token',
                 'scope': 'https://graph.microsoft.com/.default'
             }
@@ -61,28 +61,24 @@ class MicrosoftIntegration:
             token_data = response.json()
             
             # Store the token data
-            self.ms_access_token = token_data['access_token']
-            self.ms_refresh_token = token_data.get('refresh_token', self.ms_refresh_token)
-            self.ms_token_type = token_data['token_type']
-            self.ms_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_data['expires_in']))
+            self.access_token = token_data['access_token']
+            self.refresh_token = token_data.get('refresh_token', self.refresh_token)
+            self.expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_data['expires_in']))
             
         except Exception as e:
             logging.error(f"Failed to refresh Microsoft token: {str(e)}")
             raise HTTPException(status_code=401, detail="Failed to refresh Microsoft token")
 
-    async def _ensure_valid_microsoft_token(self) -> None:
-        """Check and refresh Microsoft token if expired"""
-        if datetime.now(timezone.utc) >= self.ms_expires_at:
-            self._refresh_microsoft_token()
-
-    async def _get_microsoft_headers(self) -> dict:
-        """Get valid Microsoft API headers with current token"""
-        if hasattr(self, 'ms_refresh_token'):
-            await self._ensure_valid_microsoft_token()
-        return {
-            'Authorization': f"Bearer {self.ms_access_token}",
-            'Content-Type': 'application/json'
-        }
+    def _get_headers(self) -> dict:
+        """Get authorization headers for API requests"""
+        if self.access_token:
+            if hasattr(self, 'refresh_token') and datetime.now(timezone.utc) >= self.expires_at:
+                self._refresh_microsoft_token()
+            return {
+                'Authorization': f'Bearer {self.access_token}',
+                'Content-Type': 'application/json'
+            }
+        raise ValueError("No valid token available")
 
     def _format_data_for_excel(self, data: Any) -> List[List[str]]:
         """Helper function to format data for Excel."""
@@ -105,7 +101,7 @@ class MicrosoftIntegration:
     async def _get_one_drive_id(self) -> str:
         """Get the drive ID using the Graph API for personal OneDrive"""
         if not self._one_drive_id:
-            headers = await self._get_microsoft_headers()
+            headers = self._get_headers()
             async with aiohttp.ClientSession() as session:
                 async with session.get('https://graph.microsoft.com/v1.0/me/drive', headers=headers) as response:
                     if response.status == 200:
@@ -150,7 +146,7 @@ class MicrosoftIntegration:
 
     async def _manage_office_session(self, item_id: str, action: str = 'create') -> str:
         """Manage Microsoft Office Excel sessions"""
-        headers = await self._get_microsoft_headers()
+        headers = self._get_headers()
         base_url = f'https://graph.microsoft.com/v1.0/me/drive/items/{item_id}/workbook'
         
         if action == 'create':
@@ -178,7 +174,7 @@ class MicrosoftIntegration:
         """Append data to Office Excel Online workbook on the specified sheet"""
         try:
             item_id = await self._get_one_drive_and_item_info(sheet_url)
-            headers = await self._get_microsoft_headers()
+            headers = self._get_headers()
             
             # Modified API endpoints to use /me/drive
             async with aiohttp.ClientSession() as session:
@@ -279,7 +275,7 @@ class MicrosoftIntegration:
         try:
             item_id = await self._get_one_drive_and_item_info(sheet_url)
             
-            headers = await self._get_microsoft_headers()
+            headers = self._get_headers()
             values = self._format_data_for_excel(data)
             
             async with aiohttp.ClientSession() as session:
@@ -360,7 +356,7 @@ class MicrosoftIntegration:
         try:
             item_id = await self._get_one_drive_and_item_info(sheet_url)
             
-            headers = await self._get_microsoft_headers()
+            headers = self._get_headers()
             async with aiohttp.ClientSession() as session:
                 # Get all worksheets
                 async with session.get(

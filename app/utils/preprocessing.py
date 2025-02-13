@@ -666,19 +666,20 @@ class FilePreprocessor:
         # Get plan limits
         plan = profile.get("plan", "free")
         image_limit = {"free": 10, "pro": 200}.get(plan, 0)
-        
+
         # Check image limit
         current_images = usage.get("images_processed_this_month", 0)
-        if current_images + num_pages > image_limit:
-            raise ValueError(f"Image processing limit reached.")
-        
-        # Check overage limit
-        overage_this_month = usage.get("overage_this_month", 0)
-        overage_hard_limit = usage.get("overage_hard_limit", 0)
-        
-        if overage_this_month >= overage_hard_limit:
-            raise ValueError(f"Monthly overage limit reached")
+        if plan == "free" and current_images + num_pages > image_limit:
+            raise ValueError("Image processing limit reached.")
 
+        else:
+            # Check overage limit
+            overage_this_month = usage.get("overage_this_month", 0)
+            overage_hard_limit = usage.get("overage_hard_limit", 0)
+            new_overage = overage_this_month + num_pages * 0.08
+
+            if new_overage >= overage_hard_limit:
+                raise ValueError("Monthly overage limit reached")
 
 
 
