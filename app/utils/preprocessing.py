@@ -335,7 +335,7 @@ class FilePreprocessor:
             raise ValueError(e)
 
 
-    async def process_msft_excel_url(self, url, sheet_name: str = None) -> pd.DataFrame:
+    async def process_msft_excel_url(self, url, sheet_name: str = None, picker_token: str = None) -> pd.DataFrame:
         """
         Process Microsoft Excel URLs and convert to pandas DataFrame
         
@@ -359,7 +359,7 @@ class FilePreprocessor:
                 raise ValueError("Authentication required to access Microsoft Excel")
 
             # Initialize Microsoft integration
-            msft_integration = MicrosoftIntegration(supabase, user_id)
+            msft_integration = MicrosoftIntegration(supabase, user_id, picker_token)
             
             # Extract data using the sheet_name from input_url if provided
             return await msft_integration.extract_msft_excel_data(url, sheet_name)
@@ -367,7 +367,7 @@ class FilePreprocessor:
         except Exception as e:
             raise ValueError(e)
 
-    async def process_gsheet_url(self, url, sheet_name: str = None) -> pd.DataFrame:
+    async def process_gsheet_url(self, url, sheet_name: str = None, picker_token: str = None) -> pd.DataFrame:
         """
         Process Google Sheets URLs and convert to pandas DataFrame
         
@@ -389,7 +389,7 @@ class FilePreprocessor:
                 raise ValueError("Authentication required to access Google Sheets")
 
             # Initialize Google integration
-            g_integration = GoogleIntegration(supabase, user_id)
+            g_integration = GoogleIntegration(supabase, user_id, picker_token)
             
             # Pass sheet_name to extract_google_sheets_data
             return await g_integration.extract_google_sheets_data(url, sheet_name)
@@ -599,6 +599,7 @@ class FilePreprocessor:
         query: str, 
         file_type: str, 
         sheet_name: str = None, 
+        picker_token: str = None,
         processed_data: List[FileDataInfo] = None,
         page_range: Optional[tuple[int, int]] = None,
     ) -> Union[str, pd.DataFrame]:
@@ -635,7 +636,9 @@ class FilePreprocessor:
         if file_type.lower() in ['png', 'jpg', 'jpeg']:
             return await processor(file, output_path=None, query=query, input_data=input_data)
         if file_type.lower() in ['gsheet', 'office_sheet']:
-            return await processor(file, sheet_name)
+            url = ""
+            url = file
+            return await processor(url, sheet_name, picker_token)
         return await processor(file)
 
     async def check_image_processing_limits(self, supabase: SupabaseClient, user_id: str, num_pages: int = 1) -> None:
@@ -710,11 +713,11 @@ async def preprocess_files(
             logging.info(f"Processing URL: {input_url.url}")
             if 'docs.google' in input_url.url:
                 logging.info(f"Processing Google Sheet URL with sheet name: {input_url.sheet_name}")
-                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name)
+                content = await preprocessor.preprocess_file(input_url.url, query, 'gsheet', input_url.sheet_name, input_url.picker_token)
                 logging.info("Successfully processed Google Sheet") 
             elif 'onedrive.live' in input_url.url:
                 logging.info(f"Processing OneDrive URL with sheet name: {input_url.sheet_name}")
-                content = await preprocessor.preprocess_file(input_url.url, query, 'office_sheet', input_url.sheet_name)
+                content = await preprocessor.preprocess_file(input_url.url, query, 'office_sheet', input_url.sheet_name, input_url.picker_token)
                 logging.info("Successfully processed OneDrive file")
             else:
                 logging.error(f"Unsupported URL format: {input_url.url}")

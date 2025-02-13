@@ -247,10 +247,18 @@ async def handle_destination_upload(data: Any, request: QueryRequest, old_data: 
                 data = data[0]
             else:
                 data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
-        
 
-        g_integration = GoogleIntegration(supabase, user_id)
-        msft_integration = MicrosoftIntegration(supabase, user_id)
+        # Initialize integrations with picker token if available
+        g_integration = GoogleIntegration(
+            supabase=supabase,
+            user_id=user_id,
+            picker_token=request.output_preferences.picker_token if "docs.google.com" in request.output_preferences.destination_url.lower() else None
+        )
+        msft_integration = MicrosoftIntegration(
+            supabase=supabase,
+            user_id=user_id,
+            picker_token=request.output_preferences.picker_token if any(x in request.output_preferences.destination_url.lower() for x in ["onedrive", "sharepoint.com"]) else None
+        )
         llm_service = LLMService()
         url_lower = request.output_preferences.destination_url.lower()
         
@@ -345,8 +353,17 @@ async def handle_batch_destination_upload(
             else:
                 processed_data = pd.DataFrame([data], columns=[f'Value_{i}' for i in range(len(data))])
 
-        g_integration = GoogleIntegration(supabase, user_id)
-        msft_integration = MicrosoftIntegration(supabase, user_id)
+        # Initialize integrations with picker token if available
+        g_integration = GoogleIntegration(
+            supabase=supabase,
+            user_id=user_id,
+            picker_token=request.output_preferences.picker_token 
+        )
+        msft_integration = MicrosoftIntegration(
+            supabase=supabase,
+            user_id=user_id,
+            picker_token=request.output_preferences.picker_token 
+        )
         
         url_lower = request.output_preferences.destination_url.lower()
         suggested_name = None

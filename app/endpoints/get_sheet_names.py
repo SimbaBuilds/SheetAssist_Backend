@@ -490,7 +490,8 @@ async def get_sheet_names(
     url: DocumentTitleRequest,
     user_id: Annotated[str, Depends(get_current_user)],
     supabase: Annotated[SupabaseClient, Depends(get_supabase_client)],
-    google_token: str | None = Header(None, alias="X-Google-Token")
+    access_token: str | None = Header(None, alias="Access-Token"),
+    provider: str | None = Header(None)
 ):
     if not user_id:
         return WorkbookResponse(
@@ -499,32 +500,27 @@ async def get_sheet_names(
             error="Authentication required"
         )
 
-    # Handle Google URLs
-    if any(domain in url.url for domain in ['docs.google.com', 'sheets.google.com']):
-        google_token_info = None
-        if google_token:
-            logger.info("Using provided Google access token")
-            google_token_info = TokenInfo(
-                access_token=google_token,
-                refresh_token="",  # Not needed for temporary access
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),  # Assume 1 hour validity
-                token_type="Bearer",
-                scope="https://www.googleapis.com/auth/drive.file",
-                user_id=user_id
-            )
-        else:
-            logger.info("No Google token provided, falling back to stored token")
-            google_token_info = await get_provider_token(user_id, 'google', supabase)
-            if not google_token_info:
-                return WorkbookResponse(
-                    url=url.url,
-                    success=False,
-                    error="Google authentication required. Please connect your Google account, accepting all permissions."
-                )
+    if not access_token or not provider:
+        return WorkbookResponse(
+            url=url.url,
+            success=False,
+            error="Access token and provider are required"
+        )
 
-        try:
-            logger.info(f"Attempting to get sheet names for URL: {url.url}")
-            online_sheet = await get_google_title(url.url, google_token_info, supabase)
+    provider = provider.lower()
+    token_info = TokenInfo(
+        access_token=access_token,
+        refresh_token="",  # Not needed for temporary access
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        token_type="Bearer",
+        scope="Files.Read.Selected" if provider == "microsoft" else "https://www.googleapis.com/auth/drive.file",
+        user_id=user_id
+    )
+
+    try:
+        if provider == "google":
+            logger.info(f"Attempting to get Google sheet names for URL: {url.url}")
+            online_sheet = await get_google_title(url.url, token_info, supabase)
             if online_sheet == "not_found":
                 error_message = "Document not found or not accessible. Please check that the document exists and you have been granted access to it."
                 logger.error(f"Document not found or not accessible: {url.url}")
@@ -549,27 +545,8 @@ async def get_sheet_names(
                 sheet_names=online_sheet.sheet_names,
                 success=True
             )
-        except Exception as e:
-            logger.error(f"Error processing Google URL: {str(e)}")
-            return WorkbookResponse(
-                url=url.url,
-                success=False,
-                error="Error accessing Google Sheets. Please reconnect your Google account, accepting all permissions."
-            )
-        
-    # Handle Microsoft URLs
-    elif any(domain in url.url for domain in ['office.com', 'live.com', 'onedrive.live.com']):
-        microsoft_token = await get_provider_token(user_id, 'microsoft', supabase)
-        logger.info(f"Retrieved Microsoft token")
-        if not microsoft_token:
-            return WorkbookResponse(
-                url=url.url,
-                success=False,
-                error="Microsoft authentication required. Please connect your Microsoft account."
-            )
-
-        try:
-            online_sheet = await get_microsoft_title(url.url, microsoft_token, supabase)
+        elif provider == "microsoft":
+            online_sheet = await get_microsoft_title(url.url, token_info, supabase)
             logger.info(f"Retrieved title: {online_sheet.doc_name} sheets: {online_sheet.sheet_names}")
             return WorkbookResponse(
                 url=url.url,
@@ -578,16 +555,16 @@ async def get_sheet_names(
                 sheet_names=online_sheet.sheet_names,
                 success=True
             )
-        except Exception as e:
-            logger.error(f"Error fetching Microsoft doc title: {str(e)}")
+        else:
             return WorkbookResponse(
                 url=url.url,
                 success=False,
-                error="Microsoft authentication required. Please connect your Microsoft account."
+                error=f"Unsupported provider: {provider}"
             )
-    else:
+    except Exception as e:
+        logger.error(f"Error processing {provider} URL: {str(e)}")
         return WorkbookResponse(
             url=url.url,
             success=False,
-            error="Unsupported document type"
+            error=f"Error accessing {provider} file. Please try selecting the file again."
         )

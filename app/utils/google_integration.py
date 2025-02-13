@@ -9,32 +9,46 @@ from typing import Any
 from supabase.client import Client as SupabaseClient
 from datetime import date
 from typing import List
+import logging
 
+logger = logging.getLogger(__name__)
 
 class GoogleIntegration:
-    def __init__(self, supabase: SupabaseClient, user_id: str):
+    def __init__(self, supabase: SupabaseClient = None, user_id: str = None, picker_token: str = None):
         self.google_creds = None
 
-        g_response = supabase.table('user_documents_access') \
-        .select('refresh_token') \
-        .match({'user_id': user_id, 'provider': 'google'}) \
-        .execute()
-        
-        if not g_response.data or len(g_response.data) == 0:
-            print(f"No Google token found for user {user_id}")
-            return None
-        google_refresh_token = g_response.data[0]['refresh_token']
-        
-        # Google credentials
-        self.google_creds = Credentials(
-            token=None,
-            client_id=os.getenv('GOOGLE_CLIENT_ID'),
-            client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
-            refresh_token=google_refresh_token,
-            token_uri='https://oauth2.googleapis.com/token',
-            scopes =  [
-    'https://www.googleapis.com/auth/drive.file']
-        )
+        if picker_token:
+            logger.info("Using picker token for Google integration")
+            # Use picker token directly
+            self.google_creds = Credentials(
+                token=picker_token,
+                client_id=os.getenv('GOOGLE_CLIENT_ID'),
+                client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+                token_uri='https://oauth2.googleapis.com/token',
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
+        else:
+            logger.info("Using db stored token for Google integration")
+            # Fallback to stored token if picker token not provided
+            g_response = supabase.table('user_documents_access') \
+            .select('refresh_token') \
+            .match({'user_id': user_id, 'provider': 'google'}) \
+            .execute()
+            
+            if not g_response.data or len(g_response.data) == 0:
+                print(f"No Google token found for user {user_id}")
+                return None
+            google_refresh_token = g_response.data[0]['refresh_token']
+            
+            # Google credentials
+            self.google_creds = Credentials(
+                token=None,
+                client_id=os.getenv('GOOGLE_CLIENT_ID'),
+                client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+                refresh_token=google_refresh_token,
+                token_uri='https://oauth2.googleapis.com/token',
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
 
     def _format_data_for_sheets(self, data: Any) -> List[List[str]]:
         """Helper function to format data for Google Sheets."""

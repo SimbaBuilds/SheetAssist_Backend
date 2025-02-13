@@ -10,6 +10,7 @@ class OutputPreferences(BaseModel):
     modify_existing: Optional[bool] = None
     sheet_name: Optional[str] = None
     doc_name: Optional[str] = None
+    picker_token: Optional[str] = None
 
 
 
@@ -41,6 +42,7 @@ class InputUrl(BaseModel):
     url: str
     sheet_name: Optional[str] = None
     doc_name: Optional[str] = None
+    picker_token: Optional[str] = None
 
 
 class QueryRequest(BaseModel):
