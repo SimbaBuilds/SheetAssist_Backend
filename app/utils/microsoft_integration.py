@@ -23,16 +23,11 @@ class MicrosoftIntegration:
         self._one_drive_id = None
         self.ms_access_token = None
         self.ms_token_type = 'Bearer'
-        self.ms_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)  # Picker tokens typically last 1 hour
+        self.ms_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
         if picker_token:
             logger.info("Using picker token for Microsoft integration")
-            # Use picker token directly
             self.ms_access_token = picker_token
-            self.ms_client = GraphServiceClient(
-                credentials=self.ms_access_token,
-                scopes=['https://graph.microsoft.com/.default']
-            )
         else:
             logger.info("Using db stored token for Microsoft integration")
             # Fallback to stored token if picker token not provided
@@ -44,16 +39,8 @@ class MicrosoftIntegration:
             if not ms_response.data or len(ms_response.data) == 0:
                 print(f"No Microsoft token found for user {user_id}")
                 return None
-            ms_refresh_token = ms_response.data[0]['refresh_token']
-
-            # Microsoft auth setup
-            if ms_refresh_token:
-                self.ms_refresh_token = ms_refresh_token
-                self._refresh_microsoft_token()
-                self.ms_client = GraphServiceClient(
-                    credentials=self.ms_access_token,
-                    scopes=['https://graph.microsoft.com/.default']
-                )
+            self.ms_refresh_token = ms_response.data[0]['refresh_token']
+            self._refresh_microsoft_token()
 
     def _refresh_microsoft_token(self) -> None:
         """Refresh Microsoft OAuth token"""
@@ -79,21 +66,12 @@ class MicrosoftIntegration:
             self.ms_token_type = token_data['token_type']
             self.ms_expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_data['expires_in']))
             
-            # Update the Graph client with new credentials
-            self.ms_client = GraphServiceClient(
-                credentials=self.ms_access_token,
-                scopes=['https://graph.microsoft.com/.default']
-            )
-            
         except Exception as e:
             logging.error(f"Failed to refresh Microsoft token: {str(e)}")
             raise HTTPException(status_code=401, detail="Failed to refresh Microsoft token")
 
     async def _ensure_valid_microsoft_token(self) -> None:
         """Check and refresh Microsoft token if expired"""
-        if not hasattr(self, 'ms_refresh_token'):
-            # Using picker token, no refresh needed
-            return
         if datetime.now(timezone.utc) >= self.ms_expires_at:
             self._refresh_microsoft_token()
 
@@ -102,7 +80,7 @@ class MicrosoftIntegration:
         if hasattr(self, 'ms_refresh_token'):
             await self._ensure_valid_microsoft_token()
         return {
-            'Authorization': f"{self.ms_token_type} {self.ms_access_token}",
+            'Authorization': f"Bearer {self.ms_access_token}",
             'Content-Type': 'application/json'
         }
 

@@ -10,23 +10,19 @@ from supabase.client import Client as SupabaseClient
 from datetime import date
 from typing import List
 import logging
+import aiohttp
+from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
 class GoogleIntegration:
     def __init__(self, supabase: SupabaseClient = None, user_id: str = None, picker_token: str = None):
         self.google_creds = None
+        self.access_token = None
 
         if picker_token:
             logger.info("Using picker token for Google integration")
-            # Use picker token directly
-            self.google_creds = Credentials(
-                token=picker_token,
-                client_id=os.getenv('GOOGLE_CLIENT_ID'),
-                client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
-                token_uri='https://oauth2.googleapis.com/token',
-                scopes=['https://www.googleapis.com/auth/drive.file']
-            )
+            self.access_token = picker_token
         else:
             logger.info("Using db stored token for Google integration")
             # Fallback to stored token if picker token not provided
@@ -40,7 +36,7 @@ class GoogleIntegration:
                 return None
             google_refresh_token = g_response.data[0]['refresh_token']
             
-            # Google credentials
+            # Google credentials for refresh flow
             self.google_creds = Credentials(
                 token=None,
                 client_id=os.getenv('GOOGLE_CLIENT_ID'),
@@ -203,11 +199,24 @@ class GoogleIntegration:
             logging.error(f"New Google Sheet creation error: {str(e)}")
             raise
 
-#preprocessing
+    def _get_headers(self) -> dict:
+        """Get authorization headers for API requests"""
+        if self.access_token:
+            return {
+                'Authorization': f'Bearer {self.access_token}',
+                'Accept': 'application/json'
+            }
+        elif self.google_creds:
+            if not self.google_creds.valid:
+                self.google_creds.refresh(Request())
+            return {
+                'Authorization': f'Bearer {self.google_creds.token}',
+                'Accept': 'application/json'
+            }
+        raise ValueError("No valid token available")
+
     async def extract_google_sheets_data(self, sheet_url: str, sheet_name: str) -> pd.DataFrame:
-        """
-        Extract data from a Google Sheets URL using the provided sheet name.
-        """
+        """Extract data from a Google Sheets URL using the provided sheet name."""
         if 'docs.google.com/spreadsheets' not in sheet_url:
             raise ValueError("Invalid Google Sheets URL format")
             
@@ -218,16 +227,16 @@ class GoogleIntegration:
             # Create range with sheet name
             sheet_range = f"'{sheet_name}'!A:ZZ"
             
-            # Use Google integration to get authenticated service
-            service = build('sheets', 'v4', credentials=self.google_creds)
-            if not service:
-                raise ValueError("Failed to initialize Google Sheets service")
+            # Use direct API call with headers
+            headers = self._get_headers()
+            url = f'https://sheets.googleapis.com/v4/spreadsheets/{file_id}/values/{sheet_range}'
             
-            # Read the sheet data using authenticated service
-            result = service.spreadsheets().values().get(
-                spreadsheetId=file_id,
-                range=sheet_range
-            ).execute()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Failed to fetch sheet data: {error_text}")
+                    result = await response.json()
             
             # Convert to DataFrame
             values = result.get('values', [])
