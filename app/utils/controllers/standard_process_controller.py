@@ -123,18 +123,18 @@ async def process_query_standard(
             # Specifically handle image/overage limit errors
             error_msg = str(e)
             if "limit reached" in error_msg.lower():
-                message="Usage limit reached. Please check usage in your account settings.",
+                message="Usage or overage limit reached. Please check account settings.",
                 supabase.table("jobs").update({
                     "message": message
                 }).eq("job_id", job_id).execute()
-                message="Usage limit reached. Please check usage in your account settings.",
+                message="Usage or overage limit reached. Please check account settings.",
                 supabase.table("jobs").update({
                     "status": "error"
                 }).eq("job_id", job_id).execute()
                 return QueryResponse(
                     original_query=request_data.query,
                     status="error",
-                    message="Limit reached. Please check usage in your account settings.",
+                    message="Limit reached. Please check your account settings.",
                     files=None,
                     num_images_processed=0,
                     error=error_msg,

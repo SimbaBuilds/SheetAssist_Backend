@@ -43,6 +43,8 @@ class InputUrl(BaseModel):
     sheet_name: Optional[str] = None
     doc_name: Optional[str] = None
     picker_token: Optional[str] = None
+    token_expiry: Optional[str] = None
+    provider: Optional[str] = None
 
 
 class QueryRequest(BaseModel):

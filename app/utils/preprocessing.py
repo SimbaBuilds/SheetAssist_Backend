@@ -146,12 +146,7 @@ class FilePreprocessor:
         self.num_images_processed = num_images_processed
         self.supabase = supabase
         self.user_id = user_id
-        self.google_integration = None
-        self.microsoft_integration = None
         self.llm_service = LLMService()
-        if supabase and user_id:
-            self.google_integration = GoogleIntegration(supabase, user_id)
-            self.microsoft_integration = MicrosoftIntegration(supabase, user_id)
 
     @staticmethod
     async def process_excel(file: Union[SpooledTemporaryFile, str, Path, BinaryIO, FileUploadMetadata, UploadFile]) -> pd.DataFrame:
@@ -358,8 +353,8 @@ class FilePreprocessor:
             if not supabase or not user_id:
                 raise ValueError("Authentication required to access Microsoft Excel")
 
-            # Initialize Microsoft integration
-            msft_integration = MicrosoftIntegration(supabase, user_id, picker_token)
+            # Initialize Microsoft integration W/O PICKER TOKEN
+            msft_integration = MicrosoftIntegration(supabase, user_id)
             
             # Extract data using the sheet_name from input_url if provided
             return await msft_integration.extract_msft_excel_data(url, sheet_name)
