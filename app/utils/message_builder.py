@@ -95,7 +95,7 @@ def construct_status_response_batch(job: dict) -> str:
         sheet_name = None
     
     # Handle cases
-    if current_status == "completed" or current_status == "completed_with_error(s)":
+    if current_status == "completed":
         last_chunk_message = get_last_chunk_message(job)
         if output_preferences['type'] == 'online':
             return last_chunk_message + f"Processing complete."

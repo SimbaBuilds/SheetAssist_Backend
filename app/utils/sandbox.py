@@ -7,31 +7,58 @@ from typing import Optional
 from app.schemas import SandboxResult
 import ast
 import matplotlib
+import logging
 
 
 
 # method to transform code to AST and capture last expression result 
 def transform_ast(code: str) -> ast.AST:
     """Transform AST to capture last expression result"""
-    tree = ast.parse(code)
-    if tree.body:
-        last_node = tree.body[-1]
-        if isinstance(last_node, ast.Expr):
-            # Handle both single values and tuples/lists
-            assign = ast.Assign(
-                targets=[ast.Name(id="_result", ctx=ast.Store())],
-                value=last_node.value if isinstance(last_node.value, (ast.Tuple, ast.List)) 
-                      else ast.Tuple(elts=[last_node.value], ctx=ast.Load())
-            )
-            tree.body[-1] = ast.fix_missing_locations(assign)
-        elif isinstance(last_node, ast.Assign):
-            # Create a new assignment to _result that captures the target name
-            result_assign = ast.Assign(
-                targets=[ast.Name(id="_result", ctx=ast.Store())],
-                value=ast.Tuple(elts=[last_node.targets[0]], ctx=ast.Load())
-            )
-            tree.body.append(ast.fix_missing_locations(result_assign))
-    return tree
+    logging.info("Starting AST transformation")
+    try:
+        tree = ast.parse(code)
+        logging.info("Successfully parsed code into AST")
+        
+        if tree.body:
+            last_node = tree.body[-1]
+            logging.info(f"Last node type: {type(last_node).__name__}")
+            
+            if isinstance(last_node, ast.Expr):
+                logging.info("Processing expression node")
+                # Handle both single values and tuples/lists
+                if isinstance(last_node.value, (ast.Tuple, ast.List)):
+                    logging.info("Last node is a tuple/list")
+                    value = last_node.value
+                else:
+                    logging.info("Creating tuple from single value")
+                    value = ast.Tuple(elts=[last_node.value], ctx=ast.Load())
+                
+                assign = ast.Assign(
+                    targets=[ast.Name(id="_result", ctx=ast.Store())],
+                    value=value
+                )
+                tree.body[-1] = ast.fix_missing_locations(assign)
+                logging.info("Successfully transformed expression node")
+                
+            elif isinstance(last_node, ast.Assign):
+                logging.info("Processing assignment node")
+                # Create a new assignment to _result that captures the target name
+                result_assign = ast.Assign(
+                    targets=[ast.Name(id="_result", ctx=ast.Store())],
+                    value=ast.Name(id=last_node.targets[0].id, ctx=ast.Load()) if isinstance(last_node.targets[0], ast.Name) else last_node.targets[0]
+                )
+                tree.body.append(ast.fix_missing_locations(result_assign))
+                logging.info("Successfully transformed assignment node")
+            
+            logging.info("AST transformation completed successfully")
+            return tree
+        else:
+            logging.warning("Empty AST body")
+            return tree
+            
+    except Exception as e:
+        logging.error(f"Error during AST transformation: {str(e)}", exc_info=True)
+        raise
 
 
 
@@ -167,7 +194,10 @@ class EnhancedPythonInterpreter:
     # method to execute raw code with safety checks and timeout
     def execute_code(self, original_query: str, code: str, namespace: dict = None) -> SandboxResult:
         """Execute (cleaned)code with safety checks and timeout"""
-
+        
+        logging.info("Starting code execution in sandbox")
+        logging.debug(f"Code to execute:\n{code}")
+        
         result = SandboxResult(
             original_query=original_query,
             print_output="",
@@ -179,40 +209,68 @@ class EnhancedPythonInterpreter:
         )
 
         def execute():
-            # Add and remove the restricted importer only during code execution
+            logging.info("Setting up restricted importer")
             sys.meta_path.insert(0, self.restricted_importer)
             try:
+                logging.info("Starting output capture")
                 with self.capture_output() as (stdout, stderr):
                     try:
+                        logging.info("Starting AST transformation")
                         tree = transform_ast(code)
+                        logging.info("AST transformation completed")
+                        
                         ns = {
                             '__builtins__': self.safe_builtins,
                             **self.allowed_packages,
                             **(namespace or {})
                         }
-                        exec(compile(tree, '<ast>', 'exec'), ns)
-                        result.return_value = ns.get('_result')
+                        logging.debug(f"Namespace keys: {list(ns.keys())}")
+                        
+                        logging.info("Compiling code")
+                        compiled_code = compile(tree, '<ast>', 'exec')
+                        logging.info("Executing compiled code")
+                        
+                        exec(compiled_code, ns)
+                        logging.info("Code execution completed")
+                        
+                        if '_result' in ns:
+                            logging.info(f"Result type: {type(ns.get('_result')).__name__}")
+                            result.return_value = ns.get('_result')
+                        else:
+                            logging.warning("No '_result' found in namespace after execution")
+                            
                         result.print_output = stdout.getvalue()
                         if stderr.getvalue():
-                            result.error = stderr.getvalue()
+                            stderr_output = stderr.getvalue()
+                            logging.error(f"Stderr output: {stderr_output}")
+                            result.error = stderr_output
+                        logging.info("Code execution completed successfully")
+                    except SyntaxError as e:
+                        logging.error(f"Syntax error in code: {str(e)}", exc_info=True)
+                        result.error = f"Syntax error: {str(e)}"
                     except Exception as e:
+                        logging.error(f"Error during code execution: {str(e)}", exc_info=True)
                         result.error = str(e)
             finally:
-                # Always remove the restricted importer after execution
+                logging.info("Cleaning up restricted importer")
                 if self.restricted_importer in sys.meta_path:
                     sys.meta_path.remove(self.restricted_importer)
 
+        logging.info("Starting execution thread")
         thread = threading.Thread(target=execute)
         thread.daemon = True
         thread.start()
-        print("thread started")
+        logging.info("Waiting for thread completion")
         thread.join(timeout=self.timeout_seconds)
 
         if thread.is_alive():
+            logging.error(f"Execution timed out after {self.timeout_seconds} seconds")
             result.timed_out = True
             result.error = f'Execution timed out after {self.timeout_seconds} seconds'
             thread = None
-
+        else:
+            logging.info("Thread completed execution")
+        
         return result
 
 

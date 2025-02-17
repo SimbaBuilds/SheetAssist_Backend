@@ -68,64 +68,86 @@ async def process_query_batch(
 
         # Process all chunks sequentially
         for chunk_index in range(len(page_chunks)):
-            await check_client_connection(request)
-            logger.info(f"Processing chunk {chunk_index + 1} of {len(page_chunks)}")
-            
-            # Update job with current chunk status
-            supabase.table("jobs").update({
-                "current_chunk": chunk_index,
-            }).eq("job_id", job_id).execute()
+            try:
+                await check_client_connection(request)
+                logger.info(f"Processing chunk {chunk_index + 1} of {len(page_chunks)}")
+                
+                # Update job with current chunk status
+                supabase.table("jobs").update({
+                    "current_chunk": chunk_index,
+                }).eq("job_id", job_id).execute()
 
-            # Process the chunk for ChunkResponse
-            response = await process_batch_chunk(
-                user_id=user_id,
-                supabase=supabase,
-                request_data=request_data,
-                files=files,
-                job_id=job_id,
-                session_dir=session_dir,
-                current_chunk=chunk_index,
-                previous_chunk_return_value=previous_chunk_return_value,
-                contains_image_or_like=contains_image_or_like
-            )
+                # Process the chunk for ChunkResponse
+                response = await process_batch_chunk(
+                    user_id=user_id,
+                    supabase=supabase,
+                    request_data=request_data,
+                    files=files,
+                    job_id=job_id,
+                    session_dir=session_dir,
+                    current_chunk=chunk_index,
+                    previous_chunk_return_value=previous_chunk_return_value,
+                    contains_image_or_like=contains_image_or_like
+                )
 
-            # Store the return value for the next chunk
-            previous_chunk_return_value = response.result.return_value #tuple
+                # Store the return value for the next chunk
+                previous_chunk_return_value = response.result.return_value #tuple
 
-            # Get updated job data
-            job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
-            if not job_response.data or len(job_response.data) == 0:
-                raise ValueError("Job not found")
-            job_data = job_response.data[0]
-            
-            # Accumulate total images processed
-            chunk_status = job_data.get("chunk_status", [])
-            current_chunk_status = chunk_status[chunk_index]
-            if "Success" in current_chunk_status:
-                total_images_processed += response.num_images_processed
+                # Get updated job data
+                job_response = supabase.table("jobs").select("*").eq("job_id", job_id).execute()
+                if not job_response.data or len(job_response.data) == 0:
+                    raise ValueError("Job not found")
+                job_data = job_response.data[0]
+                
+                # Accumulate total images processed
+                chunk_status = job_data.get("chunk_status", [])
+                current_chunk_status = chunk_status[chunk_index]
+                if "Success" in current_chunk_status:
+                    total_images_processed += response.num_images_processed
 
-            logger.info(f"TOTAL images processed: {total_images_processed}")
-            
-            # Calculate progress
-            processed_pages = min((chunk_index + 1) * int(os.getenv("CHUNK_SIZE")), job_data["total_pages"])
-            is_last_chunk = chunk_index == len(page_chunks) - 1
-            
-            message = construct_status_response_batch(job_data)
-            # Comprehensive job update after each chunk
-            update_data = {
-                "current_chunk": min(chunk_index + 1, len(page_chunks) - 1),
-                "processed_pages": processed_pages,
-                "total_images_processed": total_images_processed,
-                "result_snapshot": response.result.return_value_snapshot if is_last_chunk else None,
-                "message": message
-            }
-            
-            if is_last_chunk:
-                update_data.update({
+                logger.info(f"TOTAL images processed: {total_images_processed}")
+                
+                # Calculate progress
+                processed_pages = min((chunk_index + 1) * int(os.getenv("CHUNK_SIZE")), job_data["total_pages"])
+                is_last_chunk = chunk_index == len(page_chunks) - 1
+                
+                message = construct_status_response_batch(job_data)
+                # Comprehensive job update after each chunk
+                update_data = {
+                    "current_chunk": min(chunk_index + 1, len(page_chunks) - 1),
+                    "processed_pages": processed_pages,
+                    "total_images_processed": total_images_processed,
+                    "result_snapshot": response.result.return_value_snapshot if is_last_chunk else None,
+                    "message": message
+                }
+                
+                if is_last_chunk:
+                    update_data.update({
+                        "completed_at": datetime.now(UTC).isoformat(),
+                    })
+                
+                supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
+
+            except ValueError as e:
+                # Update job with error status but don't raise exception yet
+                error_msg = str(e)
+                supabase.table("jobs").update({
+                    "status": "error",
+                    "error_message": error_msg,
+                    "message": error_msg,
                     "completed_at": datetime.now(UTC).isoformat(),
-                })
-            
-            supabase.table("jobs").update(update_data).eq("job_id", job_id).execute()
+                }).eq("job_id", job_id).execute()
+                
+                # Return error response instead of raising exception
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="error",
+                    message=error_msg,
+                    files=None,
+                    num_images_processed=total_images_processed,
+                    job_id=job_id,
+                    error=error_msg
+                )
 
         # Final status update based on chunk statuses
         chunk_status = job_data.get("chunk_status", [])
@@ -148,7 +170,7 @@ async def process_query_batch(
             "completed_at": datetime.now(UTC).isoformat(),
         }).eq("job_id", job_id).execute()
 
-                
+    
         return QueryResponse(
             original_query=request_data.query,
             status=response.status,
@@ -166,9 +188,19 @@ async def process_query_batch(
         supabase.table("jobs").update({
             "status": "error",
             "error_message": error_msg,
+            "message": error_msg,
             "completed_at": datetime.now(UTC).isoformat(),
             "total_images_processed": total_images_processed if 'total_images_processed' in locals() else 0,
         }).eq("job_id", job_id).execute()
         
-        raise HTTPException(status_code=500, detail=error_msg)
+        # Return error response instead of raising exception
+        return QueryResponse(
+            original_query=request_data.query,
+            status="error",
+            message=error_msg,
+            files=None,
+            num_images_processed=total_images_processed if 'total_images_processed' in locals() else 0,
+            job_id=job_id,
+            error=error_msg
+        )
 

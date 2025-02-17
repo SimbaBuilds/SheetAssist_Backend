@@ -91,20 +91,22 @@ async def process_batch_chunk(
             error_msg = str(e)
             if "limit reached" in error_msg.lower():
                 # Get current job data
+                message = "Limit reached.  Please check usage in your account settings."
                 if job_data:
                     page_chunks = job_data["page_chunks"]
                     # Remove unprocessed chunks
                     updated_chunks = page_chunks[:current_chunk + 1]
                     # Update job with error and truncated chunks
+                    
                     supabase.table("jobs").update({
                         "status": "error",
-                        "message": "Limit reached.  Please check usage in your account settings.",
+                        "message": message,
                         "error_message": error_msg,
                         "page_chunks": updated_chunks,
                         "completed_at": datetime.now(UTC).isoformat()
                     }).eq("job_id", job_id).execute()
 
-            raise ValueError(error_msg)
+            raise ValueError(message)
 
         #append PREVIOUS chunk to input data if it exists and output type is DOWNLOAD (online sheet output appends each batch, persisting past results automatically)
         if previous_chunk_return_value and request_data.output_preferences.type == "download":

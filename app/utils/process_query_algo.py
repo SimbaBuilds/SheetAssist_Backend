@@ -31,7 +31,8 @@ async def process_query_algo(
         for idx, file_data in enumerate(data):
             var_name = f'data_{idx}' if idx > 0 else 'data'
             namespace[var_name] = file_data.content
-            
+            print(f"Var name: {var_name} type: {type(file_data.content)} snapshot: {file_data.snapshot}")
+     
             if isinstance(file_data.content, pd.DataFrame):
                 print(f"{var_name} shape:", file_data.content.shape)
             elif hasattr(file_data.content, '__len__'):
@@ -100,17 +101,21 @@ async def process_query_algo(
             # Prepare analyzer context
             full_diff_context = ""
             if old_data and new_data:
-                for i in range(len(old_data)):
-                    if isinstance(old_data[i].content, pd.DataFrame):
-                        logging.info(f"Processing DataFrame from old_data[{i}]")
-                        for j, item in enumerate(new_data.content):
-                            if isinstance(item, pd.DataFrame):
-                                this_context = {}
-                                diff_key = f"diff{i+1}_{j+1}"
-                                # Process DataFrame for JSON serialization
-                                processed_item = process_dataframe_for_json(item)
-                                this_context[diff_key] = prepare_analyzer_context(old_data[i].content, processed_item)
-                                full_diff_context += json.dumps(this_context)
+                try:
+                    for i in range(len(old_data)):
+                        if isinstance(old_data[i].content, pd.DataFrame):
+                            logging.info(f"Processing DataFrame from old_data[{i}]")
+                            for j, item in enumerate(new_data.content):
+                                if isinstance(item, pd.DataFrame):
+                                    this_context = {}
+                                    diff_key = f"diff{i+1}_{j+1}"
+                                    # Process DataFrame for JSON serialization
+                                    processed_item = process_dataframe_for_json(item)
+                                    this_context[diff_key] = prepare_analyzer_context(old_data[i].content, processed_item)
+                                    full_diff_context += json.dumps(this_context)
+                except Exception as e:
+                    logging.error(f"Error processing DataFrame comparison: {str(e)}")
+                    full_diff_context = ""
             # Analyze results
             provider, analysis_result = await llm_service.execute_with_fallback(
                 "analyze_sandbox_result",

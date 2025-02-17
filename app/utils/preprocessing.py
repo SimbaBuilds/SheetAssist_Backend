@@ -667,15 +667,14 @@ class FilePreprocessor:
         if plan == "free" and current_images + num_pages > image_limit:
             raise ValueError("Image processing limit reached.")
 
-        else:
-            # Check overage limit
-            overage_this_month = usage.get("overage_this_month", 0)
-            overage_hard_limit = usage.get("overage_hard_limit", 0)
-            new_overage = overage_this_month + num_pages * 0.08
+        
+        overage_this_month = usage.get("overage_this_month", 0)
+        overage_hard_limit = usage.get("overage_hard_limit", 0)
+        new_overage = overage_this_month + num_pages * 0.08
+        greater_than_200 = current_images + num_pages > 200
 
-            if new_overage >= overage_hard_limit:
-                raise ValueError("Monthly overage limit reached")
-
+        if plan == "pro" and new_overage >= overage_hard_limit and greater_than_200:
+            raise ValueError("Monthly overage limit reached")
 
 
 

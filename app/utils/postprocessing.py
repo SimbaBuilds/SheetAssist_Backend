@@ -355,9 +355,23 @@ async def handle_batch_destination_upload(
         url_lower = request.output_preferences.destination_url.lower()
         suggested_name = None
 
+        # Initialize integrations
+        g_integration = None
+        msft_integration = None
+        if "docs.google.com" in url_lower:
+            g_integration = GoogleIntegration(
+                supabase=supabase,
+                user_id=user_id,
+                picker_token=request.output_preferences.picker_token
+            )
+        elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+            msft_integration = MicrosoftIntegration(
+                supabase=supabase,
+                user_id=user_id
+            )
+
         # For first chunk with new sheet creation
         if is_first_chunk and not request.output_preferences.modify_existing:
-            
             print(f"Creating new sheet first chunk: {is_first_chunk} and preferences: {request.output_preferences.modify_existing}")
             provider, suggested_name = await llm_service.execute_with_fallback(
                 "file_namer",
@@ -379,25 +393,13 @@ async def handle_batch_destination_upload(
                 "output_preferences": current_preferences
             }).eq("job_id", job_id).execute()
 
-            if "docs.google.com" in url_lower:
-                # Initialize integrations with picker token if available
-                g_integration = GoogleIntegration(
-                    supabase=supabase,
-                    user_id=user_id,
-                    picker_token=request.output_preferences.picker_token 
-                )
+            if g_integration:
                 return await g_integration.append_to_new_google_sheet(
                     processed_data,
                     request.output_preferences.destination_url,
                     suggested_name
                 )
-            elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
-                msft_integration = MicrosoftIntegration(
-                supabase=supabase,
-                user_id=user_id,
-                # picker_token=request.output_preferences.picker_token 
-                 )
-                
+            elif msft_integration:
                 return await msft_integration.append_to_new_office_sheet(
                     processed_data,
                     request.output_preferences.destination_url,
@@ -416,16 +418,15 @@ async def handle_batch_destination_upload(
         else:
             sheet_name = job["output_preferences"]["sheet_name"]
       
-
         # For subsequent chunks or when modifying existing
-        if "docs.google.com" in url_lower:
+        if g_integration:
             print(f"Appending to existing sheet.  First chunk: {is_first_chunk} Sheet Name: {sheet_name}")
             return await g_integration.append_to_current_google_sheet(
                 processed_data,
                 request.output_preferences.destination_url,
                 sheet_name
             )
-        elif "onedrive" in url_lower or "sharepoint.com" in url_lower:
+        elif msft_integration:
             print(f"Appending to existing sheet.  First chunk: {is_first_chunk} Sheet Name: {sheet_name}")
             return await msft_integration.append_to_current_office_sheet(
                 processed_data,

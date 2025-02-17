@@ -112,7 +112,7 @@ class QueryResponse(BaseModel):
     job_id: Optional[str] = None  # Added for batch processing
     error: Optional[str] = None
     total_pages: Optional[int] = 0
-    job_id: Optional[str] = None
+    job_id: Optional[str] = None 
 
 
 class ChunkResponse(BaseModel):
