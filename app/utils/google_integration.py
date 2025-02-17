@@ -203,10 +203,10 @@ class GoogleIntegration:
         try:
             # Extract file ID from URL
             file_id = sheet_url.split('/d/')[1].split('/')[0]
-            
+            logging.info(f"file_id: {file_id}")
             # Create range with sheet name
             sheet_range = f"'{sheet_name}'!A:ZZ"
-            
+            logging.info(f"sheet_range: {sheet_range}")
             # Use Google integration to get authenticated service
             service = build('sheets', 'v4', credentials=self.google_creds)
             if not service:
@@ -217,7 +217,7 @@ class GoogleIntegration:
                 spreadsheetId=file_id,
                 range=sheet_range
             ).execute()
-            
+            logging.info(f"sheet read result: {result}")
             # Convert to DataFrame
             values = result.get('values', [])
             if not values:
@@ -237,8 +237,9 @@ class GoogleIntegration:
             elif len(headers) < len(df.columns):
                 for i in range(len(headers), len(df.columns)):
                     headers.append(f'Column_{i+1}')
-                
+            logging.info(f"headers: {headers}")
             df.columns = headers
+            logging.info(f"data successfully extracted from Google Sheets")
             return df
             
         except Exception as e:

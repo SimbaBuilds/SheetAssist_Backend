@@ -89,14 +89,13 @@ async def process_batch_chunk(
             )
         except ValueError as e:
             error_msg = str(e)
+            message = error_msg  # Initialize message with error_msg as fallback
+            
             if "limit reached" in error_msg.lower():
-                # Get current job data
-                message = "Limit reached.  Please check usage in your account settings."
+                message = "Limit reached. Please check usage in your account settings."
                 if job_data:
                     page_chunks = job_data["page_chunks"]
-                    # Remove unprocessed chunks
                     updated_chunks = page_chunks[:current_chunk + 1]
-                    # Update job with error and truncated chunks
                     
                     supabase.table("jobs").update({
                         "status": "error",

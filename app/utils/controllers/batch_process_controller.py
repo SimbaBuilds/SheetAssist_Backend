@@ -62,6 +62,7 @@ async def process_query_batch(
         page_chunks = job_data["page_chunks"]
         response = None
 
+        message = ''
         message = construct_status_response_batch(job_data)
         supabase.table("jobs").update({"message": message}).eq("job_id", job_id).execute()
         

@@ -385,10 +385,10 @@ class FilePreprocessor:
 
             # Initialize Google integration
             g_integration = GoogleIntegration(supabase, user_id, picker_token)
-            
+            logger.info(f"g_integration obtained")
             # Pass sheet_name to extract_google_sheets_data
             return await g_integration.extract_google_sheets_data(url, sheet_name)
-                
+            logger.info(f"g_integration extracted data")
         except Exception as e:
             raise ValueError(e)
 
