@@ -108,6 +108,8 @@ async def process_batch_chunk(
             raise ValueError(message)
 
         #append PREVIOUS chunk to input data if it exists and output type is DOWNLOAD (online sheet output appends each batch, persisting past results automatically)
+        if previous_chunk_return_value:
+            logger.info(f"Storing previous chunk return value with type: {type(previous_chunk_return_value)} and first element: {previous_chunk_return_value[0]}")
         if previous_chunk_return_value and request_data.output_preferences.type == "download":
             job_response = supabase.table("jobs").select("*").eq("job_id", job_id).eq("user_id", user_id).execute()
             if not job_response.data:

@@ -92,6 +92,7 @@ async def process_query_batch(
                 )
 
                 # Store the return value for the next chunk
+                logger.info(f"Storing previous chunk return value with type: {type(response.result.return_value)} and first element: {response.result.return_value[0]}")
                 previous_chunk_return_value = response.result.return_value #tuple
 
                 # Get updated job data
