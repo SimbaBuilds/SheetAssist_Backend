@@ -15,7 +15,8 @@ from fastapi import BackgroundTasks
 from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
-from app.utils.message_builder import check_client_connection, construct_status_response_standard
+from app.utils.client_connection import check_client_connection
+from app.utils.message_builder import construct_status_response_standard
 from dotenv import load_dotenv
 import io
 from datetime import datetime, UTC

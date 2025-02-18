@@ -9,7 +9,8 @@ from app.utils.preprocessing import preprocess_files
 from app.utils.data_processing import get_data_snapshot
 from app.utils.auth import get_current_user, get_supabase_client
 from app.utils.llm_service import LLMService
-from app.utils.message_builder import check_client_connection
+from app.utils.client_connection import check_client_connection
+
 from app.utils.controllers.visualize_data import generate_visualization
 from supabase.client import Client as SupabaseClient
 from app.utils.s3_file_management import temp_file_manager

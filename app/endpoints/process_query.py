@@ -19,7 +19,8 @@ from fastapi import BackgroundTasks
 from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
-from app.utils.message_builder import check_client_connection, construct_status_response_batch, construct_status_response_standard
+from app.utils.client_connection import check_client_connection, check_job_status
+from app.utils.message_builder import construct_status_response_batch, construct_status_response_standard
 from app.schemas import InputUrl
 from datetime import datetime, UTC
 import time
@@ -167,6 +168,16 @@ async def process_query_entry_endpoint(
         job_id = request_data.job_id
         
         # Initialize job in database (both batch and standard)
+        if check_job_status(job_id, supabase):
+            logger.info(f"Job {job_id} was canceled. Stopping processing.")
+            return QueryResponse(
+                original_query=request_data.query,
+                status="canceled",
+                message="Job was canceled",
+                files=None,
+                num_images_processed=0,
+                job_id=job_id
+            )
         
         if not need_to_batch:
             supabase.table("jobs").update({
@@ -202,6 +213,18 @@ async def process_query_entry_endpoint(
             for i in range(len(page_chunks)):
                 chunk_status_default_list.append(f"Chunk {i+1} Status:")
 
+            
+            if check_job_status(job_id, supabase):
+                logger.info(f"Job {job_id} was canceled. Stopping processing.")
+                return QueryResponse(
+                    original_query=request_data.query,
+                    status="canceled",
+                    message="Job was canceled",
+                    files=None,
+                    num_images_processed=0,
+                    job_id=job_id
+                )
+            
             supabase.table("jobs").update({
                 "status": "created",
                 "total_pages": total_pages,

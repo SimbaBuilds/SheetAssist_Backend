@@ -13,7 +13,7 @@ from supabase.client import Client as SupabaseClient
 from datetime import datetime, UTC
 import io
 from app.utils.message_builder import construct_status_response_batch
-
+from app.utils.client_connection import check_job_status
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -171,6 +171,19 @@ async def process_batch_chunk(
             
         message = construct_status_response_batch(job)
 
+        
+        # Check if job has been canceled
+        if check_job_status(job_id, supabase):
+            logger.info(f"Job {job_id} was canceled. Stopping processing.")
+            return ChunkResponse(
+                result=result,
+                status="canceled",
+                message="Job was canceled",
+                files=None,
+                num_images_processed=0,
+                job_id=job_id
+            )
+        
         supabase.table("jobs").update({
             "status": "processing",
             "error_message": error_msg,
@@ -181,9 +194,6 @@ async def process_batch_chunk(
         # Cleanup temporary files
         await temp_file_manager.cleanup_marked()
 
-        supabase.table("jobs").update({
-            "status": "processing"
-        }).eq("job_id", job_id).execute()
 
         return ChunkResponse(
             result=result,

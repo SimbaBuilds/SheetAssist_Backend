@@ -12,7 +12,8 @@ from fastapi import BackgroundTasks
 from dotenv import load_dotenv
 from supabase.client import Client as SupabaseClient
 from app.utils.auth import get_current_user, get_supabase_client
-from app.utils.message_builder import check_client_connection, construct_status_response_batch
+from app.utils.client_connection import check_client_connection, check_job_status
+from app.utils.message_builder import construct_status_response_batch
 from app.schemas import InputUrl
 from datetime import datetime, UTC
 import time
@@ -77,6 +78,18 @@ async def process_query_batch(
                 supabase.table("jobs").update({
                     "current_chunk": chunk_index,
                 }).eq("job_id", job_id).execute()
+
+                # Check if job has been canceled
+                if check_job_status(job_id, supabase):
+                    logger.info(f"Job {job_id} was canceled. Stopping processing.")
+                    return QueryResponse(
+                        original_query=request_data.query,
+                        status="canceled",
+                        message="Job was canceled",
+                        files=None,
+                        num_images_processed=total_images_processed,
+                        job_id=job_id
+                    )
 
                 # Process the chunk for ChunkResponse
                 response = await process_batch_chunk(
