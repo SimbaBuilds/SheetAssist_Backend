@@ -670,7 +670,7 @@ class FilePreprocessor:
         
         overage_this_month = usage.get("overage_this_month", 0)
         overage_hard_limit = usage.get("overage_hard_limit", 0)
-        new_overage = overage_this_month + num_pages * 0.08
+        new_overage = overage_this_month + num_pages * 0.04
         greater_than_200 = current_images + num_pages > 200
 
         if plan == "pro" and new_overage >= overage_hard_limit and greater_than_200:
