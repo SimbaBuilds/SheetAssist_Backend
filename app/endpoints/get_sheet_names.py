@@ -226,6 +226,7 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
                 async with session.get(sheets_url, headers=headers) as response:
                     logger.info(f"Sheets response status: {response.status}")
                     sheets_response_text = await response.text()
+                    logger.info(f"Sheets response text: {sheets_response_text}")
                     
                     if response.status == 404:
                         error_data = await response.json()
@@ -263,6 +264,7 @@ async def get_google_title(url: str, token_info: TokenInfo, supabase: SupabaseCl
                         raise HTTPException(status_code=401, detail="Invalid Google access token")
                     response.raise_for_status()
                     sheets_data = await response.json()
+                    logger.info(f"Sheets response data: {sheets_data}")
                     sheet_names = [sheet['properties']['title'] for sheet in sheets_data.get('sheets', [])]
                     logger.info(f"Extracted sheet names: {sheet_names}")
 
@@ -498,36 +500,22 @@ async def get_sheet_names(
             error="Authentication required"
         )
 
-    if not provider:
+    if not access_token or not provider:
         return WorkbookResponse(
             url=url.url,
             success=False,
-            error="Provider is required"
+            error="Access token and provider are required"
         )
 
     provider = provider.lower()
-    
-    # First try to get token from database
-    token_info = await get_provider_token(user_id, provider, supabase)
-    
-    # If no database token and no access token provided, return error
-    if not token_info and not access_token:
-        return WorkbookResponse(
-            url=url.url,
-            success=False,
-            error=f"No {provider} access token found. Please reconnect your {provider} account."
-        )
-    
-    # If no database token but access token provided, create temporary token
-    if not token_info and access_token:
-        token_info = TokenInfo(
-            access_token=access_token,
-            refresh_token="",  # Not needed for temporary access
-            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            token_type="Bearer",
-            scope="Files.Read.Selected" if provider == "microsoft" else "https://www.googleapis.com/auth/drive.file",
-            user_id=user_id
-        )
+    token_info = TokenInfo(
+        access_token=access_token,
+        refresh_token="",  # Not needed for temporary access
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        token_type="Bearer",
+        scope="Files.Read.Selected" if provider == "microsoft" else "https://www.googleapis.com/auth/drive.file",
+        user_id=user_id
+    )
 
     try:
         if provider == "google":
