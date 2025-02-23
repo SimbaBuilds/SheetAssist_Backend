@@ -67,11 +67,11 @@ def get_last_chunk_message(job: dict) -> str:
     # Construct the new line based on output preferences and success status
     if output_preferences['type'] == 'online':
         if output_preferences['modify_existing']:
-            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}. \n"
         else:
-            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}. \n"
     else: #download output
-        new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"        
+        new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.\n"        
     
     # Combine messages without duplication
     return prevent_duplicate_message(existing_message, new_line)
@@ -127,11 +127,11 @@ def construct_status_response_batch(job: dict) -> str:
         # Construct the new line based on output preferences and success status
         if output_preferences['type'] == 'online':
             if output_preferences['modify_existing']:
-                new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+                new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and appended to {doc_name} - {sheet_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.\n"
             else:
-                new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"
+                new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed and added to new sheet in {doc_name}.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.\n"
         else: #download output
-            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.  Please inspect problematic pages and your output destination and try again.\n"        
+            new_line = f"Page {max(0, start_page)} to {end_page} from file {file_id} processed.\n" if chunk_success else f"FAILED to successfully process page {max(0, start_page)} to {end_page} from file {file_id}.\n"        
         
         # Combine messages without duplication
         return prevent_duplicate_message(existing_message, new_line)
