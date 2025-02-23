@@ -477,6 +477,7 @@ async def get_microsoft_title(url: str, token_info: TokenInfo, supabase: Supabas
                 break
         
         if not sheet_names:
+            raise Exception("Could not fetch worksheet names, continuing with file name only")
             logger.warning("Could not fetch worksheet names, continuing with file name only")
     
     if "." in file_name:
@@ -508,17 +509,18 @@ async def get_sheet_names(
         )
 
     provider = provider.lower()
-    token_info = TokenInfo(
-        access_token=access_token,
-        refresh_token="",  # Not needed for temporary access
-        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-        token_type="Bearer",
-        scope="Files.Read.Selected" if provider == "microsoft" else "https://www.googleapis.com/auth/drive.file",
-        user_id=user_id
-    )
+
 
     try:
         if provider == "google":
+            token_info = TokenInfo(
+                access_token=access_token,
+                refresh_token="",  # Not needed for temporary access
+                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                token_type="Bearer",
+                scope="Files.Read.Selected" if provider == "microsoft" else "https://www.googleapis.com/auth/drive.file",
+                user_id=user_id
+            )
             logger.info(f"Attempting to get Google sheet names for URL: {url.url}")
             online_sheet = await get_google_title(url.url, token_info, supabase)
             if online_sheet == "not_found":
@@ -546,6 +548,7 @@ async def get_sheet_names(
                 success=True
             )
         elif provider == "microsoft":
+            token_info = await get_provider_token(user_id, provider, supabase)
             online_sheet = await get_microsoft_title(url.url, token_info, supabase)
             logger.info(f"Retrieved title: {online_sheet.doc_name} sheets: {online_sheet.sheet_names}")
             return WorkbookResponse(
@@ -566,5 +569,5 @@ async def get_sheet_names(
         return WorkbookResponse(
             url=url.url,
             success=False,
-            error=f"Error accessing {provider} file. Please try selecting the file again."
+            error=f"Error accessing {provider} file. Please clear your browser cache and cookies and try again."
         )
