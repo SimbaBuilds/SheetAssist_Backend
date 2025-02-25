@@ -660,7 +660,7 @@ class FilePreprocessor:
         
         # Get plan limits
         plan = profile.get("plan", "free")
-        image_limit = {"free": 10, "pro": 200}.get(plan, 0)
+        image_limit = {"free": int(os.getenv("FREE_USER_LIMIT")), "pro": int(os.getenv("PRO_USER_LIMIT"))}.get(plan, 0)
 
         # Check image limit
         current_images = usage.get("images_processed_this_month", 0)
@@ -670,8 +670,8 @@ class FilePreprocessor:
         
         overage_this_month = usage.get("overage_this_month", 0)
         overage_hard_limit = usage.get("overage_hard_limit", 0)
-        new_overage = overage_this_month + num_pages * 0.04
-        greater_than_200 = current_images + num_pages > 200
+        new_overage = overage_this_month + num_pages * float(os.getenv("OVERAGE_PRICE"))
+        greater_than_200 = current_images + num_pages > int(os.getenv("PRO_USER_LIMIT"))
 
         if plan == "pro" and new_overage >= overage_hard_limit and greater_than_200:
             raise ValueError("Monthly overage limit reached")
