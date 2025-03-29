@@ -67,6 +67,7 @@ async def error_logging_middleware(request: Request, call_next):
 # Configure CORS with specific origins
 origins = [
     "https://aidocassist.com",
+    "https://sheetassistapp.com",
     "https://www.aidocassist.com",
     "https://api.aidocassist.com",
     "http://api.aidocassist.com",
