@@ -25,6 +25,8 @@ anyio==4.6.2.post1
     #   openai
     #   starlette
     #   watchfiles
+async-timeout==5.0.1
+    # via redis
 attrs==24.2.0
     # via aiohttp
 azure-core==1.32.0
@@ -191,6 +193,8 @@ kiwisolver==1.4.7
     # via matplotlib
 lxml==5.3.0
     # via python-docx
+mangum==0.19.0
+    # via -r requirements.in
 markdown-it-py==3.0.0
     # via rich
 markupsafe==3.0.2
@@ -448,6 +452,7 @@ typing-extensions==4.12.2
     #   azure-storage-file-share
     #   fastapi
     #   fastapi-cache2
+    #   mangum
     #   openai
     #   opentelemetry-sdk
     #   pydantic

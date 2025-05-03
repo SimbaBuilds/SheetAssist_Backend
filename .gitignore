@@ -10,3 +10,8 @@ venv/
 .ebextensions/01_environment.config
 /.ebextensions
 .platform/nginx/conf.d/proxy_timeout.conf
+/package-lock.json
+/package.json
+/requirements-lambda.txt
+/requirements.txt
+/node_modules

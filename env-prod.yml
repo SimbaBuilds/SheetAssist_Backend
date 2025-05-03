@@ -1,0 +1,38 @@
+prod:
+
+  # Environment settings
+  ENVIRONMENT: "production"
+  PORT: "8080"
+
+  # AWS settings
+  # AWS_REGION is provided automatically by Lambda
+  AWS_TEMP_BUCKET: "sheet-assist-temp-bucket-prod"
+  TEMP_BUCKET: "sheet-assist-temp-bucket-prod"
+  MS_TENANT_ID: "36f16f07-d3b4-4986-a564-9e9535ad4226"
+  MS_CLIENT_ID: "b00adaf9-85bb-4d00-9621-702fa7e43559"
+  MS_CLIENT_SECRET: "Sjd8Q~-OlGGr6PrCccrNARlJYwJiE-edMGQOUaRY"
+  MS_GRAPH_ENDPOINT: "https://graph.microsoft.com"
+  # AWS credentials are automatically provided by Lambda
+  GOOGLE_CLIENT_ID: "325450051431-20f8r657fth2pk4k2pstvke8e021990q.apps.googleusercontent.com"
+  GOOGLE_CLIENT_SECRET: "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"
+  SUPABASE_URL: "https://rquddzzbpbyzxtgeeczr.supabase.co"
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxdWRkenpicGJ5enh0Z2VlY3pyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwMTYwNDksImV4cCI6MjA0NTU5MjA0OX0.XeEuvbjz-_AzDHtQzZjcvc7f6fTLn5I_qonKgA3-nLg"    
+  SUPABASE_SERVICE_ROLE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxdWRkenpicGJ5enh0Z2VlY3pyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMDAxNjA0OSwiZXhwIjoyMDQ1NTkyMDQ5fQ.Kqh_VTWD9r5QX5kZcJNvar8eyuHbqJgja0iLZ7N3JtI"
+  SUPABASE_JWT_SECRET: "rNMo9c57UK4HPGdqZQQ6aaVHHQ+wpn3aQ/U1p8PEECmKtKKRNtuf8EDKVy3U5Tqbon/qks7XxymmMQTHRw6A+A=="
+  ENCRYPTION_KEY: "6mJPeXlHHcibr-Xlf5Y67l3uW-p1nGF92f4DZ8R9GfM="
+  ANTHROPIC_API_KEY: "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"
+  OPENAI_API_KEY: "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"
+  DEFAULT_LLM_PROVIDER: "anthropic"  
+  OPENAI_MAIN_MODEL: "gpt-4o-2024-08-06"
+  OPENAI_SMALL_MODEL: "gpt-4o-mini-2024-07-18"
+  ANTHROPIC_MAIN_MODEL: "claude-3-5-sonnet-20241022"
+  ANTHROPIC_SMALL_MODEL: "claude-3-5-haiku-20241022"
+  SLEEP_TIME: 0.5
+  CHUNK_SIZE: 3
+  ERROR_ATTEMPTS: 5
+  ANALYSIS_ATTEMPTS: 5
+  MAX_SNAPSHOT_LENGTH: 3000 
+  MAX_VISION_OUTPUT_TOKENS: 3000
+  FREE_USER_LIMIT: 30
+  OVERAGE_PRICE: 0.04
+  PRO_USER_LIMIT: 200

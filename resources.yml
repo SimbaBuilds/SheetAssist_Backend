@@ -1,0 +1,54 @@
+Resources:
+  # S3 bucket for temporary file storage
+  TempBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: ${self:provider.environment.TEMP_BUCKET}
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfterOneDay
+            Status: Enabled
+            ExpirationInDays: 1
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+
+  # CloudWatch Log Group for API Gateway
+  ApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: ${self:custom.resourceNames.apiGatewayLogGroup}
+      RetentionInDays: 30
+      
+  # CloudWatch Log Group for Lambda
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: ${self:custom.resourceNames.logGroup}
+      RetentionInDays: 30
+
+Outputs:
+  ApiUrl:
+    Description: URL of the API Gateway
+    Value:
+      Fn::Join:
+        - ''
+        - - https://
+          - Ref: HttpApi
+          - '.execute-api.'
+          - Ref: AWS::Region
+          - '.amazonaws.com'
+  S3BucketName:
+    Description: Name of the S3 bucket for temporary file storage
+    Value:
+      Ref: TempBucket 

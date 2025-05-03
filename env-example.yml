@@ -1,0 +1,45 @@
+dev:
+  # Environment settings
+  ENVIRONMENT: development
+  PORT: 8080
+  
+  # AWS settings
+  # AWS_REGION is provided automatically by Lambda
+  TEMP_BUCKET: sheet-assist-temp-bucket-dev
+  
+  # API settings
+  DEFAULT_LLM_PROVIDER: anthropic
+  
+  # App settings
+  SLEEP_TIME: 0.5
+  CHUNK_SIZE: 3
+  ERROR_ATTEMPTS: 5
+  ANALYSIS_ATTEMPTS: 5
+  MAX_SNAPSHOT_LENGTH: 3000
+  MAX_VISION_OUTPUT_TOKENS: 3000
+  FREE_USER_LIMIT: 30
+  OVERAGE_PRICE: 0.04
+  PRO_USER_LIMIT: 200
+
+prod:
+  # Environment settings
+  ENVIRONMENT: production
+  PORT: 8080
+  
+  # AWS settings
+  # AWS_REGION is provided automatically by Lambda
+  TEMP_BUCKET: sheet-assist-temp-bucket-prod
+  
+  # API settings
+  DEFAULT_LLM_PROVIDER: anthropic
+  
+  # App settings
+  SLEEP_TIME: 0.5
+  CHUNK_SIZE: 3
+  ERROR_ATTEMPTS: 5
+  ANALYSIS_ATTEMPTS: 5
+  MAX_SNAPSHOT_LENGTH: 3000
+  MAX_VISION_OUTPUT_TOKENS: 3000
+  FREE_USER_LIMIT: 30
+  OVERAGE_PRICE: 0.04
+  PRO_USER_LIMIT: 200 

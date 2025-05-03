@@ -1,0 +1,835 @@
+{
+  "service": {
+    "service": "sheet-assist-api",
+    "serviceObject": {
+      "name": "sheet-assist-api"
+    },
+    "provider": {
+      "name": "aws",
+      "runtime": "python3.11",
+      "stage": "prod",
+      "region": "us-east-1",
+      "environment": {
+        "ENVIRONMENT": "production",
+        "PORT": "8080",
+        "AWS_TEMP_BUCKET": "sheet-assist-temp-bucket-prod",
+        "TEMP_BUCKET": "sheet-assist-temp-bucket-prod",
+        "MS_TENANT_ID": "36f16f07-d3b4-4986-a564-9e9535ad4226",
+        "MS_CLIENT_ID": "b00adaf9-85bb-4d00-9621-702fa7e43559",
+        "MS_CLIENT_SECRET": "Sjd8Q~-OlGGr6PrCccrNARlJYwJiE-edMGQOUaRY",
+        "MS_GRAPH_ENDPOINT": "https://graph.microsoft.com",
+        "GOOGLE_CLIENT_ID": "325450051431-20f8r657fth2pk4k2pstvke8e021990q.apps.googleusercontent.com",
+        "GOOGLE_CLIENT_SECRET": "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",
+        "SUPABASE_URL": "https://rquddzzbpbyzxtgeeczr.supabase.co",
+        "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxdWRkenpicGJ5enh0Z2VlY3pyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwMTYwNDksImV4cCI6MjA0NTU5MjA0OX0.XeEuvbjz-_AzDHtQzZjcvc7f6fTLn5I_qonKgA3-nLg",
+        "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxdWRkenpicGJ5enh0Z2VlY3pyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMDAxNjA0OSwiZXhwIjoyMDQ1NTkyMDQ5fQ.Kqh_VTWD9r5QX5kZcJNvar8eyuHbqJgja0iLZ7N3JtI",
+        "SUPABASE_JWT_SECRET": "rNMo9c57UK4HPGdqZQQ6aaVHHQ+wpn3aQ/U1p8PEECmKtKKRNtuf8EDKVy3U5Tqbon/qks7XxymmMQTHRw6A+A==",
+        "ENCRYPTION_KEY": "6mJPeXlHHcibr-Xlf5Y67l3uW-p1nGF92f4DZ8R9GfM=",
+        "ANTHROPIC_API_KEY": "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",
+        "OPENAI_API_KEY": "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",
+        "DEFAULT_LLM_PROVIDER": "anthropic",
+        "OPENAI_MAIN_MODEL": "gpt-4o-2024-08-06",
+        "OPENAI_SMALL_MODEL": "gpt-4o-mini-2024-07-18",
+        "ANTHROPIC_MAIN_MODEL": "claude-3-5-sonnet-20241022",
+        "ANTHROPIC_SMALL_MODEL": "claude-3-5-haiku-20241022",
+        "SLEEP_TIME": "0.5",
+        "CHUNK_SIZE": "3",
+        "ERROR_ATTEMPTS": "5",
+        "ANALYSIS_ATTEMPTS": "5",
+        "MAX_SNAPSHOT_LENGTH": "3000",
+        "MAX_VISION_OUTPUT_TOKENS": "3000",
+        "FREE_USER_LIMIT": "30",
+        "OVERAGE_PRICE": "0.04",
+        "PRO_USER_LIMIT": "200"
+      },
+      "timeout": 900,
+      "memorySize": 1024,
+      "apiGateway": {
+        "binaryMediaTypes": [
+          "multipart/form-data"
+        ]
+      },
+      "iam": {
+        "role": {
+          "statements": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListBucket"
+              ],
+              "Resource": [
+                "arn:aws:s3:::sheet-assist-temp-bucket-prod/*",
+                "arn:aws:s3:::sheet-assist-temp-bucket-prod"
+              ]
+            }
+          ]
+        }
+      },
+      "versionFunctions": true,
+      "compiledCloudFormationTemplate": {
+        "AWSTemplateFormatVersion": "2010-09-09",
+        "Description": "The AWS CloudFormation template for this Serverless application",
+        "Resources": {
+          "ServerlessDeploymentBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+              "BucketEncryption": {
+                "ServerSideEncryptionConfiguration": [
+                  {
+                    "ServerSideEncryptionByDefault": {
+                      "SSEAlgorithm": "AES256"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ServerlessDeploymentBucketPolicy": {
+            "Type": "AWS::S3::BucketPolicy",
+            "Properties": {
+              "Bucket": {
+                "Ref": "ServerlessDeploymentBucket"
+              },
+              "PolicyDocument": {
+                "Statement": [
+                  {
+                    "Action": "s3:*",
+                    "Effect": "Deny",
+                    "Principal": "*",
+                    "Resource": [
+                      {
+                        "Fn::Join": [
+                          "",
+                          [
+                            "arn:",
+                            {
+                              "Ref": "AWS::Partition"
+                            },
+                            ":s3:::",
+                            {
+                              "Ref": "ServerlessDeploymentBucket"
+                            },
+                            "/*"
+                          ]
+                        ]
+                      },
+                      {
+                        "Fn::Join": [
+                          "",
+                          [
+                            "arn:",
+                            {
+                              "Ref": "AWS::Partition"
+                            },
+                            ":s3:::",
+                            {
+                              "Ref": "ServerlessDeploymentBucket"
+                            }
+                          ]
+                        ]
+                      }
+                    ],
+                    "Condition": {
+                      "Bool": {
+                        "aws:SecureTransport": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ApiLogGroup": {
+            "Type": "AWS::Logs::LogGroup",
+            "Properties": {
+              "LogGroupName": "/aws/lambda/sheet-assist-api-prod-api"
+            }
+          },
+          "IamRoleLambdaExecution": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+              "AssumeRolePolicyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": {
+                      "Service": [
+                        "lambda.amazonaws.com"
+                      ]
+                    },
+                    "Action": [
+                      "sts:AssumeRole"
+                    ]
+                  }
+                ]
+              },
+              "Policies": [
+                {
+                  "PolicyName": {
+                    "Fn::Join": [
+                      "-",
+                      [
+                        "sheet-assist-api",
+                        "prod",
+                        "lambda"
+                      ]
+                    ]
+                  },
+                  "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                      {
+                        "Effect": "Allow",
+                        "Action": [
+                          "logs:CreateLogStream",
+                          "logs:CreateLogGroup",
+                          "logs:TagResource"
+                        ],
+                        "Resource": [
+                          {
+                            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sheet-assist-api-prod*:*"
+                          }
+                        ]
+                      },
+                      {
+                        "Effect": "Allow",
+                        "Action": [
+                          "logs:PutLogEvents"
+                        ],
+                        "Resource": [
+                          {
+                            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sheet-assist-api-prod*:*:*"
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "$[\"service\"][\"provider\"][\"iam\"][\"role\"][\"statements\"][0]"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "Path": "/",
+              "RoleName": {
+                "Fn::Join": [
+                  "-",
+                  [
+                    "sheet-assist-api",
+                    "prod",
+                    {
+                      "Ref": "AWS::Region"
+                    },
+                    "lambdaRole"
+                  ]
+                ]
+              }
+            }
+          },
+          "ApiLambdaFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+              "Code": {
+                "S3Bucket": {
+                  "Ref": "ServerlessDeploymentBucket"
+                },
+                "S3Key": "serverless/sheet-assist-api/prod/1746235752858-2025-05-03T01:29:12.858Z/api.zip"
+              },
+              "Handler": "lambda_handler.handler",
+              "Runtime": "python3.11",
+              "FunctionName": "sheet-assist-api-prod-api",
+              "MemorySize": 1024,
+              "Timeout": 900,
+              "Environment": {
+                "Variables": {
+                  "ENVIRONMENT": "production",
+                  "PORT": "8080",
+                  "AWS_TEMP_BUCKET": "sheet-assist-temp-bucket-prod",
+                  "TEMP_BUCKET": "sheet-assist-temp-bucket-prod",
+                  "MS_TENANT_ID": "36f16f07-d3b4-4986-a564-9e9535ad4226",
+                  "MS_CLIENT_ID": "b00adaf9-85bb-4d00-9621-702fa7e43559",
+                  "MS_CLIENT_SECRET": "Sjd8Q~-OlGGr6PrCccrNARlJYwJiE-edMGQOUaRY",
+                  "MS_GRAPH_ENDPOINT": "https://graph.microsoft.com",
+                  "GOOGLE_CLIENT_ID": "325450051431-20f8r657fth2pk4k2pstvke8e021990q.apps.googleusercontent.com",
+                  "GOOGLE_CLIENT_SECRET": "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",
+                  "SUPABASE_URL": "https://rquddzzbpbyzxtgeeczr.supabase.co",
+                  "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxdWRkenpicGJ5enh0Z2VlY3pyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwMTYwNDksImV4cCI6MjA0NTU5MjA0OX0.XeEuvbjz-_AzDHtQzZjcvc7f6fTLn5I_qonKgA3-nLg",
+                  "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxdWRkenpicGJ5enh0Z2VlY3pyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMDAxNjA0OSwiZXhwIjoyMDQ1NTkyMDQ5fQ.Kqh_VTWD9r5QX5kZcJNvar8eyuHbqJgja0iLZ7N3JtI",
+                  "SUPABASE_JWT_SECRET": "rNMo9c57UK4HPGdqZQQ6aaVHHQ+wpn3aQ/U1p8PEECmKtKKRNtuf8EDKVy3U5Tqbon/qks7XxymmMQTHRw6A+A==",
+                  "ENCRYPTION_KEY": "6mJPeXlHHcibr-Xlf5Y67l3uW-p1nGF92f4DZ8R9GfM=",
+                  "ANTHROPIC_API_KEY": "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",
+                  "OPENAI_API_KEY": "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",
+                  "DEFAULT_LLM_PROVIDER": "anthropic",
+                  "OPENAI_MAIN_MODEL": "gpt-4o-2024-08-06",
+                  "OPENAI_SMALL_MODEL": "gpt-4o-mini-2024-07-18",
+                  "ANTHROPIC_MAIN_MODEL": "claude-3-5-sonnet-20241022",
+                  "ANTHROPIC_SMALL_MODEL": "claude-3-5-haiku-20241022",
+                  "SLEEP_TIME": "0.5",
+                  "CHUNK_SIZE": "3",
+                  "ERROR_ATTEMPTS": "5",
+                  "ANALYSIS_ATTEMPTS": "5",
+                  "MAX_SNAPSHOT_LENGTH": "3000",
+                  "MAX_VISION_OUTPUT_TOKENS": "3000",
+                  "FREE_USER_LIMIT": "30",
+                  "OVERAGE_PRICE": "0.04",
+                  "PRO_USER_LIMIT": "200"
+                }
+              },
+              "Role": {
+                "Fn::GetAtt": [
+                  "IamRoleLambdaExecution",
+                  "Arn"
+                ]
+              }
+            },
+            "DependsOn": [
+              "ApiLogGroup"
+            ]
+          },
+          "ApiLambdaVersionGZ7hXlge2GTaHPmShDOpUvYppUN1IEC7wJMONdluYs": {
+            "Type": "AWS::Lambda::Version",
+            "DeletionPolicy": "Retain",
+            "Properties": {
+              "FunctionName": {
+                "Ref": "ApiLambdaFunction"
+              },
+              "CodeSha256": "1DI5kF3l7xyyIQhznGHojKkM1owy25F6TBuGYWnSnxo="
+            }
+          },
+          "HttpApi": {
+            "Type": "AWS::ApiGatewayV2::Api",
+            "Properties": {
+              "Name": "prod-sheet-assist-api",
+              "ProtocolType": "HTTP"
+            }
+          },
+          "HttpApiStage": {
+            "Type": "AWS::ApiGatewayV2::Stage",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "StageName": "$default",
+              "AutoDeploy": true,
+              "DefaultRouteSettings": {
+                "DetailedMetricsEnabled": false
+              }
+            }
+          },
+          "ApiLambdaPermissionHttpApi": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+              "FunctionName": {
+                "Fn::GetAtt": [
+                  "ApiLambdaFunction",
+                  "Arn"
+                ]
+              },
+              "Action": "lambda:InvokeFunction",
+              "Principal": "apigateway.amazonaws.com",
+              "SourceArn": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":execute-api:",
+                    {
+                      "Ref": "AWS::Region"
+                    },
+                    ":",
+                    {
+                      "Ref": "AWS::AccountId"
+                    },
+                    ":",
+                    {
+                      "Ref": "HttpApi"
+                    },
+                    "/*"
+                  ]
+                ]
+              }
+            }
+          },
+          "HttpApiIntegrationApi": {
+            "Type": "AWS::ApiGatewayV2::Integration",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "IntegrationType": "AWS_PROXY",
+              "IntegrationUri": {
+                "$ref": "$[\"service\"][\"provider\"][\"compiledCloudFormationTemplate\"][\"Resources\"][\"ApiLambdaPermissionHttpApi\"][\"Properties\"][\"FunctionName\"]"
+              },
+              "PayloadFormatVersion": "2.0",
+              "TimeoutInMillis": 30000
+            }
+          },
+          "HttpApiRouteAnyProxyVar": {
+            "Type": "AWS::ApiGatewayV2::Route",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "RouteKey": "ANY /{proxy+}",
+              "Target": {
+                "Fn::Join": [
+                  "/",
+                  [
+                    "integrations",
+                    {
+                      "Ref": "HttpApiIntegrationApi"
+                    }
+                  ]
+                ]
+              }
+            },
+            "DependsOn": "HttpApiIntegrationApi"
+          },
+          "HttpApiRouteAny": {
+            "Type": "AWS::ApiGatewayV2::Route",
+            "Properties": {
+              "ApiId": {
+                "Ref": "HttpApi"
+              },
+              "RouteKey": "ANY /",
+              "Target": {
+                "Fn::Join": [
+                  "/",
+                  [
+                    "integrations",
+                    {
+                      "Ref": "HttpApiIntegrationApi"
+                    }
+                  ]
+                ]
+              }
+            },
+            "DependsOn": "HttpApiIntegrationApi"
+          },
+          "TempBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+              "BucketName": "sheet-assist-temp-bucket-prod",
+              "LifecycleConfiguration": {
+                "Rules": [
+                  {
+                    "Id": "DeleteAfterOneDay",
+                    "Status": "Enabled",
+                    "ExpirationInDays": 1
+                  }
+                ]
+              },
+              "CorsConfiguration": {
+                "CorsRules": [
+                  {
+                    "AllowedHeaders": [
+                      "*"
+                    ],
+                    "AllowedMethods": [
+                      "GET",
+                      "PUT",
+                      "POST",
+                      "DELETE",
+                      "HEAD"
+                    ],
+                    "AllowedOrigins": [
+                      "*"
+                    ],
+                    "MaxAge": 3000
+                  }
+                ]
+              }
+            }
+          },
+          "ApiGatewayLogGroup": {
+            "Type": "AWS::Logs::LogGroup",
+            "Properties": {
+              "LogGroupName": "/aws/apigateway/sheet-assist-api-prod-custom",
+              "RetentionInDays": 30
+            }
+          },
+          "LambdaLogGroup": {
+            "Type": "AWS::Logs::LogGroup",
+            "Properties": {
+              "LogGroupName": "/aws/lambda/sheet-assist-api-prod-api-custom",
+              "RetentionInDays": 30
+            }
+          }
+        },
+        "Outputs": {
+          "ServerlessDeploymentBucketName": {
+            "Value": {
+              "Ref": "ServerlessDeploymentBucket"
+            },
+            "Export": {
+              "Name": "sls-sheet-assist-api-prod-ServerlessDeploymentBucketName"
+            }
+          },
+          "ApiLambdaFunctionQualifiedArn": {
+            "Description": "Current Lambda function version",
+            "Value": {
+              "Ref": "ApiLambdaVersionGZ7hXlge2GTaHPmShDOpUvYppUN1IEC7wJMONdluYs"
+            },
+            "Export": {
+              "Name": "sls-sheet-assist-api-prod-ApiLambdaFunctionQualifiedArn"
+            }
+          },
+          "HttpApiId": {
+            "Description": "Id of the HTTP API",
+            "Value": {
+              "Ref": "HttpApi"
+            },
+            "Export": {
+              "Name": "sls-sheet-assist-api-prod-HttpApiId"
+            }
+          },
+          "HttpApiUrl": {
+            "Description": "URL of the HTTP API",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "https://",
+                  {
+                    "Ref": "HttpApi"
+                  },
+                  ".execute-api.",
+                  {
+                    "Ref": "AWS::Region"
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix"
+                  }
+                ]
+              ]
+            },
+            "Export": {
+              "Name": "sls-sheet-assist-api-prod-HttpApiUrl"
+            }
+          },
+          "ApiUrl": {
+            "Description": "URL of the API Gateway",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  "https://",
+                  {
+                    "Ref": "HttpApi"
+                  },
+                  ".execute-api.",
+                  {
+                    "Ref": "AWS::Region"
+                  },
+                  ".amazonaws.com"
+                ]
+              ]
+            }
+          },
+          "S3BucketName": {
+            "Description": "Name of the S3 bucket for temporary file storage",
+            "Value": {
+              "Ref": "TempBucket"
+            }
+          }
+        }
+      },
+      "coreCloudFormationTemplate": {
+        "AWSTemplateFormatVersion": "2010-09-09",
+        "Description": "The AWS CloudFormation template for this Serverless application",
+        "Resources": {
+          "ServerlessDeploymentBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+              "BucketEncryption": {
+                "ServerSideEncryptionConfiguration": [
+                  {
+                    "ServerSideEncryptionByDefault": {
+                      "SSEAlgorithm": "AES256"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ServerlessDeploymentBucketPolicy": {
+            "Type": "AWS::S3::BucketPolicy",
+            "Properties": {
+              "Bucket": {
+                "Ref": "ServerlessDeploymentBucket"
+              },
+              "PolicyDocument": {
+                "Statement": [
+                  {
+                    "Action": "s3:*",
+                    "Effect": "Deny",
+                    "Principal": "*",
+                    "Resource": [
+                      {
+                        "Fn::Join": [
+                          "",
+                          [
+                            "arn:",
+                            {
+                              "Ref": "AWS::Partition"
+                            },
+                            ":s3:::",
+                            {
+                              "Ref": "ServerlessDeploymentBucket"
+                            },
+                            "/*"
+                          ]
+                        ]
+                      },
+                      {
+                        "Fn::Join": [
+                          "",
+                          [
+                            "arn:",
+                            {
+                              "Ref": "AWS::Partition"
+                            },
+                            ":s3:::",
+                            {
+                              "Ref": "ServerlessDeploymentBucket"
+                            }
+                          ]
+                        ]
+                      }
+                    ],
+                    "Condition": {
+                      "Bool": {
+                        "aws:SecureTransport": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "Outputs": {
+          "ServerlessDeploymentBucketName": {
+            "Value": {
+              "Ref": "ServerlessDeploymentBucket"
+            }
+          }
+        }
+      },
+      "vpc": {}
+    },
+    "custom": {
+      "pythonRequirements": {
+        "dockerizePip": true,
+        "usePoetry": false,
+        "slim": true,
+        "slimPatterns": [
+          "**/*.so",
+          "**/*.dist-info/**",
+          "**/__pycache__/**",
+          "**/*.egg-info/**",
+          "**/tests/**",
+          "**/.github/**",
+          "**/.pytest_cache/**"
+        ],
+        "strip": false,
+        "fileName": "requirements-lambda.txt",
+        "pipCmdExtraArgs": [
+          "--only-binary=:all:"
+        ],
+        "noDeploy": [
+          "pytest",
+          "pytest-cov",
+          "coverage"
+        ]
+      },
+      "resourceNames": {
+        "logGroup": "/aws/lambda/sheet-assist-api-prod-api-custom",
+        "apiGatewayLogGroup": "/aws/apigateway/sheet-assist-api-prod-custom"
+      }
+    },
+    "plugins": [
+      "serverless-python-requirements"
+    ],
+    "pluginsData": {},
+    "functions": {
+      "api": {
+        "handler": "lambda_handler.handler",
+        "events": [
+          {
+            "httpApi": {
+              "path": "/{proxy+}",
+              "method": "ANY"
+            },
+            "resolvedMethod": "ANY",
+            "resolvedPath": "/{proxy+}"
+          },
+          {
+            "httpApi": {
+              "path": "/",
+              "method": "ANY"
+            },
+            "resolvedMethod": "ANY",
+            "resolvedPath": "/"
+          }
+        ],
+        "timeout": 900,
+        "name": "sheet-assist-api-prod-api",
+        "module": ".",
+        "package": {
+          "artifact": "/Users/cameronhightower/Software_Projects/SheetAssist_Backend/.serverless/api.zip"
+        },
+        "memory": 1024,
+        "runtime": "python3.11",
+        "vpc": {},
+        "versionLogicalId": "ApiLambdaVersionGZ7hXlge2GTaHPmShDOpUvYppUN1IEC7wJMONdluYs"
+      }
+    },
+    "resources": {
+      "Resources": {
+        "TempBucket": {
+          "Type": "AWS::S3::Bucket",
+          "Properties": {
+            "BucketName": "sheet-assist-temp-bucket-prod",
+            "LifecycleConfiguration": {
+              "Rules": [
+                {
+                  "Id": "DeleteAfterOneDay",
+                  "Status": "Enabled",
+                  "ExpirationInDays": 1
+                }
+              ]
+            },
+            "CorsConfiguration": {
+              "CorsRules": [
+                {
+                  "AllowedHeaders": [
+                    "*"
+                  ],
+                  "AllowedMethods": [
+                    "GET",
+                    "PUT",
+                    "POST",
+                    "DELETE",
+                    "HEAD"
+                  ],
+                  "AllowedOrigins": [
+                    "*"
+                  ],
+                  "MaxAge": 3000
+                }
+              ]
+            }
+          }
+        },
+        "ApiGatewayLogGroup": {
+          "Type": "AWS::Logs::LogGroup",
+          "Properties": {
+            "LogGroupName": "/aws/apigateway/sheet-assist-api-prod-custom",
+            "RetentionInDays": 30
+          }
+        },
+        "LambdaLogGroup": {
+          "Type": "AWS::Logs::LogGroup",
+          "Properties": {
+            "LogGroupName": "/aws/lambda/sheet-assist-api-prod-api-custom",
+            "RetentionInDays": 30
+          }
+        }
+      },
+      "Outputs": {
+        "ApiUrl": {
+          "Description": "URL of the API Gateway",
+          "Value": {
+            "Fn::Join": [
+              "",
+              [
+                "https://",
+                {
+                  "Ref": "HttpApi"
+                },
+                ".execute-api.",
+                {
+                  "Ref": "AWS::Region"
+                },
+                ".amazonaws.com"
+              ]
+            ]
+          }
+        },
+        "S3BucketName": {
+          "Description": "Name of the S3 bucket for temporary file storage",
+          "Value": {
+            "Ref": "TempBucket"
+          }
+        }
+      }
+    },
+    "configValidationMode": "warn",
+    "serviceFilename": "serverless.yml",
+    "initialServerlessConfig": {
+      "service": "sheet-assist-api",
+      "frameworkVersion": "3",
+      "provider": {
+        "$ref": "$[\"service\"][\"provider\"]"
+      },
+      "plugins": {
+        "$ref": "$[\"service\"][\"plugins\"]"
+      },
+      "custom": {
+        "$ref": "$[\"service\"][\"custom\"]"
+      },
+      "package": {
+        "individually": true,
+        "patterns": [
+          "!.elasticbeanstalk/**",
+          "!.ebextensions/**",
+          "!.platform/**",
+          "!venv/**",
+          "!node_modules/**",
+          "!package.json",
+          "!package-lock.json",
+          "!.git/**",
+          "!.pytest_cache/**",
+          "!tests/**",
+          "!docs/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!**/*.pyd",
+          "!**/.DS_Store",
+          "!**/.serverless/**",
+          "!**/.idea/**",
+          "!**/.vscode/**",
+          "!**/node_modules/**",
+          "!requirements.txt",
+          "!README*",
+          "!LICENSE*",
+          "!CHANGELOG*"
+        ],
+        "artifactsS3KeyDirname": "serverless/sheet-assist-api/prod/code-artifacts",
+        "artifactDirectoryName": "serverless/sheet-assist-api/prod/1746235752858-2025-05-03T01:29:12.858Z"
+      },
+      "functions": {
+        "$ref": "$[\"service\"][\"functions\"]"
+      },
+      "resources": {
+        "$ref": "$[\"service\"][\"resources\"]"
+      }
+    },
+    "layers": {},
+    "isDashboardMonitoringPreconfigured": false
+  },
+  "package": {
+    "individually": true,
+    "artifactDirectoryName": "serverless/sheet-assist-api/prod/1746235752858-2025-05-03T01:29:12.858Z",
+    "artifact": ""
+  }
+}
