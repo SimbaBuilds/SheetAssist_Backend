@@ -6,8 +6,7 @@
 set -e
 
 STAGE="prod"
-API_NAME="prod-sheet-assist-api"
-FUNCTION_NAME="${API_NAME}-api"
+FUNCTION_NAME="sheet-assist-api-prod-api"
 
 echo "Deploying Lambda layers for ${STAGE} environment..."
 echo "Target function: ${FUNCTION_NAME}"
@@ -22,8 +21,8 @@ function create_layer() {
     # Create temp directory
     mkdir -p "/tmp/$layer_name/python"
     
-    # Install dependencies
-    pip install -r "$req_file" -t "/tmp/$layer_name/python"
+    # Install dependencies with --ignore-installed flag to avoid warnings
+    pip install --ignore-installed -r "$req_file" -t "/tmp/$layer_name/python"
     
     # Create zip file
     cd "/tmp/$layer_name"
@@ -61,10 +60,26 @@ echo "Utils: $UTILS_LAYER_ARN"
 
 echo "Updating Lambda function configuration..."
 
-# Update the Lambda function to use the new layers
-aws lambda update-function-configuration \
-    --function-name $FUNCTION_NAME \
-    --layers $CORE_LAYER_ARN $DATA_LAYER_ARN $LLM_LAYER_ARN $GOOGLE_LAYER_ARN $UTILS_LAYER_ARN
+# Create a temporary JSON file for the Lambda update
+TEMP_CLI_INPUT="/tmp/lambda_layers_input.json"
+cat > $TEMP_CLI_INPUT << EOL
+{
+  "FunctionName": "$FUNCTION_NAME",
+  "Layers": [
+    "$CORE_LAYER_ARN",
+    "$DATA_LAYER_ARN",
+    "$LLM_LAYER_ARN",
+    "$GOOGLE_LAYER_ARN",
+    "$UTILS_LAYER_ARN"
+  ]
+}
+EOL
+
+# Update the Lambda function using the CLI input file
+aws lambda update-function-configuration --cli-input-json file://$TEMP_CLI_INPUT
+
+# Clean up temp file
+rm $TEMP_CLI_INPUT
 
 echo "Lambda function updated successfully!"
 
