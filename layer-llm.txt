@@ -1,0 +1,8 @@
+anthropic==0.40.0
+openai==1.52.2
+msal==1.31.0
+supabase==2.10.0
+azure-identity==1.19.0
+azure-core==1.32.0
+tenacity==9.0.0
+tqdm==4.66.5 

@@ -1,8 +1,8 @@
 {
   "service": {
-    "service": "sheet-assist-api",
+    "service": "sheet-assist-api-minimal",
     "serviceObject": {
-      "name": "sheet-assist-api"
+      "name": "sheet-assist-api-minimal"
     },
     "provider": {
       "name": "aws",
@@ -42,30 +42,37 @@
         "OVERAGE_PRICE": "0.04",
         "PRO_USER_LIMIT": "200"
       },
-      "timeout": 900,
-      "memorySize": 1024,
-      "apiGateway": {
-        "binaryMediaTypes": [
-          "multipart/form-data"
-        ]
-      },
-      "iam": {
-        "role": {
-          "statements": [
-            {
-              "Effect": "Allow",
-              "Action": [
-                "s3:GetObject",
-                "s3:PutObject",
-                "s3:DeleteObject",
-                "s3:ListBucket"
-              ],
-              "Resource": [
-                "arn:aws:s3:::sheet-assist-temp-bucket-prod/*",
-                "arn:aws:s3:::sheet-assist-temp-bucket-prod"
-              ]
-            }
-          ]
+      "httpApi": {
+        "cors": {
+          "allowedOrigins": [
+            "https://localhost:3000",
+            "http://localhost:3000",
+            "https://aidocassist.com",
+            "https://sheetassistapp.com",
+            "https://www.aidocassist.com",
+            "https://api.aidocassist.com",
+            "http://api.aidocassist.com",
+            "https://1t2fkfa15h.execute-api.us-east-1.amazonaws.com"
+          ],
+          "allowedHeaders": [
+            "Content-Type",
+            "X-Amz-Date",
+            "Authorization",
+            "X-Api-Key",
+            "X-Amz-Security-Token",
+            "X-Amz-User-Agent",
+            "*"
+          ],
+          "allowedMethods": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "OPTIONS",
+            "*"
+          ],
+          "allowCredentials": true,
+          "maxAge": 86400
         }
       },
       "versionFunctions": true,
@@ -145,7 +152,7 @@
           "ApiLogGroup": {
             "Type": "AWS::Logs::LogGroup",
             "Properties": {
-              "LogGroupName": "/aws/lambda/sheet-assist-api-prod-api"
+              "LogGroupName": "/aws/lambda/sheet-assist-api-minimal-prod-api"
             }
           },
           "IamRoleLambdaExecution": {
@@ -173,7 +180,7 @@
                     "Fn::Join": [
                       "-",
                       [
-                        "sheet-assist-api",
+                        "sheet-assist-api-minimal",
                         "prod",
                         "lambda"
                       ]
@@ -191,7 +198,7 @@
                         ],
                         "Resource": [
                           {
-                            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sheet-assist-api-prod*:*"
+                            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sheet-assist-api-minimal-prod*:*"
                           }
                         ]
                       },
@@ -202,12 +209,9 @@
                         ],
                         "Resource": [
                           {
-                            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sheet-assist-api-prod*:*:*"
+                            "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sheet-assist-api-minimal-prod*:*:*"
                           }
                         ]
-                      },
-                      {
-                        "$ref": "$[\"service\"][\"provider\"][\"iam\"][\"role\"][\"statements\"][0]"
                       }
                     ]
                   }
@@ -218,7 +222,7 @@
                 "Fn::Join": [
                   "-",
                   [
-                    "sheet-assist-api",
+                    "sheet-assist-api-minimal",
                     "prod",
                     {
                       "Ref": "AWS::Region"
@@ -236,13 +240,13 @@
                 "S3Bucket": {
                   "Ref": "ServerlessDeploymentBucket"
                 },
-                "S3Key": "serverless/sheet-assist-api/prod/1746235752858-2025-05-03T01:29:12.858Z/api.zip"
+                "S3Key": "serverless/sheet-assist-api-minimal/prod/1746338178408-2025-05-04T05:56:18.408Z/api.zip"
               },
-              "Handler": "lambda_handler.handler",
+              "Handler": "lambda_handler_minimal.handler",
               "Runtime": "python3.11",
-              "FunctionName": "sheet-assist-api-prod-api",
+              "FunctionName": "sheet-assist-api-minimal-prod-api",
               "MemorySize": 1024,
-              "Timeout": 900,
+              "Timeout": 6,
               "Environment": {
                 "Variables": {
                   "ENVIRONMENT": "production",
@@ -289,21 +293,52 @@
               "ApiLogGroup"
             ]
           },
-          "ApiLambdaVersionGZ7hXlge2GTaHPmShDOpUvYppUN1IEC7wJMONdluYs": {
+          "ApiLambdaVersionr8VI4yq4XSRuqwPBn7XnKFQf3pbEnO1btQKvbBEuU": {
             "Type": "AWS::Lambda::Version",
             "DeletionPolicy": "Retain",
             "Properties": {
               "FunctionName": {
                 "Ref": "ApiLambdaFunction"
               },
-              "CodeSha256": "1DI5kF3l7xyyIQhznGHojKkM1owy25F6TBuGYWnSnxo="
+              "CodeSha256": "BfIbmS8+hrvGG569H/vBxwvNLxRI4CrKl2Axak3OOOE="
             }
           },
           "HttpApi": {
             "Type": "AWS::ApiGatewayV2::Api",
             "Properties": {
-              "Name": "prod-sheet-assist-api",
-              "ProtocolType": "HTTP"
+              "Name": "prod-sheet-assist-api-minimal",
+              "ProtocolType": "HTTP",
+              "CorsConfiguration": {
+                "AllowCredentials": true,
+                "AllowHeaders": [
+                  "Content-Type",
+                  "X-Amz-Date",
+                  "Authorization",
+                  "X-Api-Key",
+                  "X-Amz-Security-Token",
+                  "X-Amz-User-Agent",
+                  "*"
+                ],
+                "AllowMethods": [
+                  "GET",
+                  "POST",
+                  "PUT",
+                  "DELETE",
+                  "OPTIONS",
+                  "*"
+                ],
+                "AllowOrigins": [
+                  "https://localhost:3000",
+                  "http://localhost:3000",
+                  "https://aidocassist.com",
+                  "https://sheetassistapp.com",
+                  "https://www.aidocassist.com",
+                  "https://api.aidocassist.com",
+                  "http://api.aidocassist.com",
+                  "https://1t2fkfa15h.execute-api.us-east-1.amazonaws.com"
+                ],
+                "MaxAge": 86400
+              }
             }
           },
           "HttpApiStage": {
@@ -411,55 +446,6 @@
               }
             },
             "DependsOn": "HttpApiIntegrationApi"
-          },
-          "TempBucket": {
-            "Type": "AWS::S3::Bucket",
-            "Properties": {
-              "BucketName": "sheet-assist-temp-bucket-prod",
-              "LifecycleConfiguration": {
-                "Rules": [
-                  {
-                    "Id": "DeleteAfterOneDay",
-                    "Status": "Enabled",
-                    "ExpirationInDays": 1
-                  }
-                ]
-              },
-              "CorsConfiguration": {
-                "CorsRules": [
-                  {
-                    "AllowedHeaders": [
-                      "*"
-                    ],
-                    "AllowedMethods": [
-                      "GET",
-                      "PUT",
-                      "POST",
-                      "DELETE",
-                      "HEAD"
-                    ],
-                    "AllowedOrigins": [
-                      "*"
-                    ],
-                    "MaxAge": 3000
-                  }
-                ]
-              }
-            }
-          },
-          "ApiGatewayLogGroup": {
-            "Type": "AWS::Logs::LogGroup",
-            "Properties": {
-              "LogGroupName": "/aws/apigateway/sheet-assist-api-prod-custom",
-              "RetentionInDays": 30
-            }
-          },
-          "LambdaLogGroup": {
-            "Type": "AWS::Logs::LogGroup",
-            "Properties": {
-              "LogGroupName": "/aws/lambda/sheet-assist-api-prod-api-custom",
-              "RetentionInDays": 30
-            }
           }
         },
         "Outputs": {
@@ -468,16 +454,16 @@
               "Ref": "ServerlessDeploymentBucket"
             },
             "Export": {
-              "Name": "sls-sheet-assist-api-prod-ServerlessDeploymentBucketName"
+              "Name": "sls-sheet-assist-api-minimal-prod-ServerlessDeploymentBucketName"
             }
           },
           "ApiLambdaFunctionQualifiedArn": {
             "Description": "Current Lambda function version",
             "Value": {
-              "Ref": "ApiLambdaVersionGZ7hXlge2GTaHPmShDOpUvYppUN1IEC7wJMONdluYs"
+              "Ref": "ApiLambdaVersionr8VI4yq4XSRuqwPBn7XnKFQf3pbEnO1btQKvbBEuU"
             },
             "Export": {
-              "Name": "sls-sheet-assist-api-prod-ApiLambdaFunctionQualifiedArn"
+              "Name": "sls-sheet-assist-api-minimal-prod-ApiLambdaFunctionQualifiedArn"
             }
           },
           "HttpApiId": {
@@ -486,7 +472,7 @@
               "Ref": "HttpApi"
             },
             "Export": {
-              "Name": "sls-sheet-assist-api-prod-HttpApiId"
+              "Name": "sls-sheet-assist-api-minimal-prod-HttpApiId"
             }
           },
           "HttpApiUrl": {
@@ -511,32 +497,7 @@
               ]
             },
             "Export": {
-              "Name": "sls-sheet-assist-api-prod-HttpApiUrl"
-            }
-          },
-          "ApiUrl": {
-            "Description": "URL of the API Gateway",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "https://",
-                  {
-                    "Ref": "HttpApi"
-                  },
-                  ".execute-api.",
-                  {
-                    "Ref": "AWS::Region"
-                  },
-                  ".amazonaws.com"
-                ]
-              ]
-            }
-          },
-          "S3BucketName": {
-            "Description": "Name of the S3 bucket for temporary file storage",
-            "Value": {
-              "Ref": "TempBucket"
+              "Name": "sls-sheet-assist-api-minimal-prod-HttpApiUrl"
             }
           }
         }
@@ -641,18 +602,11 @@
         ],
         "strip": false,
         "fileName": "requirements-lambda.txt",
-        "pipCmdExtraArgs": [
-          "--only-binary=:all:"
-        ],
         "noDeploy": [
           "pytest",
           "pytest-cov",
           "coverage"
         ]
-      },
-      "resourceNames": {
-        "logGroup": "/aws/lambda/sheet-assist-api-prod-api-custom",
-        "apiGatewayLogGroup": "/aws/apigateway/sheet-assist-api-prod-custom"
       }
     },
     "plugins": [
@@ -661,7 +615,7 @@
     "pluginsData": {},
     "functions": {
       "api": {
-        "handler": "lambda_handler.handler",
+        "handler": "lambda_handler_minimal.handler",
         "events": [
           {
             "httpApi": {
@@ -680,102 +634,22 @@
             "resolvedPath": "/"
           }
         ],
-        "timeout": 900,
-        "name": "sheet-assist-api-prod-api",
+        "name": "sheet-assist-api-minimal-prod-api",
         "module": ".",
         "package": {
           "artifact": "/Users/cameronhightower/Software_Projects/SheetAssist_Backend/.serverless/api.zip"
         },
         "memory": 1024,
+        "timeout": 6,
         "runtime": "python3.11",
         "vpc": {},
-        "versionLogicalId": "ApiLambdaVersionGZ7hXlge2GTaHPmShDOpUvYppUN1IEC7wJMONdluYs"
-      }
-    },
-    "resources": {
-      "Resources": {
-        "TempBucket": {
-          "Type": "AWS::S3::Bucket",
-          "Properties": {
-            "BucketName": "sheet-assist-temp-bucket-prod",
-            "LifecycleConfiguration": {
-              "Rules": [
-                {
-                  "Id": "DeleteAfterOneDay",
-                  "Status": "Enabled",
-                  "ExpirationInDays": 1
-                }
-              ]
-            },
-            "CorsConfiguration": {
-              "CorsRules": [
-                {
-                  "AllowedHeaders": [
-                    "*"
-                  ],
-                  "AllowedMethods": [
-                    "GET",
-                    "PUT",
-                    "POST",
-                    "DELETE",
-                    "HEAD"
-                  ],
-                  "AllowedOrigins": [
-                    "*"
-                  ],
-                  "MaxAge": 3000
-                }
-              ]
-            }
-          }
-        },
-        "ApiGatewayLogGroup": {
-          "Type": "AWS::Logs::LogGroup",
-          "Properties": {
-            "LogGroupName": "/aws/apigateway/sheet-assist-api-prod-custom",
-            "RetentionInDays": 30
-          }
-        },
-        "LambdaLogGroup": {
-          "Type": "AWS::Logs::LogGroup",
-          "Properties": {
-            "LogGroupName": "/aws/lambda/sheet-assist-api-prod-api-custom",
-            "RetentionInDays": 30
-          }
-        }
-      },
-      "Outputs": {
-        "ApiUrl": {
-          "Description": "URL of the API Gateway",
-          "Value": {
-            "Fn::Join": [
-              "",
-              [
-                "https://",
-                {
-                  "Ref": "HttpApi"
-                },
-                ".execute-api.",
-                {
-                  "Ref": "AWS::Region"
-                },
-                ".amazonaws.com"
-              ]
-            ]
-          }
-        },
-        "S3BucketName": {
-          "Description": "Name of the S3 bucket for temporary file storage",
-          "Value": {
-            "Ref": "TempBucket"
-          }
-        }
+        "versionLogicalId": "ApiLambdaVersionr8VI4yq4XSRuqwPBn7XnKFQf3pbEnO1btQKvbBEuU"
       }
     },
     "configValidationMode": "warn",
-    "serviceFilename": "serverless.yml",
+    "serviceFilename": "serverless-minimal.yml",
     "initialServerlessConfig": {
-      "service": "sheet-assist-api",
+      "service": "sheet-assist-api-minimal",
       "frameworkVersion": "3",
       "provider": {
         "$ref": "$[\"service\"][\"provider\"]"
@@ -789,39 +663,15 @@
       "package": {
         "individually": true,
         "patterns": [
-          "!.elasticbeanstalk/**",
-          "!.ebextensions/**",
-          "!.platform/**",
-          "!venv/**",
-          "!node_modules/**",
-          "!package.json",
-          "!package-lock.json",
-          "!.git/**",
-          "!.pytest_cache/**",
-          "!tests/**",
-          "!docs/**",
-          "!**/__pycache__/**",
-          "!**/*.pyc",
-          "!**/*.pyo",
-          "!**/*.pyd",
-          "!**/.DS_Store",
-          "!**/.serverless/**",
-          "!**/.idea/**",
-          "!**/.vscode/**",
-          "!**/node_modules/**",
-          "!requirements.txt",
-          "!README*",
-          "!LICENSE*",
-          "!CHANGELOG*"
+          "!**",
+          "lambda_handler_minimal.py",
+          "requirements-lambda.txt"
         ],
-        "artifactsS3KeyDirname": "serverless/sheet-assist-api/prod/code-artifacts",
-        "artifactDirectoryName": "serverless/sheet-assist-api/prod/1746235752858-2025-05-03T01:29:12.858Z"
+        "artifactsS3KeyDirname": "serverless/sheet-assist-api-minimal/prod/code-artifacts",
+        "artifactDirectoryName": "serverless/sheet-assist-api-minimal/prod/1746338178408-2025-05-04T05:56:18.408Z"
       },
       "functions": {
         "$ref": "$[\"service\"][\"functions\"]"
-      },
-      "resources": {
-        "$ref": "$[\"service\"][\"resources\"]"
       }
     },
     "layers": {},
@@ -829,7 +679,7 @@
   },
   "package": {
     "individually": true,
-    "artifactDirectoryName": "serverless/sheet-assist-api/prod/1746235752858-2025-05-03T01:29:12.858Z",
+    "artifactDirectoryName": "serverless/sheet-assist-api-minimal/prod/1746338178408-2025-05-04T05:56:18.408Z",
     "artifact": ""
   }
 }

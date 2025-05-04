@@ -10,11 +10,11 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+# Only import uvicorn when running the script directly (not in Lambda)
 import logging
-from app.endpoints import get_sheet_names, process_query, download, data_visualization
+from app.endpoints import get_sheet_names, process_query, download, data_visualization, health
 from app.utils.s3_file_management import temp_file_manager
 from contextlib import asynccontextmanager
 
@@ -46,6 +46,10 @@ app = FastAPI(
 async def error_logging_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
+        # Add CORS headers for HTTPS localhost
+        if "origin" in request.headers and request.headers["origin"] == "https://localhost:3000":
+            response.headers["Access-Control-Allow-Origin"] = "https://localhost:3000"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
     except Exception as e:
         # Log exception details for Lambda
@@ -57,6 +61,12 @@ async def error_logging_middleware(request: Request, call_next):
             content={
                 "detail": str(e),
                 "traceback": traceback.format_exc()
+            },
+            headers={
+                "Access-Control-Allow-Origin": "https://localhost:3000",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Credentials": "true",
             }
         )
 
@@ -68,32 +78,49 @@ origins = [
     "https://api.aidocassist.com",
     "http://api.aidocassist.com",
     "https://localhost:3000",
-    "http://localhost:8000"
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "https://1t2fkfa15h.execute-api.us-east-1.amazonaws.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],
+    max_age=86400,
 )
+
+@app.options("/{path:path}")
+async def options_route(path: str):
+    """Handle OPTIONS requests for CORS preflight."""
+    return PlainTextResponse(
+        content="",
+        headers={
+            "Access-Control-Allow-Origin": "https://localhost:3000",  # Specifically for HTTPS localhost
+            "Access-Control-Allow-Methods": "*",  # Allow all methods
+            "Access-Control-Allow-Headers": "*",  # Allow all headers
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "86400",
+        },
+    )
 
 @app.get("/")
 async def root():
     return {"message": "SheetAssist API - Lambda version"}
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
 app.include_router(process_query.router)
 app.include_router(download.router)
 app.include_router(get_sheet_names.router)
 app.include_router(data_visualization.router)
+app.include_router(health.router)
 
 if __name__ == "__main__":    
     port = int(os.getenv("PORT", 8000))
+    # Only import uvicorn when running locally
+    import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)
 
 

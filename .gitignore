@@ -15,3 +15,4 @@ venv/
 /requirements-lambda.txt
 /requirements.txt
 /node_modules
+/dev_utils/
